@@ -1,0 +1,84 @@
+# ==========================================
+# 1. 本地敏感配置文件 (核心红线，绝对不能上云！)
+# ==========================================
+# 我们之前聊过的本地专属配置，存放了阿里百炼大模型和数据库的真实密码
+application-local.yml
+application-local.properties
+.env
+.env.local
+.env.development.local
+
+# ==========================================
+# 2. 现代 AI 编程辅助工具 (Cursor, Trae, Codex 等)
+# ==========================================
+# Cursor: 忽略本地工作区状态和缓存，防止路径冲突
+.cursor/
+.cursorworkspace
+# 【注意】: 如果你根目录下有 .cursorrules 文件（用来规定 AI 行为规范的），
+# 建议不要忽略它，把它提交到 Git，这样团队其他人的 Cursor 也能遵守同样的规范。
+
+# Trae: 忽略字节 Trae 编辑器的本地缓存与索引
+.trae/
+
+# GitHub Copilot / Codex / 通用 AI 聊天历史与索引缓存
+.copilot/
+.aichat/
+.ai/
+
+# ==========================================
+# 3. 传统 IDE 工作区 (IntelliJ IDEA, VS Code)
+# ==========================================
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.code-workspace
+# VS Code 本地历史记录插件缓存
+.history/
+
+# ==========================================
+# 4. Java / Spring Boot / Maven 编译与构建输出
+# ==========================================
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+# 忽略运行日志
+*.log
+logs/
+/logs/
+
+# ==========================================
+# 5. 操作系统垃圾文件 (防呆设计)
+# ==========================================
+# Mac 系统极其烦人的索引文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+# Windows 系统的缩略图缓存
+ehthumbs.db
+Thumbs.db
+
+# ==========================================
+# 6. 前端 (Vue/Node) 常见忽略 (如果前后端放在同一个仓库)
+# ==========================================
+node_modules/
+dist/
+dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
