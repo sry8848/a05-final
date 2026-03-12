@@ -1,12 +1,8 @@
 package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.AiClient;
-import com.a05.aiinterview.ai.config.PromptProperties;
-import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.ReportGenerationInput;
 import com.a05.aiinterview.ai.dto.ReportGenerationOutput;
-import com.a05.aiinterview.ai.entity.AiInvocationLog;
-import com.a05.aiinterview.ai.service.AiInvocationLogService;
 import com.a05.aiinterview.interview.entity.InterviewAttempt;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewReport;
@@ -54,12 +50,10 @@ import java.util.stream.Collectors;
 public class ReportGenerationService {
 
     private final AiClient aiClient;
-    private final PromptProperties promptProperties;
     private final InterviewSessionMapper interviewSessionMapper;
     private final InterviewQuestionMapper interviewQuestionMapper;
     private final InterviewAttemptMapper interviewAttemptMapper;
     private final InterviewReportMapper interviewReportMapper;
-    private final AiInvocationLogService aiInvocationLogService;
 
     /**
      * 异步生成面试报告。
@@ -95,6 +89,9 @@ public class ReportGenerationService {
             List<ReportGenerationInput.QuestionAnswerPair> pairs = buildQaPairs(questions, answerMap, session);
 
             ReportGenerationInput input = ReportGenerationInput.builder()
+                    .interviewId(session.getId())
+                    .questionId(null)
+                    .variantId(null)
                     .positionCode(session.getTargetRole())
                     .experienceLevel(session.getExperienceLevel())
                     .mode(session.getMode())
@@ -106,21 +103,12 @@ public class ReportGenerationService {
 
             log.info("调用 AI 生成报告, sessionId={}, qaCount={}", sessionId, pairs.size());
 
-            boolean success = true;
-            String errorMsg = null;
             ReportGenerationOutput output = null;
-            AiCallResult<ReportGenerationOutput> reportResult = null;
-
             try {
-                reportResult = aiClient.callReportGeneration(input);
-                output = reportResult.getOutput();
+                output = aiClient.callReportGeneration(input).getOutput();
             } catch (Exception e) {
-                success = false;
-                errorMsg = e.getMessage();
                 log.error("报告生成 AI 调用失败, sessionId={}", sessionId, e);
                 throw e;
-            } finally {
-                recordReportLog(session, success, errorMsg, reportResult);
             }
 
             InterviewReport report = buildReport(sessionId, output);
@@ -249,28 +237,6 @@ public class ReportGenerationService {
         return (code instanceof String s && !s.isBlank()) ? s : "intro";
     }
 
-    /**
-     * 记录报告生成 AI 调用审计日志（含 Token 计数）。
-     */
-    private void recordReportLog(InterviewSession session, boolean success, String errorMsg,
-                                  AiCallResult<ReportGenerationOutput> result) {
-        AiInvocationLog logEntry = AiInvocationLog.builder()
-                .sessionId(session.getId())
-                .userId(session.getUserId())
-                .promptCode(resolvePromptCode(result, "report_generation"))
-                .promptVersion(resolvePromptVersion(result, promptProperties.resolveVersion("report_generation")))
-                .modelProvider(session.getModelProvider() != null ? session.getModelProvider() : "unknown")
-                .modelName(session.getModelName() != null ? session.getModelName() : "")
-                .requestTokens(result != null ? result.getPromptTokens() : 0)
-                .responseTokens(result != null ? result.getResponseTokens() : 0)
-                .latencyMs(result != null ? (int) result.getLatencyMs() : 0)
-                .success(success)
-                .errorMessage(errorMsg)
-                .createdAt(LocalDateTime.now())
-                .build();
-        aiInvocationLogService.saveAsync(logEntry);
-    }
-
     /** 确保会话状态为 completed（若已存在报告则补充更新状态）。 */
     private void ensureCompleted(Long sessionId) {
         interviewSessionMapper.update(null, new LambdaUpdateWrapper<InterviewSession>()
@@ -280,17 +246,4 @@ public class ReportGenerationService {
                 .set(InterviewSession::getUpdatedAt, LocalDateTime.now()));
     }
 
-    private String resolvePromptCode(AiCallResult<?> result, String defaultCode) {
-        if (result == null || result.getPromptCode() == null || result.getPromptCode().isBlank()) {
-            return defaultCode;
-        }
-        return result.getPromptCode();
-    }
-
-    private String resolvePromptVersion(AiCallResult<?> result, String defaultVersion) {
-        if (result == null || result.getPromptVersion() == null || result.getPromptVersion().isBlank()) {
-            return defaultVersion;
-        }
-        return result.getPromptVersion();
-    }
 }

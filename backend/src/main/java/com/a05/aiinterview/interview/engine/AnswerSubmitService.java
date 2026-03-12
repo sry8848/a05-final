@@ -1,11 +1,7 @@
 package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.AiClient;
-import com.a05.aiinterview.ai.config.PromptProperties;
-import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.*;
-import com.a05.aiinterview.ai.entity.AiInvocationLog;
-import com.a05.aiinterview.ai.service.AiInvocationLogService;
 import com.a05.aiinterview.common.enums.DomainStatus;
 import com.a05.aiinterview.interview.dto.SubmitAttemptRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptResponse;
@@ -50,9 +46,7 @@ public class AnswerSubmitService {
     private final InterviewQuestionMapper interviewQuestionMapper;
     private final InterviewAttemptMapper interviewAttemptMapper;
     private final StateLedgerPatchService stateLedgerPatchService;
-    private final AiInvocationLogService aiInvocationLogService;
     private final ReportGenerationService reportGenerationService;
-    private final PromptProperties promptProperties;
 
     /**
      * 提交候选人回答，完整执行 8 步主链路。
@@ -108,6 +102,8 @@ public class AnswerSubmitService {
 
                     // 调用评估决策 AI
             EvaluationDecisionInput evalInput = EvaluationDecisionInput.builder()
+                    .interviewId(session.getId())
+                    .variantId(null)
                     .positionCode(session.getTargetRole())
                     .experienceLevel(session.getExperienceLevel())
                     .mode(session.getMode())
@@ -126,20 +122,11 @@ public class AnswerSubmitService {
                     .recentContext(recentContext)
                     .build();
 
-            boolean evalSuccess = true;
-            String evalError = null;
-            AiCallResult<EvaluationDecisionOutput> evalResult = null;
-
             try {
-                evalResult = aiClient.callEvaluationDecision(evalInput);
-                evalOutput = evalResult.getOutput();
+                evalOutput = aiClient.callEvaluationDecision(evalInput).getOutput();
             } catch (Exception e) {
-                evalSuccess = false;
-                evalError = e.getMessage();
                 log.error("评估决策 AI 调用失败, sessionId={}, attemptId={}", sessionId, request.getAttemptId(), e);
                 throw new RuntimeException("评估决策服务暂时不可用", e);
-            } finally {
-                recordEvalLog(session, currentQuestion, evalSuccess, evalError, evalResult);
             }
         }
 
@@ -371,45 +358,6 @@ public class AnswerSubmitService {
         update.setFinishedAt(LocalDateTime.now());
         update.setUpdatedAt(LocalDateTime.now());
         interviewSessionMapper.updateById(update);
-    }
-
-    /**
-     * 记录评估决策 AI 调用审计日志（含 Token 计数）。
-     */
-    private void recordEvalLog(InterviewSession session, InterviewQuestion question,
-                                boolean success, String errorMsg,
-                                AiCallResult<EvaluationDecisionOutput> result) {
-        AiInvocationLog logEntry = AiInvocationLog.builder()
-                .sessionId(session.getId())
-                .questionId(question.getId())
-                .userId(session.getUserId())
-                .promptCode(resolvePromptCode(result, "evaluation_decision"))
-                .promptVersion(resolvePromptVersion(result,
-                        promptProperties.resolveVersion("evaluation_decision")))
-                .modelProvider(session.getModelProvider() != null ? session.getModelProvider() : "unknown")
-                .modelName(session.getModelName() != null ? session.getModelName() : "")
-                .requestTokens(result != null ? result.getPromptTokens() : 0)
-                .responseTokens(result != null ? result.getResponseTokens() : 0)
-                .latencyMs(result != null ? (int) result.getLatencyMs() : 0)
-                .success(success)
-                .errorMessage(errorMsg)
-                .createdAt(LocalDateTime.now())
-                .build();
-        aiInvocationLogService.saveAsync(logEntry);
-    }
-
-    private String resolvePromptCode(AiCallResult<?> result, String defaultCode) {
-        if (result == null || result.getPromptCode() == null || result.getPromptCode().isBlank()) {
-            return defaultCode;
-        }
-        return result.getPromptCode();
-    }
-
-    private String resolvePromptVersion(AiCallResult<?> result, String defaultVersion) {
-        if (result == null || result.getPromptVersion() == null || result.getPromptVersion().isBlank()) {
-            return defaultVersion;
-        }
-        return result.getPromptVersion();
     }
 
     /**

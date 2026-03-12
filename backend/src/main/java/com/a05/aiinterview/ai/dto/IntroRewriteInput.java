@@ -13,6 +13,15 @@ import java.util.List;
 @Builder
 public class IntroRewriteInput {
 
+    /** 面试会话 ID（审计透传） */
+    private Long interviewId;
+
+    /** 当前题目 ID（首题改写调用前通常为空，统一审计字段保留） */
+    private Long questionId;
+
+    /** INTRO 底稿变体 ID */
+    private String variantId;
+
     private String positionCode;
     private String experienceLevel;
     private String mode;

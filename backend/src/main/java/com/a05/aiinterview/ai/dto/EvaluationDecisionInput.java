@@ -15,6 +15,12 @@ import java.util.Map;
 @Builder
 public class EvaluationDecisionInput {
 
+    /** 面试会话 ID（审计透传） */
+    private Long interviewId;
+
+    /** 题目变体 ID（评估场景通常为空，统一审计字段保留） */
+    private String variantId;
+
     /** 岗位编码，如 JAVA_BACKEND */
     private String positionCode;
 

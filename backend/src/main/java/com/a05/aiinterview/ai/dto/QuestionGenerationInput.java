@@ -14,6 +14,15 @@ import java.util.Map;
 @Builder
 public class QuestionGenerationInput {
 
+    /** 面试会话 ID（审计透传） */
+    private Long interviewId;
+
+    /** 当前题目 ID（流式出题时通常为空，统一审计字段保留） */
+    private Long questionId;
+
+    /** 题目变体 ID（普通出题场景通常为空，统一审计字段保留） */
+    private String variantId;
+
     /** 岗位编码 */
     private String positionCode;
 

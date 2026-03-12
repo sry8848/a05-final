@@ -18,10 +18,10 @@ public class ApiResponse<T> {
     private String traceId;
 
     public static <T> ApiResponse<T> ok(T data) {
-        return new ApiResponse<>(0, "OK", data, null);
+        return new ApiResponse<>(0, "OK", data, TraceContext.getOrCreateTraceId());
     }
 
     public static <T> ApiResponse<T> fail(int code, String message) {
-        return new ApiResponse<>(code, message, null, null);
+        return new ApiResponse<>(code, message, null, TraceContext.getOrCreateTraceId());
     }
 }

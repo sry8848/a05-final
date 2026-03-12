@@ -34,6 +34,9 @@ public class QuestionDto {
     @Schema(description = "本题目标深度等级", example = "L3")
     private String targetDepth;
 
+    @Schema(description = "AI 结果状态：success/fallback", example = "success")
+    private String aiResultStatus;
+
     @Schema(description = "是否可获取提示", example = "true")
     private Boolean hintAvailable;
 }

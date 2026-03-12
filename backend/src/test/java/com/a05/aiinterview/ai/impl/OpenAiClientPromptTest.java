@@ -1,5 +1,8 @@
 package com.a05.aiinterview.ai.impl;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.a05.aiinterview.ai.config.PromptProperties;
 import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.IntroRewriteInput;
@@ -12,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -168,7 +172,97 @@ class OpenAiClientPromptTest {
         assertThat(result.getOutput()).isEqualTo("请先做一个简短的自我介绍。");
     }
 
+    @Test
+    @DisplayName("lite audit should contain success fields and avoid leaking full user answer")
+    void audit_shouldContainSuccessFieldsAndAvoidSensitiveInput() {
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse("""
+                {
+                  "domainCode": "java",
+                  "depthReached": "L3",
+                  "saturated": true,
+                  "signal": "NEXT_DOMAIN",
+                  "reasoning": "ok"
+                }
+                """));
+        ListAppender<ILoggingEvent> appender = startLogCapture();
+
+        OpenAiClient client = new OpenAiClient(
+                chatModel,
+                new ClasspathPromptTemplateService(new ObjectMapper()),
+                new PromptProperties(),
+                new ObjectMapper()
+        );
+
+        client.callEvaluationDecision(com.a05.aiinterview.ai.dto.EvaluationDecisionInput.builder()
+                .interviewId(999L)
+                .currentQuestionId(1001L)
+                .currentDomainCode("java")
+                .currentDomainName("Java")
+                .currentQuestionType("PRINCIPLE")
+                .currentTargetDepth("L3")
+                .currentQuestionStem("请解释线程池")
+                .answerText("这是用户完整回答，不应该出现在审计日志中")
+                .build());
+
+        String audit = appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(msg -> msg.contains("ai_lite_audit=") && msg.contains("\"status\":\"success\""))
+                .findFirst()
+                .orElse("");
+        assertThat(audit).contains("\"traceId\":");
+        assertThat(audit).contains("\"requestId\":");
+        assertThat(audit).contains("\"interviewId\":999");
+        assertThat(audit).contains("\"questionId\":1001");
+        assertThat(audit).contains("\"promptCode\":\"evaluation_decision\"");
+        assertThat(audit).contains("\"status\":\"success\"");
+        assertThat(audit).contains("\"promptVersion\":\"v1\"");
+        assertThat(audit).doesNotContain("这是用户完整回答，不应该出现在审计日志中");
+    }
+
+    @Test
+    @DisplayName("lite audit should contain error fields when model call fails")
+    void audit_shouldContainErrorFieldsWhenModelFails() {
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.call(any(Prompt.class))).thenThrow(new RuntimeException("mock model unavailable"));
+        ListAppender<ILoggingEvent> appender = startLogCapture();
+
+        OpenAiClient client = new OpenAiClient(
+                chatModel,
+                new ClasspathPromptTemplateService(new ObjectMapper()),
+                new PromptProperties(),
+                new ObjectMapper()
+        );
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.callPlanner(PlannerInput.builder()
+                        .interviewId(123L)
+                        .positionCode("JAVA_BACKEND")
+                        .positionName("Java 后端")
+                        .experienceLevel("SENIOR")
+                        .mode("professional")
+                        .build()))
+                .isInstanceOf(RuntimeException.class);
+
+        String audit = appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(msg -> msg.contains("ai_lite_audit=") && msg.contains("\"status\":\"error\""))
+                .findFirst()
+                .orElse("");
+        assertThat(audit).contains("\"interviewId\":123");
+        assertThat(audit).contains("\"promptCode\":\"planner\"");
+        assertThat(audit).contains("\"status\":\"error\"");
+        assertThat(audit).contains("\"errorType\":\"RuntimeException\"");
+    }
+
     private ChatResponse chatResponse(String text) {
         return new ChatResponse(List.of(new Generation(new org.springframework.ai.chat.messages.AssistantMessage(text))));
+    }
+
+    private ListAppender<ILoggingEvent> startLogCapture() {
+        Logger logger = (Logger) LoggerFactory.getLogger(OpenAiClient.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        return appender;
     }
 }
