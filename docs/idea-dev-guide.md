@@ -1,395 +1,266 @@
-# IntelliJ IDEA 开发环境启动与测试指南
+# IntelliJ IDEA 本地开发指南
 
-> 适用版本：IntelliJ IDEA 2023.x / 2024.x，JDK 21，Maven 3.9+
+这份文档只解决一件事：让你分清 `application.yml`、`application-local.yml`、`application-test.yml` 分别是干什么的，并且知道在 IDEA 里该怎么启动项目。
 
----
+## 1. 先记住这一条
 
-## 一、前置环境准备
+- 手动运行项目，用 `local`
+- 运行自动化测试，用 `test`
 
-### 1.1 必须启动的本地服务
+不要把这两件事混在一起。
 
-| 服务 | 默认端口 | 用途 | 是否必须 |
-|------|---------|------|---------|
-| MySQL 8.x | 3306 | 业务数据主库 | **必须** |
-| Redis 7.x | 6379 | 分布式锁、验证码、幂等缓存 | **必须** |
-| RabbitMQ 3.x | 5672 | 异步报告生成消息队列 | **必须** |
-| Qdrant | 6333(REST) / 6334(gRPC) | 向量知识库（RAG） | 仅 `rag.enabled=true` 时需要 |
+## 2. 三个配置文件分别负责什么
 
-**启动 MySQL / Redis / RabbitMQ（推荐用 Docker Compose）**
+### `backend/src/main/resources/application.yml`
+
+这是公共基础配置。
+
+它的作用：
+
+- 放所有环境都可能共用的默认值
+- 作为整个项目的基础配置
+
+它不应该做的事：
+
+- 不应该写死 `spring.profiles.active`
+- 不应该只为你这台电脑服务
+- 不应该承担“测试专用配置”的职责
+
+你可以把它理解成“底座”。
+
+### `backend/src/main/resources/application-local.yml`
+
+这是你在自己电脑上手动启动项目时用的配置。
+
+它的作用：
+
+- 放本地开发时才需要的覆盖项
+- 例如本地调试日志、关闭某些本地不想启动的中间件自动配置
+
+当前这个项目里，`local` 的意义主要是：
+
+- 本地启动时排除 RabbitMQ 自动配置
+- 保留 Redis 自动配置，避免 `StringRedisTemplate` 缺失
+- 保持开发时更容易看日志
+
+重点：
+
+- `local` 不是测试环境
+- `local` 要靠 IDEA 明确指定
+- 不是靠 `application.yml` 写死
+
+### `backend/src/test/resources/application-test.yml`
+
+这是自动化测试专用配置。
+
+它的作用：
+
+- 给 JUnit 测试使用
+- 让测试尽量不要依赖不必要的外部集成
+
+当前这个项目里，`test` 的意义主要是：
+
+- 排除 RabbitMQ 自动配置
+- 关闭语音功能
+- 强制使用 mock AI
+
+重点：
+
+- `test` 不是给你平时点启动按钮用的
+- 只有测试类显式指定 `@ActiveProfiles("test")` 时它才生效
+
+## 3. 现在这个项目正确的运行方式
+
+### 手动启动后端
+
+在 IDEA 里使用 `local`。
+
+步骤：
+
+1. 打开 **Run -> Edit Configurations**
+2. 新建一个 **Spring Boot** 配置
+3. `Main class` 选择 `com.a05.aiinterview.AiInterviewApplication`
+4. `Working directory` 选择 `backend`
+5. 在 `Active profiles` 填入 `local`
+6. 保存并启动
+
+你真正需要关注的是这一个地方：
+
+```text
+Active profiles = local
+```
+
+只要这里配对了，你就不用再去代码里写死 `spring.profiles.active`。
+
+### 运行测试
+
+直接运行测试类或 Maven 测试命令即可。
+
+例如：
 
 ```bash
-# 项目根目录下执行（如无 docker-compose.yml 则参考下方单独命令）
-docker run -d --name mysql8 -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql:8.0
-docker run -d --name redis7  -p 6379:6379 redis:7
-docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+mvn test
 ```
 
-**启动 Qdrant（仅 RAG 模式需要）**
+测试会通过测试代码里的 `@ActiveProfiles("test")` 使用 `test` 配置，不需要你手动切换。
 
-```bash
-docker run -d --name qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant
+## 4. 为什么不把 `local` 写死在 `application.yml`
+
+因为那会让“本地启动”和“测试运行”的边界变模糊。
+
+一旦主配置里写了：
+
+```yaml
+spring:
+  profiles:
+    active: local
 ```
 
----
+你就会开始误以为：
 
-### 1.2 初始化数据库
+- 项目永远应该跑在 `local`
+- `test` 好像没什么意义
+- 启动失败时也不容易判断到底是 profile 问题还是中间件问题
 
-首次运行前，按顺序执行以下 SQL 脚本：
+更规范的方式是：
 
-```bash
-# 进入 MySQL 命令行（密码默认 123456）
-mysql -u root -p
+- 共享配置不写死 profile
+- 谁启动，谁明确指定 profile
 
-# 依次执行（在 IDEA 的 Database 工具或命令行均可）
-source backend/src/main/resources/db/01-create-database.sql
-source backend/src/main/resources/db/schema-auth.sql
-source backend/src/main/resources/db/schema-resume.sql
-source backend/src/main/resources/db/schema-position.sql
-source backend/src/main/resources/db/schema-interview.sql
-source backend/src/main/resources/db/schema-interview-v2.sql
+对你来说，就是：
+
+- IDEA 手动运行时指定 `local`
+- 测试代码自己指定 `test`
+
+## 5. 这次报错的根因是什么
+
+之前 `local` 里排除了 Redis 自动配置，但代码里又有服务直接依赖 `StringRedisTemplate`。
+
+结果就是：
+
+- Spring Boot 没有创建 `StringRedisTemplate`
+- 但 `TtsService` 还在强依赖它
+- 应用在启动阶段就直接失败
+
+这不是 IDEA 的问题，也不是 Spring 的问题，是配置和代码要求互相冲突。
+
+现在已经修正为：
+
+- `local` 仍然可以排除 RabbitMQ
+- `local` 不再排除 Redis 自动配置
+
+## 6. 启动成功，不等于所有功能都可用
+
+这是新手最容易误解的一点。
+
+### 情况一：应用根本起不来
+
+这通常是启动阶段就缺少必须的 Bean 或关键配置。
+
+例如：
+
+- MySQL 配置错误且项目启动时就要连数据库
+- Redis 自动配置被排除，导致 `StringRedisTemplate` 根本不存在
+
+这种问题会直接表现为：
+
+- 控制台报 `APPLICATION FAILED TO START`
+
+### 情况二：应用能启动，但某个功能 later 才报错
+
+这通常表示：
+
+- Spring 容器已经起来了
+- 但是某个中间件在真正使用时才连接失败
+
+例如：
+
+- Redis 服务没启动，但 Bean 已经创建成功
+- 当你真正调用验证码、缓存、SSE、TTS 等 Redis 相关功能时，才出现连接错误
+
+所以你要学会区分：
+
+- “项目能启动”
+- “某个依赖服务真的可用”
+
+这不是一回事。
+
+## 7. 本地开发时通常需要哪些服务
+
+最常见的是：
+
+- MySQL
+- Redis
+
+RabbitMQ 在当前项目里可以先不启动，因为 `local` 已经排除了它的自动配置。  
+Qdrant 只有你真的开启 RAG 相关功能时才需要。
+
+## 8. 你在 IDEA 里最推荐的配置
+
+建议只保留一个最常用的启动配置：
+
+- Name: `backend-local`
+- Main class: `com.a05.aiinterview.AiInterviewApplication`
+- Working directory: `D:\a05-cursor\backend`
+- Active profiles: `local`
+
+如果你还需要环境变量，可以再加这些常见值：
+
+```text
+DB_PASSWORD=123456
 ```
 
-> **IDEA 操作**：在右侧 `Database` 面板中添加 MySQL 数据源后，右键 → `Run SQL Script` 依次执行上述文件。
+如果你只是本地联调，通常还可以继续使用默认 mock AI，不需要立刻配真实 API Key。
 
----
+## 9. 常见问题怎么判断
 
-## 二、IDEA 导入与 Maven 配置
+### 报 `APPLICATION FAILED TO START`
 
-### 2.1 导入项目
+先看是不是下面这类问题：
 
-1. **File → Open** → 选择 `d:\a05-cursor\backend` 目录（pom.xml 所在目录）
-2. IDEA 自动识别为 Maven 项目，点击 **Load Maven Project**
-3. 等待 Maven 下载依赖（首次约需 2~5 分钟，依网络而定）
-4. 确认右下角 Maven 进度条消失后继续
+- Bean 缺失
+- 自动配置被排除了
+- 数据源配置有误
 
-> 若 Maven 下载缓慢，可在 `Settings → Build → Maven → Repositories` 中使用阿里云镜像：
-> `https://maven.aliyun.com/repository/public`
+这是“启动阶段问题”。
 
-### 2.2 SDK 配置
+### 报数据库连接失败
 
-**File → Project Structure → Project**
+优先检查：
 
-| 配置项 | 值 |
-|--------|-----|
-| SDK | `21`（需提前在 IDEA 中安装 JDK 21） |
-| Language Level | `21 - ... (Preview)` 或 `21` |
+- MySQL 是否启动
+- 用户名密码是否正确
+- 3306 端口是否可访问
 
----
+### 报 Redis 连接失败
 
-## 三、Run Configuration 配置
+优先检查：
 
-### 3.1 模式一：Mock AI（默认，推荐联调阶段）
+- Redis 服务是否启动
+- 6379 端口是否可访问
+- 是否配置了密码却没填 `REDIS_PASSWORD`
 
-> **特点**：无需真实 OpenAI Key，无需 Qdrant，最快启动，适合前端联调和主链路功能验证。
+### 测试跑得和手动启动表现不一样
 
-**操作步骤：**
+优先怀疑是不是你把 `local` 和 `test` 混了。
 
-1. 打开 **Run → Edit Configurations**
-2. 点击 `+` → **Spring Boot**
-3. 填写以下配置：
+记住：
 
-| 字段 | 值 |
-|------|----|
-| Name | `AI Interview - Mock 模式` |
-| Main class | `com.a05.aiinterview.AiInterviewApplication` |
-| Working directory | `$MODULE_WORKING_DIR$` |
-| Environment variables | 见下方 |
+- 手动运行看 `local`
+- 自动化测试看 `test`
 
-**Environment variables（复制粘贴到 IDEA 的环境变量输入框）：**
+## 10. 你现在应该怎么做
 
-```
-DB_PASSWORD=123456;AI_MOCK_ENABLED=true;RAG_ENABLED=false
-```
+你只需要按下面执行：
 
-4. 点击 **Apply → OK**
-5. 点击绿色 ▶ 启动，观察控制台输出 `Started AiInterviewApplication`
+1. 启动本地 MySQL
+2. 启动本地 Redis
+3. 在 IDEA 里把 `Active profiles` 设置为 `local`
+4. 启动 `AiInterviewApplication`
 
----
+如果还是报错，再看它属于：
 
-### 3.2 模式二：真实 AI + RAG（需 OpenAI Key 和 Qdrant）
+- 启动阶段问题
+- 还是功能访问阶段问题
 
-> **特点**：调用真实 GPT 模型出题，RAG 检索向量知识库增强出题质量。
-
-**Environment variables：**
-
-```
-DB_PASSWORD=123456;AI_MOCK_ENABLED=false;OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxx;OPENAI_BASE_URL=https://api.openai.com;OPENAI_MODEL=gpt-4o-mini;RAG_ENABLED=true;RAG_INIT_SAMPLE=true
-```
-
-> `RAG_INIT_SAMPLE=true` 表示首次启动时自动向 Qdrant 注入两个知识域（`java_memory_model` + `jvm_gc`）的样本数据，之后可改为 `false`。
-
-> 如果使用国内代理/兼容接口，修改 `OPENAI_BASE_URL` 为对应地址，如：
-> `OPENAI_BASE_URL=https://your-proxy.com/v1`
-
----
-
-### 3.3 模式三：真实 AI、禁用 RAG
-
-> **特点**：调用真实模型但不启用向量检索，适合单独验证 AI 出题质量。
-
-**Environment variables：**
-
-```
-DB_PASSWORD=123456;AI_MOCK_ENABLED=false;OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxx;OPENAI_BASE_URL=https://api.openai.com;OPENAI_MODEL=gpt-4o-mini;RAG_ENABLED=false
-```
-
----
-
-## 四、启动验证
-
-### 4.1 控制台关键日志
-
-启动成功后，在控制台中确认以下日志出现：
-
-```
-Started AiInterviewApplication in XX.XXX seconds
-```
-
-**Mock 模式额外确认：**
-```
-# 无 Qdrant 相关连接日志，说明 RAG 已按预期跳过
-```
-
-**RAG 模式额外确认：**
-```
-INFO  RagConfiguration - 初始化 Qdrant 客户端, host=localhost, port=6334
-INFO  RagConfiguration - 初始化 Qdrant VectorStore, collection=interview_knowledge, initSchema=true
-INFO  SampleKnowledgeDataLoader - 样本知识数据加载完成, 写入片段数=X
-```
-
-### 4.2 接口健康检查
-
-```bash
-# 系统 Ping（无需登录）
-curl http://localhost:8080/api/v1/system/ping
-# 期望返回：{"code":0,"message":"OK","data":{"serverTime":"..."}}
-```
-
----
-
-## 五、主流程 API 测试
-
-以下用例覆盖 T1.4 的端到端验收，可在 IDEA 内置的 **HTTP Client** 或 Postman 执行。
-
-### 5.1 注册 + 登录
-
-```http
-### 1. 注册
-POST http://localhost:8080/api/v1/auth/register
-Content-Type: application/json
-
-{
-  "email": "test@example.com",
-  "password": "Test@1234",
-  "nickname": "测试用户"
-}
-
-### 2. 登录，获取 Token
-POST http://localhost:8080/api/v1/auth/login/password
-Content-Type: application/json
-
-{
-  "email": "test@example.com",
-  "password": "Test@1234"
-}
-```
-
-> 将返回的 `token` 保存，后续请求在 Header 中携带：`Authorization: Bearer <token>`
-
----
-
-### 5.2 创建面试会话（自动触发 Planner）
-
-```http
-POST http://localhost:8080/api/v1/interviews
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-  "targetRole": "backend_java",
-  "experienceLevel": "MID",
-  "mode": "practice"
-}
-```
-
-> 返回 `sessionId`，保存备用。Planner 异步生成考纲，约 1~3 秒。
-
----
-
-### 5.3 轮询会话状态（等待首题就绪）
-
-```http
-GET http://localhost:8080/api/v1/interviews/{{sessionId}}
-Authorization: Bearer {{token}}
-```
-
-> 当 `status` 变为 `in_progress` 且 `currentQuestionId` 非空时，进入答题流程。
-
----
-
-### 5.4 提交回答（核心：验证 RAG 接入）
-
-```http
-POST http://localhost:8080/api/v1/interviews/{{sessionId}}/attempts
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-  "questionId": {{currentQuestionId}},
-  "attemptId": "test-attempt-001",
-  "answerText": "Java 内存模型定义了主内存和工作内存的交互规则，volatile 保证可见性但不保证原子性...",
-  "isFinal": true
-}
-```
-
-**验证点：**
-
-- `evalautionSignal` 为 `NEXT_DOMAIN` 或 `DEEPEN`，说明评估决策正常
-- `nextQuestion.stem` 非空，说明下一题生成成功
-- **RAG 模式**：打开数据库查询 `ai_invocation_logs` 最新记录：
-
-```sql
-SELECT id, prompt_code, retrieval_context_json, success, created_at
-FROM ai_invocation_logs
-WHERE prompt_code = 'question_generation'
-ORDER BY id DESC
-LIMIT 5;
-```
-
-> `retrieval_context_json` 字段不为 `null` 且 `hitCount > 0` 即表示 RAG 检索命中。
-
----
-
-### 5.5 幂等验证
-
-```http
-# 使用完全相同的 attemptId 重复提交
-POST http://localhost:8080/api/v1/interviews/{{sessionId}}/attempts
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-  "questionId": {{currentQuestionId}},
-  "attemptId": "test-attempt-001",
-  "answerText": "重复提交",
-  "isFinal": true
-}
-```
-
-> 期望返回与第一次相同的结果，且控制台打印 `幂等命中，直接返回历史结果`。
-
----
-
-### 5.6 RAG 降级验证（仅 RAG 模式）
-
-**方法一：暂停 Qdrant 进程后提交回答**
-
-```bash
-docker stop qdrant
-```
-
-再次执行 5.4 的提交回答请求，期望：
-- 接口正常返回（不报错）
-- 控制台出现 `ERROR ... RAG 检索异常，降级返回空上下文`
-- `retrieval_context_json.empty = true`
-
-```bash
-# 恢复
-docker start qdrant
-```
-
-**方法二：清空 Qdrant 集合后测试无命中路径**
-
-```bash
-# 访问 Qdrant Dashboard 删除集合
-http://localhost:6333/dashboard
-# 或用 REST API
-curl -X DELETE http://localhost:6333/collections/interview_knowledge
-```
-
-再次提交回答，期望：
-- 接口正常返回（不报错）
-- 控制台打印 `RAG 检索无命中`
-- `retrieval_context_json.empty = true`，`hitCount = 0`
-
----
-
-## 六、IDEA HTTP Client 文件（可直接使用）
-
-在 `backend/src/test/http/` 目录下创建 `dev.http`，将以下内容粘贴：
-
-```http
-### 系统 Ping
-GET http://localhost:8080/api/v1/system/ping
-
-### 登录
-# @name login
-POST http://localhost:8080/api/v1/auth/login/password
-Content-Type: application/json
-
-{
-  "email": "test@example.com",
-  "password": "Test@1234"
-}
-
-### 创建面试会话
-# @name createSession
-POST http://localhost:8080/api/v1/interviews
-Authorization: Bearer {{login.response.body.data.token}}
-Content-Type: application/json
-
-{
-  "targetRole": "backend_java",
-  "experienceLevel": "MID",
-  "mode": "practice"
-}
-
-### 查询会话状态
-GET http://localhost:8080/api/v1/interviews/{{createSession.response.body.data.sessionId}}
-Authorization: Bearer {{login.response.body.data.token}}
-
-### 提交回答
-POST http://localhost:8080/api/v1/interviews/{{createSession.response.body.data.sessionId}}/attempts
-Authorization: Bearer {{login.response.body.data.token}}
-Content-Type: application/json
-
-{
-  "questionId": 1,
-  "attemptId": "manual-test-001",
-  "answerText": "Java 内存模型（JMM）规定了主内存与工作内存的交互规则...",
-  "isFinal": true
-}
-```
-
----
-
-## 七、常见问题排查
-
-| 现象 | 原因 | 解决 |
-|------|------|------|
-| 启动报 `Communications link failure` | MySQL 未启动或端口不对 | 检查 Docker / 本地 MySQL 服务 |
-| 启动报 `NOAUTH Authentication required` | Redis 设置了密码但配置未填 | 在环境变量中加 `REDIS_PASSWORD=你的密码` |
-| 启动报 `Connection refused: localhost:5672` | RabbitMQ 未启动 | `docker start rabbitmq` 或重新拉起 |
-| 启动报 `QdrantClient ... Connection refused` | `rag.enabled=true` 但 Qdrant 未启动 | 先 `docker start qdrant`，或将 `RAG_ENABLED` 设为 `false` |
-| 提交回答返回 `评估决策失败` | MockAiClient 出现异常 | 查看控制台完整堆栈，通常是 JSON 解析问题 |
-| `retrieval_context_json` 一直为 null | `rag.enabled=false` 是预期行为 | 如需测试 RAG，将 `RAG_ENABLED=true` 加入环境变量 |
-| Maven 构建报 `Could not resolve dependencies` | 网络问题或镜像源未配置 | 在 `~/.m2/settings.xml` 配置阿里云 mirror |
-| 端口 8080 被占用 | 其他应用占用 | 修改 `application.yml` 的 `server.port`，或关闭占用进程 |
-
----
-
-## 八、多模式配置速查
-
-| 变量名 | Mock 联调 | 真实 AI | 真实 AI + RAG |
-|--------|----------|---------|---------------|
-| `AI_MOCK_ENABLED` | `true` | `false` | `false` |
-| `OPENAI_API_KEY` | （不需要） | `sk-xxx` | `sk-xxx` |
-| `OPENAI_BASE_URL` | （不需要） | API 地址 | API 地址 |
-| `RAG_ENABLED` | `false` | `false` | `true` |
-| `RAG_INIT_SAMPLE` | （不需要） | （不需要） | `true`（首次）/ `false`（之后） |
-| `DB_PASSWORD` | `123456` | `123456` | `123456` |
-
----
-
-> 如遇其他问题，优先查看 IDEA 控制台的完整日志（`com.a05.aiinterview` 包日志级别为 DEBUG），
-> 关键错误均有 `log.error(...)` 包含完整堆栈。
+先把这两类分清，再排查才不会乱。

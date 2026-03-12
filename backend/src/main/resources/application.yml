@@ -1,6 +1,6 @@
+# 公共基础配置。
+# 所有环境共享默认值；不要在这里写死 spring.profiles.active。
 spring:
-  profiles:
-    active: local
 
   application:
     name: ai_interview-backend
@@ -72,7 +72,7 @@ mybatis-plus:
 logging:
   level:
     root: INFO
-    com.a05.aiinterview: DEBUG
+    com.a05.aiinterview: INFO
 
 # 简历文件上传目录配置，默认使用系统临时目录，生产环境建议配置固定路径
 resume:
