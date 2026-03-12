@@ -234,7 +234,7 @@ export class AsrService {
 
   /** 从 localStorage 读取 JWT（与 auth.js 保持一致） */
   _getJwtFromStorage() {
-    return localStorage.getItem('token') || ''
+    return localStorage.getItem('aiInterviewToken') || localStorage.getItem('token') || ''
   }
 
   /** 建立 WebSocket 并等待连接成功 */

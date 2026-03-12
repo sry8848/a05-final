@@ -667,14 +667,14 @@ import {
   getInterviewSessionDetail,
   submitInterviewAttempt,
   finishInterviewSession,
-  getInterviewReport,
-  streamInterviewQuestion
+  getInterviewReport
 } from '../api/resume'
 import CustomSelect from './CustomSelect.vue'
 import AiInterviewerAvatar from './AiInterviewerAvatar.vue'
 import TtsPlayerControl from './TtsPlayerControl.vue'
 import { asrService } from '../services/AsrService'
 import { ttsPlayerService } from '../services/TtsPlayerService'
+import { QuestionStreamClient } from '../services/QuestionStreamClient'
 
 export default {
   name: 'InterviewPage',
@@ -752,7 +752,6 @@ export default {
     const isAiSpeaking = ref(false)
     const aiVoiceLevel = ref(0)
     const ttsMode = ref('auto') // auto | manual | mute
-    const pendingTtsAudioUrl = ref('')
     // ASR 相关状态
     const asrAvailable = ref(false)
     const asrState = ref('idle')      // idle | connecting | running | stopping | stopped
@@ -767,6 +766,7 @@ export default {
     const isSubmittingAnswer = ref(false)
     const isWaitingNextQuestion = ref(false)
     const isFinishing = ref(false)
+    const streamConnectionState = ref('idle') // idle | connecting | streaming | reconnecting | completed | error
 
     const metrics = reactive({
       speed: '适中',
@@ -932,6 +932,9 @@ export default {
     })
 
     const interviewStatus = computed(() => {
+      if (isWaitingNextQuestion.value && (streamConnectionState.value === 'connecting' || streamConnectionState.value === 'reconnecting')) {
+        return 'reconnecting'
+      }
       if (isAiSpeaking.value) return 'speaking'
       if (isListening.value) return 'listening'
       return 'waiting'
@@ -939,6 +942,7 @@ export default {
 
     const statusText = computed(() => {
       const statusMap = {
+        reconnecting: '网络恢复中',
         speaking: 'AI回答中',
         listening: '正在倾听',
         waiting: '等待回答'
@@ -1158,7 +1162,7 @@ export default {
       startInterviewDirectly().catch((err) => {
         console.error('[InterviewPage] failed to start interview', err)
         failLoading()
-        alert(err?.message || 'Failed to start interview, please retry.')
+        alert(err?.message || '启动面试失败，请重试。')
       })
     }
 
@@ -1216,10 +1220,10 @@ export default {
       hintUsed.value = false
       answerInput.value = ''
       recognizedText.value = ''
-      pendingTtsAudioUrl.value = ''
       backendSessionId.value = null
       isSubmittingAnswer.value = false
       isWaitingNextQuestion.value = false
+      streamConnectionState.value = 'idle'
       isFinishing.value = false
 
       if (streamAbortController) {
@@ -1396,9 +1400,9 @@ export default {
     }
 
     const SIGNAL_TEXT_MAP = {
-      NEXT_DOMAIN: 'Got it. We will move to the next topic.',
-      DEEPEN: 'Good answer. Let us dive deeper on this area.',
-      END: 'Interview Q&A finished. Generating your report now.'
+      NEXT_DOMAIN: '好的，我们进入下一个知识点。',
+      DEEPEN: '回答不错，我们继续深挖这个方向。',
+      END: '本轮问答已完成，正在生成你的面试报告。'
     }
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -1438,14 +1442,14 @@ export default {
       const createResp = await createInterviewSession(buildCreateInterviewPayload())
       const sessionId = createResp?.sessionId
       if (!sessionId) {
-        throw new Error('Failed to create interview session: missing sessionId')
+        throw new Error('创建面试会话失败：缺少 sessionId')
       }
       backendSessionId.value = sessionId
 
       const detail = await pollSessionUntilReady(sessionId)
       const firstQuestion = normalizeQuestion(detail?.currentQuestion, 1)
       if (!firstQuestion || !firstQuestion.question) {
-        throw new Error('First question is not ready yet, please retry shortly')
+        throw new Error('首题尚未就绪，请稍后重试')
       }
       return firstQuestion
     }
@@ -1460,13 +1464,13 @@ export default {
           return detail
         }
         if (status === 'aborted') {
-          throw new Error('Interview session aborted')
+          throw new Error('面试会话已中止')
         }
 
         loadingProgress.value = Math.min(95, loadingProgress.value + 1)
         await sleep(intervalMs)
       }
-      throw new Error('Interview preparation timed out')
+      throw new Error('面试准备超时，请重试')
     }
 
     const waitReportReady = async (sessionId, timeoutMs = 90000, intervalMs = 1500) => {
@@ -1495,7 +1499,7 @@ export default {
 
     const streamNextQuestion = async (streamAttemptId) => {
       if (!backendSessionId.value) {
-        throw new Error('Missing session context for streaming next question')
+        throw new Error('缺少会话上下文，无法流式生成下一题')
       }
 
       if (streamAbortController) {
@@ -1505,7 +1509,7 @@ export default {
 
       isWaitingNextQuestion.value = true
       isAiSpeaking.value = true
-      pendingTtsAudioUrl.value = ''
+      streamConnectionState.value = 'connecting'
 
       messages.value.push({
         type: 'ai',
@@ -1517,21 +1521,38 @@ export default {
       let donePayload = null
 
       try {
-        await streamInterviewQuestion(
+        const streamClient = new QuestionStreamClient({ maxReconnectDurationMs: 60000 })
+        await streamClient.consume(
           backendSessionId.value,
           streamAttemptId,
           {
+            onStateChange: (state) => {
+              streamConnectionState.value = state
+            },
+            onReconnect: ({ attempt, delayMs, error }) => {
+              console.warn('[InterviewPage] SSE重连中', { attempt, delayMs, error: error?.message || null })
+            },
+            onStart: (payload) => {
+              ttsPlayerService.beginGeneration(payload?.generationId || streamAttemptId)
+            },
             onDelta: async (payload) => {
               const delta = payload?.text || ''
               streamedStem += delta
               messages.value[streamMessageIndex].content = streamedStem || '...'
               await scrollToBottom()
             },
+            onTtsReady: async (payload) => {
+              try {
+                await ttsPlayerService.handleTtsReadyEvent(payload)
+              } catch (err) {
+                console.warn('[InterviewPage] 处理 tts_ready 事件失败，降级为文本模式', err)
+              }
+            },
             onDone: (payload) => {
               donePayload = payload || null
             },
             onError: (payload) => {
-              throw new Error(payload?.message || 'Failed to stream next question')
+              throw new Error(payload?.message || '流式生成下一题失败')
             }
           },
           streamAbortController.signal
@@ -1539,7 +1560,7 @@ export default {
 
         const finalStem = streamedStem.trim()
         if (!finalStem) {
-          throw new Error('No next-question text was received')
+          throw new Error('未收到下一题文本，请重试')
         }
 
         messages.value[streamMessageIndex].content = finalStem
@@ -1557,16 +1578,13 @@ export default {
 
         questions.value.push(nextQuestion)
         currentQuestion.value = questions.value.length - 1
-
-        if (donePayload?.ttsReady && donePayload?.audioStatusUrl) {
-          await handleQuestionTtsDone(donePayload.audioStatusUrl)
-        }
       } finally {
         if (streamAbortController) {
           streamAbortController = null
         }
         isWaitingNextQuestion.value = false
         isAiSpeaking.value = false
+        streamConnectionState.value = 'idle'
       }
     }
 
@@ -1595,8 +1613,8 @@ export default {
     const sendWelcomeMessage = () => {
       isAiSpeaking.value = true
       const welcomeMsg = singleQuestionMode.value
-        ? 'Starting single-question practice for ' + jobDisplayName.value + '.'
-        : 'Welcome to the ' + jobDisplayName.value + ' interview. Let us begin with the first question.'
+        ? '开始「' + jobDisplayName.value + '」单题练习。'
+        : '欢迎参加「' + jobDisplayName.value + '」面试，我们从第一题开始。'
       messages.value.push({
         type: 'ai',
         content: welcomeMsg
@@ -1622,11 +1640,11 @@ export default {
 
       let hint = ''
       if (Array.isArray(question.keywords) && question.keywords.length) {
-        hint = 'Hint: try covering these points: ' + question.keywords.slice(0, 2).join(', ')
+        hint = '提示：可以优先覆盖这些要点：' + question.keywords.slice(0, 2).join('、')
       } else if (question.targetSkill) {
-        hint = 'Hint: focus on your understanding and practice for ' + question.targetSkill + '.'
+        hint = '提示：重点讲清你对「' + question.targetSkill + '」的理解和实践。'
       } else {
-        hint = 'Hint: answer with structure: definition -> principle -> practical scenario.'
+        hint = '提示：可按“定义 -> 原理 -> 实战场景”来组织回答。'
       }
 
       messages.value.push({
@@ -1788,7 +1806,7 @@ export default {
         }
 
         if (!backendSessionId.value) {
-          throw new Error('Interview session is not initialized')
+          throw new Error('面试会话尚未初始化')
         }
 
         const attemptId = buildAttemptId()
@@ -1826,26 +1844,16 @@ export default {
         }
       } catch (err) {
         console.error('[InterviewPage] failed to start interview', err)
-        alert(err?.message || 'Failed to submit answer. Please retry.')
+        alert(err?.message || '提交回答失败，请重试。')
       } finally {
         isSubmittingAnswer.value = false
         await scrollToBottom()
       }
     }
 
-    const handleQuestionTtsDone = async (audioStatusUrl) => {
-      try {
-        const readyUrl = await ttsPlayerService.handleDoneEvent(audioStatusUrl)
-        pendingTtsAudioUrl.value = readyUrl || ''
-      } catch (err) {
-        console.warn('[InterviewPage] 处理题目 TTS 失败，降级为文本模式', err)
-      }
-    }
-
     const handleManualPlayTts = async () => {
-      if (!pendingTtsAudioUrl.value) return
       try {
-        await ttsPlayerService.play(pendingTtsAudioUrl.value)
+        await ttsPlayerService.play()
       } catch (err) {
         console.warn('[InterviewPage] 手动播放 TTS 失败', err)
       }
@@ -1863,12 +1871,14 @@ export default {
       if (isSubmittingAnswer.value || isWaitingNextQuestion.value || isFinishing.value) return
       const question = questions.value[currentQuestion.value]
       if (!question) return
+      ttsPlayerService.skip()
       await submitAnswerText('[skip]', true)
     }
 
     const endInterview = async () => {
       if (isFinishing.value) return
-      if (confirm('Are you sure you want to end this interview?')) {
+      if (confirm('确认结束本场面试吗？')) {
+        ttsPlayerService.skip()
         await finishInterview({ manual: true })
       }
     }
@@ -1884,7 +1894,7 @@ export default {
         correctCount,
         totalQuestions: total,
         beatPercent: Math.min(Math.round(score * 0.9 + Math.random() * 8), 99),
-        feedback: report?.summary || 'Report is ready. Please check the detailed analysis.',
+        feedback: report?.summary || '报告已生成，请查看详细分析。',
         duration: formattedTime.value,
         reportStatus: report?.reportStatus || 'ready',
         report
@@ -1894,6 +1904,7 @@ export default {
     const finishInterview = async ({ manual = false } = {}) => {
       if (isFinishing.value) return
       isFinishing.value = true
+      ttsPlayerService.skip()
 
       stopTimer()
 
@@ -1917,7 +1928,7 @@ export default {
           if (report && report.reportStatus === 'ready') {
             resultData = buildResultFromReport(report)
           } else {
-            resultData.feedback = 'Report is still generating. Please check it later in history.'
+            resultData.feedback = '报告仍在生成中，请稍后到历史记录页面查看。'
           }
         } catch (err) {
           console.warn('[InterviewPage] failed to fetch report, fallback to local result', err)
@@ -1926,13 +1937,13 @@ export default {
 
       resultData.answers = answers.value
       resultData.jobName = jobDisplayName.value
-      resultData.difficulty = config.difficulty === 'easy' ? 'easy' : config.difficulty === 'hard' ? 'hard' : 'medium'
+      resultData.difficulty = config.difficulty === 'easy' ? '简单' : config.difficulty === 'hard' ? '困难' : '中等'
       resultData.companyName = config.companyName
       resultData.interviewRound = currentRound.value.label
       resultData.interviewMode = config.interviewMode
       resultData.sessionId = backendSessionId.value
       const expLabel = experienceLevels.find(e => e.value === config.experience)
-      resultData.experienceLabel = expLabel ? expLabel.label : 'unknown'
+      resultData.experienceLabel = expLabel ? expLabel.label : '未知'
 
       isRunning.value = false
       emit('interviewEnd', resultData)
@@ -1956,13 +1967,13 @@ export default {
 
       let feedback = ''
       if (avgScore >= 85) {
-        feedback = 'Excellent performance. Your answers were comprehensive and solid.'
+        feedback = '表现优秀，你的回答完整且扎实。'
       } else if (avgScore >= 70) {
-        feedback = 'Good overall performance. Keep strengthening weak points.'
+        feedback = '整体表现良好，建议继续强化薄弱点。'
       } else if (avgScore >= 60) {
-        feedback = 'Basically qualified, but there is room to improve depth and structure.'
+        feedback = '基本达标，但在深度和结构化表达上还有提升空间。'
       } else {
-        feedback = 'Performance needs improvement. Build stronger fundamentals and practice more.'
+        feedback = '表现有待提升，建议夯实基础并加强实战练习。'
       }
 
       return {
@@ -2008,6 +2019,7 @@ export default {
       messages.value = []
       answers.value = []
       elapsedTime.value = 0
+      streamConnectionState.value = 'idle'
     }
 
     const reviewAnswers = () => {
@@ -2136,7 +2148,6 @@ export default {
       submitAnswer,
       skipQuestion,
       endInterview,
-      handleQuestionTtsDone,
       handleManualPlayTts,
       handleSkipTts,
       handleInterruptTts,
@@ -3042,6 +3053,11 @@ export default {
 .interview-status.listening {
   background: rgba(245, 158, 11, 0.1);
   color: #f59e0b;
+}
+
+.interview-status.reconnecting {
+  background: rgba(249, 115, 22, 0.12);
+  color: #f97316;
 }
 
 .status-dot {

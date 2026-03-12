@@ -115,8 +115,13 @@ rag:
 # generation-cache-ttl-seconds: Redis 缓存 delta 块和 done 状态的过期时间
 #   - 用于断点续传：客户端重连时可以从缓存恢复已生成的内容
 #   - 避免无限期占用 Redis 内存，默认 1800s = 30 分钟
+# follow.poll-interval-ms: 尾随回放轮询间隔（毫秒）
+# follow.idle-timeout-seconds: 尾随等待超时（秒）
 sse:
   generation-cache-ttl-seconds: ${SSE_CACHE_TTL:1800}
+  follow:
+    poll-interval-ms: ${SSE_FOLLOW_POLL_INTERVAL_MS:250}
+    idle-timeout-seconds: ${SSE_FOLLOW_IDLE_TIMEOUT_SECONDS:30}
 
 # 语音服务配置（ASR + TTS）
 # asr.enabled=false 时跳过语音识别服务初始化，相关 Bean 不加载

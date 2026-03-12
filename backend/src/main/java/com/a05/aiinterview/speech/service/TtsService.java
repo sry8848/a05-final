@@ -40,6 +40,8 @@ public class TtsService {
     private static final String KEY_TEXT_AUDIO = "speech:tts:text:%s";
     private static final String KEY_QUESTION_HASH = "speech:tts:question:%s:%s";
     private static final String KEY_QUESTION_STATE = "speech:tts:state:%s:%s";
+    private static final String KEY_ATTEMPT_SEGMENT_HASH = "speech:tts:attempt:%s:%s:segment:%s";
+    private static final String KEY_ATTEMPT_SEGMENT_STATE = "speech:tts:attempt:%s:%s:segment:%s:state";
 
     private final SpeechProperties speechProperties;
     private final StringRedisTemplate redisTemplate;
@@ -86,6 +88,54 @@ public class TtsService {
     }
 
     /**
+     * 异步触发题目片段音频合成。
+     *
+     * @param sessionId    面试会话 ID
+     * @param attemptId    流式生成 attemptId
+     * @param segmentIndex 片段索引（从 0 开始）
+     * @param segmentText  片段文本
+     * @return Future，完成时 true 表示片段音频已就绪
+     */
+    public CompletableFuture<Boolean> triggerQuestionSegmentAudioAsync(
+            Long sessionId, String attemptId, Integer segmentIndex, String segmentText) {
+        SpeechProperties.Tts tts = speechProperties.getTts();
+        if (!tts.isEnabled()) {
+            return CompletableFuture.completedFuture(false);
+        }
+        if (sessionId == null || attemptId == null || attemptId.isBlank()
+                || segmentIndex == null || segmentIndex < 0
+                || segmentText == null || segmentText.isBlank()) {
+            log.warn("触发片段 TTS 失败，参数非法, sessionId={}, attemptId={}, segmentIndex={}",
+                    sessionId, attemptId, segmentIndex);
+            return CompletableFuture.completedFuture(false);
+        }
+
+        String normalizedText = normalizeText(segmentText);
+        if (normalizedText.isBlank()) {
+            return CompletableFuture.completedFuture(false);
+        }
+
+        String textHash = sha256(normalizedText);
+        String textAudioKey = String.format(KEY_TEXT_AUDIO, textHash);
+        String segmentHashKey = attemptSegmentHashKey(sessionId, attemptId, segmentIndex);
+        String segmentStateKey = attemptSegmentStateKey(sessionId, attemptId, segmentIndex);
+        int ttl = Math.max(tts.getCacheTtlSeconds(), 300);
+
+        redisTemplate.opsForValue().set(segmentHashKey, textHash, ttl, TimeUnit.SECONDS);
+
+        String cachedAudio = redisTemplate.opsForValue().get(textAudioKey);
+        if (cachedAudio != null && !cachedAudio.isBlank()) {
+            redisTemplate.opsForValue().set(segmentStateKey, "ready", ttl, TimeUnit.SECONDS);
+            return CompletableFuture.completedFuture(true);
+        }
+
+        redisTemplate.opsForValue().set(segmentStateKey, "processing", ttl, TimeUnit.SECONDS);
+        return CompletableFuture.supplyAsync(
+                () -> synthesizeSegmentAndCache(
+                        sessionId, attemptId, segmentIndex, normalizedText, textHash));
+    }
+
+    /**
      * 查询题目音频是否已就绪。
      *
      * @param sessionId  面试会话 ID
@@ -120,6 +170,31 @@ public class TtsService {
         return Base64.getDecoder().decode(audioBase64);
     }
 
+    /**
+     * 获取题目片段音频二进制。
+     *
+     * @param sessionId    面试会话 ID
+     * @param attemptId    流式生成 attemptId
+     * @param segmentIndex 片段索引
+     * @return 音频字节，不存在时返回 null
+     */
+    public byte[] getAttemptSegmentAudioBytes(Long sessionId, String attemptId, Integer segmentIndex) {
+        if (sessionId == null || attemptId == null || attemptId.isBlank()
+                || segmentIndex == null || segmentIndex < 0) {
+            return null;
+        }
+        String textHash = redisTemplate.opsForValue().get(
+                attemptSegmentHashKey(sessionId, attemptId, segmentIndex));
+        if (textHash == null || textHash.isBlank()) {
+            return null;
+        }
+        String audioBase64 = redisTemplate.opsForValue().get(String.format(KEY_TEXT_AUDIO, textHash));
+        if (audioBase64 == null || audioBase64.isBlank()) {
+            return null;
+        }
+        return Base64.getDecoder().decode(audioBase64);
+    }
+
     private void synthesizeAndCache(Long sessionId, Long questionId, String text, String textHash) {
         SpeechProperties.Tts tts = speechProperties.getTts();
         String questionStateKey = questionStateKey(sessionId, questionId);
@@ -141,6 +216,30 @@ public class TtsService {
         } catch (Exception e) {
             redisTemplate.opsForValue().set(questionStateKey, "failed", ttl, TimeUnit.SECONDS);
             log.error("题目 TTS 合成失败, 参数: sessionId={}, questionId={}", sessionId, questionId, e);
+        }
+    }
+
+    private boolean synthesizeSegmentAndCache(
+            Long sessionId, String attemptId, Integer segmentIndex, String text, String textHash) {
+        SpeechProperties.Tts tts = speechProperties.getTts();
+        String segmentStateKey = attemptSegmentStateKey(sessionId, attemptId, segmentIndex);
+        String textAudioKey = String.format(KEY_TEXT_AUDIO, textHash);
+        int ttl = Math.max(tts.getCacheTtlSeconds(), 300);
+
+        try {
+            byte[] audio = requestAlibabaCosyVoice(text);
+            if (audio == null || audio.length == 0) {
+                redisTemplate.opsForValue().set(segmentStateKey, "failed", ttl, TimeUnit.SECONDS);
+                return false;
+            }
+            redisTemplate.opsForValue().set(textAudioKey, Base64.getEncoder().encodeToString(audio), ttl, TimeUnit.SECONDS);
+            redisTemplate.opsForValue().set(segmentStateKey, "ready", ttl, TimeUnit.SECONDS);
+            return true;
+        } catch (Exception e) {
+            redisTemplate.opsForValue().set(segmentStateKey, "failed", ttl, TimeUnit.SECONDS);
+            log.error("题目片段 TTS 合成失败, sessionId={}, attemptId={}, segmentIndex={}",
+                    sessionId, attemptId, segmentIndex, e);
+            return false;
         }
     }
 
@@ -207,6 +306,14 @@ public class TtsService {
         return String.format(KEY_QUESTION_STATE, sessionId, questionId);
     }
 
+    private String attemptSegmentHashKey(Long sessionId, String attemptId, Integer segmentIndex) {
+        return String.format(KEY_ATTEMPT_SEGMENT_HASH, sessionId, attemptId, segmentIndex);
+    }
+
+    private String attemptSegmentStateKey(Long sessionId, String attemptId, Integer segmentIndex) {
+        return String.format(KEY_ATTEMPT_SEGMENT_STATE, sessionId, attemptId, segmentIndex);
+    }
+
     private String normalizeText(String stemText) {
         return stemText.replaceAll("\\s+", " ").trim();
     }
@@ -234,4 +341,3 @@ public class TtsService {
         }
     }
 }
-

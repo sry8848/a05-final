@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.a05.aiinterview.interview.mapper.InterviewSessionMapper">
+
+    <resultMap id="InterviewSessionResultMap" type="com.a05.aiinterview.interview.entity.InterviewSession">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="resume_id" property="resumeId"/>
+        <result column="title" property="title"/>
+        <result column="target_role" property="targetRole"/>
+        <result column="position_domain_version" property="positionDomainVersion"/>
+        <result column="experience_level" property="experienceLevel"/>
+        <result column="mode" property="mode"/>
+        <result column="job_description" property="jobDescription"/>
+        <result column="focus_topics" property="focusTopics"/>
+        <result column="current_question_no" property="currentQuestionNo"/>
+        <result column="context_window_size" property="contextWindowSize"/>
+        <result column="think_time_limit_seconds" property="thinkTimeLimitSeconds"/>
+        <result column="answer_time_limit_seconds" property="answerTimeLimitSeconds"/>
+        <result column="first_question_json"
+                property="firstQuestionJson"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="syllabus_json"
+                property="syllabusJson"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="state_ledger_json"
+                property="stateLedgerJson"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="status" property="status"/>
+        <result column="model_provider" property="modelProvider"/>
+        <result column="model_name" property="modelName"/>
+        <result column="started_at" property="startedAt"/>
+        <result column="finished_at" property="finishedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="selectForUpdate" resultMap="InterviewSessionResultMap">
+        SELECT *
+        FROM interview_sessions
+        WHERE id = #{sessionId}
+        FOR UPDATE
+    </select>
+</mapper>

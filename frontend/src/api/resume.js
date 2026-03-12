@@ -162,14 +162,19 @@ function parseSsePayload(raw) {
 }
 
 /** Stream interview question via fetch-based SSE */
-export async function streamInterviewQuestion(sessionId, attemptId, handlers = {}, signal) {
+export async function streamInterviewQuestion(sessionId, attemptId, handlers = {}, signal, options = {}) {
   const url = BASE + '/interviews/' + sessionId + '/questions/stream?attemptId=' + encodeURIComponent(attemptId)
+  const headers = {
+    Accept: 'text/event-stream',
+    Authorization: getAuthHeader()
+  }
+  if (options.lastEventId != null && String(options.lastEventId).trim() !== '') {
+    headers['Last-Event-ID'] = String(options.lastEventId)
+  }
+
   const resp = await fetch(url, {
     method: 'GET',
-    headers: {
-      Accept: 'text/event-stream',
-      Authorization: getAuthHeader()
-    },
+    headers,
     signal
   })
 
@@ -186,19 +191,28 @@ export async function streamInterviewQuestion(sessionId, attemptId, handlers = {
   let eventName = 'message'
   let eventId = ''
   let dataLines = []
+  let terminalEvent = null
+  let latestEventId = options.lastEventId ? String(options.lastEventId) : ''
 
   const dispatch = async () => {
     if (!dataLines.length) return
+    if (eventId) {
+      latestEventId = eventId
+    }
     const payload = parseSsePayload(dataLines.join('\n'))
     const map = {
       start: handlers.onStart,
       delta: handlers.onDelta,
+      tts_ready: handlers.onTtsReady,
       done: handlers.onDone,
       error: handlers.onError
     }
     const fn = map[eventName] || handlers.onMessage
     if (fn) {
       await fn(payload, eventName, eventId)
+    }
+    if (eventName === 'done' || eventName === 'error') {
+      terminalEvent = eventName
     }
   }
 
@@ -239,5 +253,10 @@ export async function streamInterviewQuestion(sessionId, attemptId, handlers = {
     }
   } finally {
     reader.releaseLock()
+  }
+
+  return {
+    terminalEvent,
+    lastEventId: latestEventId
   }
 }

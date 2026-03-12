@@ -9,7 +9,6 @@ import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.a05.aiinterview.position.entity.PositionSkillDomain;
 import com.a05.aiinterview.position.service.PositionService;
 import com.a05.aiinterview.resume.mapper.ResumeMapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -81,9 +80,11 @@ public class PlannerOrchestrationService {
             // 5. 将考纲结果保存到 session
             @SuppressWarnings("unchecked")
             Map<String, Object> syllabusMap = objectMapper.convertValue(plannerOutput, Map.class);
-            interviewSessionMapper.update(null, new LambdaUpdateWrapper<InterviewSession>()
-                    .eq(InterviewSession::getId, sessionId)
-                    .set(InterviewSession::getSyllabusJson, syllabusMap));
+            InterviewSession syllabusUpdate = new InterviewSession();
+            syllabusUpdate.setId(sessionId);
+            syllabusUpdate.setSyllabusJson(syllabusMap);
+            syllabusUpdate.setUpdatedAt(LocalDateTime.now());
+            interviewSessionMapper.updateById(syllabusUpdate);
 
             // 6. 初始化状态账本 session_skill_states
             Map<String, Object> ledger = stateLedgerInitService.initLedger(sessionId, plannerOutput, domains);
@@ -94,21 +95,25 @@ public class PlannerOrchestrationService {
             Map<String, Object> firstQuestionSnapshot = buildFirstQuestionSnapshot(firstQuestion, domains);
 
             // 9. 更新 session 状态为 in_progress
-            interviewSessionMapper.update(null, new LambdaUpdateWrapper<InterviewSession>()
-                    .eq(InterviewSession::getId, sessionId)
-                    .set(InterviewSession::getStateLedgerJson, ledger)
-                    .set(InterviewSession::getFirstQuestionJson, firstQuestionSnapshot)
-                    .set(InterviewSession::getCurrentQuestionNo, 1)
-                    .set(InterviewSession::getStatus, "in_progress")
-                    .set(InterviewSession::getStartedAt, LocalDateTime.now()));
+            InterviewSession progressUpdate = new InterviewSession();
+            progressUpdate.setId(sessionId);
+            progressUpdate.setStateLedgerJson(ledger);
+            progressUpdate.setFirstQuestionJson(firstQuestionSnapshot);
+            progressUpdate.setCurrentQuestionNo(1);
+            progressUpdate.setStatus("in_progress");
+            progressUpdate.setStartedAt(LocalDateTime.now());
+            progressUpdate.setUpdatedAt(LocalDateTime.now());
+            interviewSessionMapper.updateById(progressUpdate);
 
             log.info("Planner 编排流程完成, sessionId={}, status=in_progress", sessionId);
 
         } catch (Exception e) {
             log.error("Planner 编排流程异常，设置 session status=aborted, sessionId={}", sessionId, e);
-            interviewSessionMapper.update(null, new LambdaUpdateWrapper<InterviewSession>()
-                    .eq(InterviewSession::getId, sessionId)
-                    .set(InterviewSession::getStatus, "aborted"));
+            InterviewSession abortedUpdate = new InterviewSession();
+            abortedUpdate.setId(sessionId);
+            abortedUpdate.setStatus("aborted");
+            abortedUpdate.setUpdatedAt(LocalDateTime.now());
+            interviewSessionMapper.updateById(abortedUpdate);
         }
     }
 
