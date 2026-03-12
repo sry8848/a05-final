@@ -3,11 +3,11 @@ package com.a05.aiinterview.interview.engine;
 import com.a05.aiinterview.ai.AiClient;
 import com.a05.aiinterview.ai.config.PromptProperties;
 import com.a05.aiinterview.ai.dto.AiCallResult;
+import com.a05.aiinterview.ai.dto.IntroRewriteInput;
 import com.a05.aiinterview.ai.dto.PlannerOutput;
-import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
-import com.a05.aiinterview.ai.dto.QuestionGenerationOutput;
-import com.a05.aiinterview.ai.entity.AiInvocationLog;
-import com.a05.aiinterview.ai.service.AiInvocationLogService;
+import com.a05.aiinterview.common.TraceContext;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
@@ -16,155 +16,151 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 首题生成服务。
- * 在 Planner 规划完成后，负责生成面试的第一道题目并保存到数据库。
- *
- * <p>首题生成策略：
- * <ul>
- *   <li>若考纲中包含 INTRO 类型题目，优先生成自我介绍题，引导候选人进入面试状态</li>
- *   <li>若没有 INTRO，则从高优先级知识域中选择第一个域，生成 PRINCIPLE 类型题目</li>
- * </ul>
+ * 固定首题为 INTRO，流程为：题库选底稿 -> AI 改写 -> 失败回退到底稿。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class FirstQuestionGenerationService {
 
+    private static final ObjectMapper AUDIT_OBJECT_MAPPER = new ObjectMapper();
+    private static final String INTRO_DOMAIN_CODE = "intro";
+    private static final String INTRO_QUESTION_TYPE = "INTRO";
+    private static final String INTRO_TARGET_DEPTH = "L1";
+    private static final String INTRO_TARGET_SKILL = "沟通表达与项目概述";
+    private static final String INTRO_REWRITE_PROMPT_CODE = "intro_rewrite";
+    private static final int INTRO_REWRITE_MAX_LEN = 180;
+    private static final int RESPONSE_PREVIEW_MAX_LEN = 120;
+    private static final String DEFAULT_INTRO_BASE_PROMPT = "请先做一个简短的自我介绍，重点介绍你的技术背景和最近参与的项目。";
+    private static final List<String> INTRO_EXPECTED_POINTS = List.of(
+            "技术方向与核心技术栈",
+            "最近一年代表项目与职责边界",
+            "项目中的关键贡献或问题解决"
+    );
+
     private final AiClient aiClient;
     private final PromptProperties promptProperties;
+    private final IntroQuestionStrategyService introQuestionStrategyService;
     private final InterviewQuestionMapper interviewQuestionMapper;
-    private final AiInvocationLogService aiInvocationLogService;
 
     /**
-     * 生成并保存面试的第一道题目。
-     *
-     * @param session       面试会话实体（包含岗位、年限等上下文）
-     * @param plannerOutput Planner 规划输出（包含考纲信息）
-     * @return 生成的第一道题目实体（已持久化到数据库）
+     * 生成并保存面试的第一道题目（固定 INTRO）。
      */
     public InterviewQuestion generateAndSave(InterviewSession session, PlannerOutput plannerOutput) {
-        log.info("开始生成首题, sessionId={}", session.getId());
+        log.info("开始生成首题（固定 INTRO）, sessionId={}", session.getId());
 
-        QuestionDecision decision = decideFirstQuestion(plannerOutput);
+        IntroQuestionStrategyService.IntroQuestionSelection selection =
+                introQuestionStrategyService.selectIntroForUser(session.getUserId());
 
-        QuestionGenerationInput input = QuestionGenerationInput.builder()
-                .positionCode(session.getTargetRole())
-                .mode(session.getMode())
-                .experienceLevel(session.getExperienceLevel())
-                .nextDomainId(decision.getDomainId())
-                .nextDomainCode(decision.getDomainCode())
-                .nextDomainName(decision.getDomainName())
-                .nextQuestionType(decision.getQuestionType())
-                .targetDepth(decision.getTargetDepth())
-                .askedQuestions(List.of())
-                .syllabus(new HashMap<>())
-                .resumeTextSummary(null)
-                .build();
-        boolean success = true;
-        String errorMessage = null;
-        QuestionGenerationOutput output = null;
-        AiCallResult<QuestionGenerationOutput> result = null;
+        String basePrompt = safePrompt(selection.getBasePrompt());
+        boolean rewritten = false;
+        String finalStem = basePrompt;
+        String aiResultStatus = "success";
+        String fallbackReason = "";
+
+        boolean rewriteSuccess = true;
+        String rewriteErrorMessage = null;
+        AiCallResult<String> rewriteResult = null;
+
+        String rewritePromptCode = INTRO_REWRITE_PROMPT_CODE;
+        String rewritePromptVersion = promptProperties.resolveVersion(INTRO_REWRITE_PROMPT_CODE);
 
         try {
-            result = aiClient.callQuestionGeneration(input);
-            output = result.getOutput();
-        } catch (Exception e) {
-            success = false;
-            errorMessage = e.getMessage();
-            log.error("首题生成 AI 调用失败, sessionId={}", session.getId(), e);
-            throw e;
-        } finally {
-            int latencyMs = result != null ? (int) result.getLatencyMs() : 0;
-            int promptTokens = result != null ? result.getPromptTokens() : 0;
-            int responseTokens = result != null ? result.getResponseTokens() : 0;
-
-            AiInvocationLog logEntry = AiInvocationLog.builder()
-                    .sessionId(session.getId())
-                    .userId(session.getUserId())
-                    .promptCode("question_generation")
-                    .promptVersion(promptProperties.resolveVersion("question_generation"))
-                    .modelProvider(session.getModelProvider() != null ? session.getModelProvider() : "unknown")
-                    .modelName(session.getModelName() != null ? session.getModelName() : "")
-                    .requestTokens(promptTokens)
-                    .responseTokens(responseTokens)
-                    .latencyMs(latencyMs)
-                    .success(success)
-                    .errorMessage(errorMessage)
-                    .createdAt(LocalDateTime.now())
+            IntroRewriteInput input = IntroRewriteInput.builder()
+                    .interviewId(session.getId())
+                    .questionId(null)
+                    .variantId(selection.getVariantId())
+                    .positionCode(session.getTargetRole())
+                    .experienceLevel(session.getExperienceLevel())
+                    .mode(session.getMode())
+                    .basePrompt(basePrompt)
+                    .recentPrompts(selection.getRecentPrompts())
+                    .avoidPhrases(selection.getAvoidPhrases())
                     .build();
-            aiInvocationLogService.saveAsync(logEntry);
+            rewriteResult = aiClient.callIntroRewrite(input);
+
+            rewritePromptCode = resolvePromptCode(rewriteResult, rewritePromptCode);
+            rewritePromptVersion = resolvePromptVersion(rewriteResult, rewritePromptVersion);
+            String rewrittenStem = rewriteResult.getOutput() != null ? rewriteResult.getOutput().trim() : "";
+            if (isInvalidRewriteText(rewrittenStem)) {
+                rewriteSuccess = false;
+                aiResultStatus = "fallback";
+                fallbackReason = rewrittenStem.isBlank()
+                        ? "blank_output"
+                        : "too_long_output";
+                rewriteErrorMessage = "intro_rewrite invalid output: " + fallbackReason;
+                log.warn("INTRO 改写无效，回退到底稿, sessionId={}, reason={}", session.getId(), fallbackReason);
+            } else {
+                rewritten = true;
+                finalStem = rewrittenStem;
+            }
+        } catch (Exception e) {
+            rewriteSuccess = false;
+            aiResultStatus = "fallback";
+            fallbackReason = "exception";
+            rewriteErrorMessage = e.getMessage();
+            log.warn("INTRO 改写失败，回退到底稿, sessionId={}", session.getId(), e);
+        } finally {
+            recordIntroRewriteLiteAudit(session, selection.getVariantId(), rewriteSuccess,
+                    fallbackReason, rewriteResult, rewritePromptCode, rewritePromptVersion, rewriteErrorMessage);
         }
 
-        // 将 AI 返回的题目内容封装为实体并持久化
-        InterviewQuestion question = buildQuestion(session.getId(), 1, decision, output);
+        InterviewQuestion question = buildIntroQuestion(
+                session.getId(),
+                1,
+                finalStem,
+                selection,
+                rewritten,
+                aiResultStatus,
+                fallbackReason,
+                rewritePromptCode,
+                rewritePromptVersion
+        );
         interviewQuestionMapper.insert(question);
 
-        log.info("首题生成并保存成功, sessionId={}, questionId={}, stem 前50字={}",
-                session.getId(), question.getId(),
-                question.getStem() != null ? question.getStem().substring(0, Math.min(50, question.getStem().length())) : "");
+        log.info("首题生成并保存成功, sessionId={}, questionId={}, rewritten={}",
+                session.getId(), question.getId(), rewritten);
         return question;
     }
 
-    /**
-     * 根据考纲决定第一题的类型和知识域。
-     * 优先选择 INTRO 类型作为开场；若考纲中没有 INTRO，则选择高优先级知识域的 PRINCIPLE 题目。
-     */
-    private QuestionDecision decideFirstQuestion(PlannerOutput plannerOutput) {
-        if (plannerOutput.getQuestionMixPlan() != null
-                && plannerOutput.getQuestionMixPlan().getOrDefault("INTRO", 0) > 0) {
-            return QuestionDecision.builder()
-                    .domainId(null)
-                    .domainCode("intro")
-                    .domainName("自我介绍")
-                    .questionType("INTRO")
-                    .targetDepth("L1")
-                    .build();
-        }
-
-        if (plannerOutput.getDomains() != null && !plannerOutput.getDomains().isEmpty()) {
-            PlannerOutput.DomainPlan firstDomain = plannerOutput.getDomains().stream()
-                    .filter(d -> "high".equals(d.getPriority()))
-                    .findFirst()
-                    .orElse(plannerOutput.getDomains().get(0));
-
-            return QuestionDecision.builder()
-                    .domainId(firstDomain.getDomainId())
-                    .domainCode(firstDomain.getDomainCode())
-                    .domainName(firstDomain.getDomainName())
-                    .questionType("PRINCIPLE")
-                    .targetDepth(firstDomain.getTargetDepth() != null ? firstDomain.getTargetDepth() : "L3")
-                    .build();
-        }
-
-        return QuestionDecision.builder()
-                .domainId(null)
-                .domainCode("intro")
-                .domainName("Self-introduction")
-                .questionType("INTRO")
-                .targetDepth("L1")
-                .build();
-    }
-
-    private InterviewQuestion buildQuestion(Long sessionId, int questionNo,
-                                            QuestionDecision decision, QuestionGenerationOutput output) {
+    private InterviewQuestion buildIntroQuestion(Long sessionId,
+                                                 int questionNo,
+                                                 String stem,
+                                                 IntroQuestionStrategyService.IntroQuestionSelection selection,
+                                                 boolean rewritten,
+                                                 String aiResultStatus,
+                                                 String fallbackReason,
+                                                 String rewritePromptCode,
+                                                 String rewritePromptVersion) {
         InterviewQuestion question = new InterviewQuestion();
         question.setSessionId(sessionId);
         question.setQuestionNo(questionNo);
-        question.setQuestionType(decision.getQuestionType());
-        question.setDomainId(decision.getDomainId());
-        question.setStem(output.getStem());
-        question.setTargetSkill(output.getTargetSkill());
-        question.setExpectedPoints(output.getExpectedPoints());
-        question.setTargetDepth(output.getTargetDepth() != null ? output.getTargetDepth() : decision.getTargetDepth());
+        question.setQuestionType(INTRO_QUESTION_TYPE);
+        question.setDomainId(null);
+        question.setStem(safePrompt(stem));
+        question.setTargetSkill(INTRO_TARGET_SKILL);
+        question.setExpectedPoints(INTRO_EXPECTED_POINTS);
+        question.setTargetDepth(INTRO_TARGET_DEPTH);
         question.setStatus("asked");
 
         Map<String, Object> ctx = new LinkedHashMap<>();
-        ctx.put("domainCode", decision.getDomainCode());
-        ctx.put("questionType", decision.getQuestionType());
-        ctx.put("targetDepth", decision.getTargetDepth());
+        ctx.put("domainCode", INTRO_DOMAIN_CODE);
+        ctx.put("questionType", INTRO_QUESTION_TYPE);
+        ctx.put("targetDepth", INTRO_TARGET_DEPTH);
+        ctx.put("variantId", selection.getVariantId());
+        ctx.put("basePromptText", selection.getBasePrompt());
+        ctx.put("rewritten", rewritten);
+        ctx.put("aiResultStatus", aiResultStatus);
+        ctx.put("fallbackReason", fallbackReason);
+        ctx.put("historyAvoidCount", selection.getHistoryAvoidCount());
+        ctx.put("rewritePromptCode", rewritePromptCode);
+        ctx.put("rewritePromptVersion", rewritePromptVersion);
         question.setGenerationContextJson(ctx);
 
         question.setCreatedAt(LocalDateTime.now());
@@ -172,16 +168,74 @@ public class FirstQuestionGenerationService {
         return question;
     }
 
-    /** 首题生成决策信息，包含知识域、题型、目标深度等 DTO */
-    @lombok.Data
-    @lombok.Builder
-    @lombok.NoArgsConstructor
-    @lombok.AllArgsConstructor
-    private static class QuestionDecision {
-        private Long domainId;
-        private String domainCode;
-        private String domainName;
-        private String questionType;
-        private String targetDepth;
+    private void recordIntroRewriteLiteAudit(InterviewSession session,
+                                             String variantId,
+                                             boolean success,
+                                             String fallbackReason,
+                                             AiCallResult<String> result,
+                                             String promptCode,
+                                             String promptVersion,
+                                             String errorMessage) {
+        try {
+            ObjectNode audit = AUDIT_OBJECT_MAPPER.createObjectNode();
+            audit.put("traceId", TraceContext.getOrCreateTraceId());
+            audit.put("requestId", TraceContext.getOrCreateRequestId());
+            audit.put("interviewId", session.getId());
+            audit.putNull("questionId");
+            audit.put("promptCode", promptCode);
+            audit.put("variantId", variantId == null ? "" : variantId);
+            audit.put("model", session.getModelName() == null ? "" : session.getModelName());
+            audit.put("latencyMs", result != null ? Math.max(result.getLatencyMs(), 0) : 0);
+            audit.put("status", success ? "success" : "fallback");
+            audit.put("fallbackReason", fallbackReason == null ? "" : fallbackReason);
+            audit.put("promptVersion", promptVersion == null ? "" : promptVersion);
+
+            String output = result != null ? result.getOutput() : null;
+            if (output != null && !output.isBlank()) {
+                String preview = output.replace("\r", " ").replace("\n", " ").trim();
+                if (preview.length() > RESPONSE_PREVIEW_MAX_LEN) {
+                    preview = preview.substring(0, RESPONSE_PREVIEW_MAX_LEN);
+                }
+                audit.put("responsePreview", preview);
+                audit.put("responseLength", output.length());
+            } else {
+                audit.put("responseLength", 0);
+            }
+            if (!success && errorMessage != null && !errorMessage.isBlank()) {
+                audit.put("errorMessage", errorMessage.length() > 200
+                        ? errorMessage.substring(0, 200)
+                        : errorMessage);
+            }
+            log.info("ai_lite_audit={}", audit);
+        } catch (Exception e) {
+            log.warn("INTRO Lite 审计日志记录失败, sessionId={}", session.getId(), e);
+        }
+    }
+
+    private boolean isInvalidRewriteText(String rewrittenStem) {
+        return rewrittenStem == null
+                || rewrittenStem.isBlank()
+                || rewrittenStem.length() > INTRO_REWRITE_MAX_LEN;
+    }
+
+    private String resolvePromptCode(AiCallResult<?> result, String defaultCode) {
+        if (result == null || result.getPromptCode() == null || result.getPromptCode().isBlank()) {
+            return defaultCode;
+        }
+        return result.getPromptCode();
+    }
+
+    private String resolvePromptVersion(AiCallResult<?> result, String defaultVersion) {
+        if (result == null || result.getPromptVersion() == null || result.getPromptVersion().isBlank()) {
+            return defaultVersion;
+        }
+        return result.getPromptVersion();
+    }
+
+    private String safePrompt(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return DEFAULT_INTRO_BASE_PROMPT;
+        }
+        return prompt.trim();
     }
 }

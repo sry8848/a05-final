@@ -224,6 +224,7 @@ public class InterviewService {
         firstQuestionSnapshot.put("stem", question.getStem());
         firstQuestionSnapshot.put("targetSkill", question.getTargetSkill());
         firstQuestionSnapshot.put("targetDepth", targetDepth);
+        firstQuestionSnapshot.put("aiResultStatus", "success");
         firstQuestionSnapshot.put("hintAvailable", true);
 
         InterviewSession update = new InterviewSession();
@@ -334,6 +335,8 @@ public class InterviewService {
         dto.setStem((String) snapshot.get("stem"));
         dto.setTargetSkill((String) snapshot.get("targetSkill"));
         dto.setTargetDepth((String) snapshot.get("targetDepth"));
+        Object aiResultStatus = snapshot.get("aiResultStatus");
+        dto.setAiResultStatus(aiResultStatus instanceof String ? (String) aiResultStatus : null);
         Object hintAvailable = snapshot.get("hintAvailable");
         dto.setHintAvailable(hintAvailable instanceof Boolean ? (Boolean) hintAvailable : true);
         return dto;

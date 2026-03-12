@@ -1,11 +1,8 @@
 package com.a05.aiinterview.interview.service;
 
 import com.a05.aiinterview.ai.AiClient;
-import com.a05.aiinterview.ai.config.PromptProperties;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
-import com.a05.aiinterview.ai.entity.AiInvocationLog;
-import com.a05.aiinterview.ai.service.AiInvocationLogService;
 import com.a05.aiinterview.interview.dto.SseDeltaEvent;
 import com.a05.aiinterview.interview.dto.SseDoneEvent;
 import com.a05.aiinterview.interview.dto.SseErrorEvent;
@@ -67,11 +64,9 @@ import java.util.stream.Collectors;
 public class QuestionStreamService {
 
     private final AiClient aiClient;
-    private final PromptProperties promptProperties;
     private final InterviewSessionMapper interviewSessionMapper;
     private final InterviewQuestionMapper interviewQuestionMapper;
     private final InterviewAttemptMapper interviewAttemptMapper;
-    private final AiInvocationLogService aiInvocationLogService;
     private final RagRetrievalService ragRetrievalService;
     private final TtsService ttsService;
     private final StringRedisTemplate redisTemplate;
@@ -194,7 +189,6 @@ public class QuestionStreamService {
                         redisTemplate.opsForValue().set(statusKey, STATUS_DONE, cacheTtlSeconds, TimeUnit.SECONDS);
                         redisTemplate.opsForValue().set(questionIdKey, String.valueOf(question.getId()),
                                 cacheTtlSeconds, TimeUnit.SECONDS);
-                        recordStreamLog(session, question.getId(), true, null, chunkIndex.get());
                         boolean ttsReady = ttsService.triggerQuestionAudioAsync(
                                 session.getId(), question.getId(), finalStem);
                         completionSink.tryEmitValue(buildDoneEvent(
@@ -203,7 +197,6 @@ public class QuestionStreamService {
                         log.error("题目流式生成后保存失败, attemptId={}", attemptId, e);
                         String statusKey = String.format(KEY_STATUS, attemptId);
                         redisTemplate.opsForValue().set(statusKey, STATUS_ERROR, cacheTtlSeconds, TimeUnit.SECONDS);
-                        recordStreamLog(session, null, false, e.getMessage(), chunkIndex.get());
                         completionSink.tryEmitValue(buildErrorEvent("SAVE_FAILED", "题目保存失败，请稍后重试"));
                     }
                 })
@@ -212,7 +205,6 @@ public class QuestionStreamService {
                     log.error("AI 题目流式生成异常, sessionId={}, attemptId={}", session.getId(), attemptId, e);
                     String statusKey = String.format(KEY_STATUS, attemptId);
                     redisTemplate.opsForValue().set(statusKey, STATUS_ERROR, cacheTtlSeconds, TimeUnit.SECONDS);
-                    recordStreamLog(session, null, false, e.getMessage(), chunkIndex.get());
                     completionSink.tryEmitValue(
                             buildErrorEvent("AI_STREAM_ERROR", "题目生成服务暂时不可用，" +
                                     (e.getMessage() != null ? e.getMessage() : "请稍后重试")));
@@ -332,6 +324,9 @@ public class QuestionStreamService {
                 .collect(Collectors.toList());
 
         QuestionGenerationInput input = QuestionGenerationInput.builder()
+                .interviewId(session.getId())
+                .questionId(null)
+                .variantId(null)
                 .positionCode(session.getTargetRole())
                 .mode(session.getMode())
                 .experienceLevel(session.getExperienceLevel())
@@ -393,29 +388,6 @@ public class QuestionStreamService {
         log.info("题目流式生成保存成功, sessionId={}, questionNo={}, questionId={}",
                 session.getId(), nextQuestionNo, question.getId());
         return question;
-    }
-
-    /**
-     * 异步记录流式 AI 调用日志，含成功状态、错误信息、token 数量等。
-     */
-    private void recordStreamLog(InterviewSession session, Long questionId,
-                                  boolean success, String errorMsg, int tokenCount) {
-        AiInvocationLog logEntry = AiInvocationLog.builder()
-                .sessionId(session.getId())
-                .questionId(questionId)
-                .userId(session.getUserId())
-                .promptCode("question_generation_stream")
-                .promptVersion(promptProperties.resolveVersion("question_generation_stream"))
-                .modelProvider(session.getModelProvider() != null ? session.getModelProvider() : "unknown")
-                .modelName(session.getModelName() != null ? session.getModelName() : "")
-                .requestTokens(0)
-                .responseTokens(tokenCount)
-                .latencyMs(0)
-                .success(success)
-                .errorMessage(errorMsg)
-                .createdAt(LocalDateTime.now())
-                .build();
-        aiInvocationLogService.saveAsync(logEntry);
     }
 
     // ==================== SSE 事件构建 ====================

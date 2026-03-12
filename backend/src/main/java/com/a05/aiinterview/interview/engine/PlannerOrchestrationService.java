@@ -1,12 +1,8 @@
 package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.AiClient;
-import com.a05.aiinterview.ai.config.PromptProperties;
-import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.PlannerInput;
 import com.a05.aiinterview.ai.dto.PlannerOutput;
-import com.a05.aiinterview.ai.entity.AiInvocationLog;
-import com.a05.aiinterview.ai.service.AiInvocationLogService;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
@@ -50,8 +46,6 @@ public class PlannerOrchestrationService {
     private final ResumeMapper resumeMapper;
     private final PositionService positionService;
     private final AiClient aiClient;
-    private final PromptProperties promptProperties;
-    private final AiInvocationLogService aiInvocationLogService;
     private final StateLedgerInitService stateLedgerInitService;
     private final FirstQuestionGenerationService firstQuestionGenerationService;
     private final ObjectMapper objectMapper;
@@ -80,7 +74,7 @@ public class PlannerOrchestrationService {
 
             PlannerInput plannerInput = buildPlannerInput(session, resumeText, domains);
 
-            PlannerOutput plannerOutput = callPlannerWithLog(session, plannerInput);
+            PlannerOutput plannerOutput = aiClient.callPlanner(plannerInput).getOutput();
 
             validateAndFillPlannerOutput(plannerOutput, sessionId);
 
@@ -142,6 +136,9 @@ public class PlannerOrchestrationService {
                 .collect(Collectors.toList());
 
         return PlannerInput.builder()
+                .interviewId(session.getId())
+                .questionId(null)
+                .variantId(null)
                 .positionCode(session.getTargetRole())
                 .positionName(resolvePositionName(session.getTargetRole()))
                 .experienceLevel(session.getExperienceLevel())
@@ -151,45 +148,6 @@ public class PlannerOrchestrationService {
                 .focusTopics(session.getFocusTopics())
                 .domains(domainInfos)
                 .build();
-    }
-
-    /**
-     * 调用 AI Planner 生成考纲，并记录调用日志（含 Token 消耗、耗时）。
-     */
-    private PlannerOutput callPlannerWithLog(InterviewSession session, PlannerInput input) {
-        boolean success = true;
-        String errorMessage = null;
-        AiCallResult<PlannerOutput> result = null;
-
-        try {
-            result = aiClient.callPlanner(input);
-            return result.getOutput();
-        } catch (Exception e) {
-            success = false;
-            errorMessage = e.getMessage();
-            log.error("Planner AI 调用失败, sessionId={}", session.getId(), e);
-            throw e;
-        } finally {
-            int latencyMs = result != null ? (int) result.getLatencyMs() : 0;
-            int promptTokens = result != null ? result.getPromptTokens() : 0;
-            int responseTokens = result != null ? result.getResponseTokens() : 0;
-
-            AiInvocationLog logEntry = AiInvocationLog.builder()
-                    .sessionId(session.getId())
-                    .userId(session.getUserId())
-                    .promptCode("planner")
-                    .promptVersion(promptProperties.resolveVersion("planner"))
-                    .modelProvider(session.getModelProvider() != null ? session.getModelProvider() : "mock")
-                    .modelName(session.getModelName() != null ? session.getModelName() : "")
-                    .requestTokens(promptTokens)
-                    .responseTokens(responseTokens)
-                    .latencyMs(latencyMs)
-                    .success(success)
-                    .errorMessage(errorMessage)
-                    .createdAt(LocalDateTime.now())
-                    .build();
-            aiInvocationLogService.saveAsync(logEntry);
-        }
     }
 
     /**
@@ -216,8 +174,17 @@ public class PlannerOrchestrationService {
         snapshot.put("stem", q.getStem());
         snapshot.put("targetSkill", q.getTargetSkill());
         snapshot.put("targetDepth", q.getTargetDepth());
+        snapshot.put("aiResultStatus", resolveAiResultStatus(q));
         snapshot.put("hintAvailable", true);
         return snapshot;
+    }
+
+    private String resolveAiResultStatus(InterviewQuestion question) {
+        if (question.getGenerationContextJson() == null) {
+            return null;
+        }
+        Object value = question.getGenerationContextJson().get("aiResultStatus");
+        return value instanceof String s ? s : null;
     }
 
     /**

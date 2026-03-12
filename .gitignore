@@ -36,10 +36,7 @@ application-local.properties
 out/
 
 # VS Code
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
+.vscode/
 *.code-workspace
 # VS Code 本地历史记录插件缓存
 .history/

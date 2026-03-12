@@ -1,8 +1,10 @@
 package com.a05.aiinterview.ai.impl;
 
 import com.a05.aiinterview.ai.AiClient;
+import com.a05.aiinterview.ai.config.PromptProperties;
 import com.a05.aiinterview.ai.dto.*;
 import com.a05.aiinterview.common.enums.DomainStatus;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -25,8 +27,11 @@ import java.util.Objects;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 @ConditionalOnProperty(name = "ai.openai.mock-enabled", havingValue = "true", matchIfMissing = true)
 public class MockAiClient implements AiClient {
+
+    private final PromptProperties promptProperties;
 
     // ───────────────────────────── Planner ──────────────────────────────────
 
@@ -64,7 +69,7 @@ public class MockAiClient implements AiClient {
         output.setProjects(List.of());
 
         log.info("[MockAI] callPlanner 完成，共规划 {} 个知识域", output.getDomains().size());
-        return mockResult(output, startMs);
+        return mockResult(output, startMs, "planner");
     }
 
     // ────────────────────────── QuestionGeneration ──────────────────────────
@@ -87,7 +92,7 @@ public class MockAiClient implements AiClient {
         output.setTargetDepth(input.getTargetDepth() != null ? input.getTargetDepth() : "L3");
 
         log.info("[MockAI] callQuestionGeneration 完成，stem 长度={}", stem.length());
-        return mockResult(output, startMs);
+        return mockResult(output, startMs, "question_generation");
     }
 
     /**
@@ -99,6 +104,16 @@ public class MockAiClient implements AiClient {
         String stem = buildMockStem(input.getNextDomainName(), input.getNextQuestionType());
         return Flux.fromArray(stem.split(""))
                 .delayElements(Duration.ofMillis(30));
+    }
+
+    @Override
+    public AiCallResult<String> callIntroRewrite(IntroRewriteInput input) {
+        log.info("[MockAI] callIntroRewrite, positionCode={}, experienceLevel={}",
+                input.getPositionCode(), input.getExperienceLevel());
+        long startMs = System.currentTimeMillis();
+
+        String rewritten = buildMockIntroRewrite(input);
+        return mockResult(rewritten, startMs, "intro_rewrite");
     }
 
     // ────────────────────────── EvaluationDecision ──────────────────────────
@@ -137,7 +152,7 @@ public class MockAiClient implements AiClient {
                 .reasoning("[Mock] 候选人回答达标，进入下一知识域。")
                 .build();
 
-        return mockResult(output, startMs);
+        return mockResult(output, startMs, "evaluation_decision");
     }
 
     // ─────────────────────────── ReportGeneration ───────────────────────────
@@ -179,7 +194,7 @@ public class MockAiClient implements AiClient {
                 .skillDomainScores(domainScores)
                 .build();
 
-        return mockResult(output, startMs);
+        return mockResult(output, startMs, "report_generation");
     }
 
     // ──────────────────────────── 私有工具 ──────────────────────────────────
@@ -187,9 +202,11 @@ public class MockAiClient implements AiClient {
     /**
      * 构造 Mock 结果：promptTokens / responseTokens 填 0，latencyMs 取实际耗时。
      */
-    private <T> AiCallResult<T> mockResult(T output, long startMs) {
+    private <T> AiCallResult<T> mockResult(T output, long startMs, String promptCode) {
         return AiCallResult.<T>builder()
                 .output(output)
+                .promptCode(promptCode)
+                .promptVersion(promptProperties.resolveVersion(promptCode))
                 .promptTokens(0)
                 .responseTokens(0)
                 .latencyMs(System.currentTimeMillis() - startMs)
@@ -211,6 +228,14 @@ public class MockAiClient implements AiClient {
             return "请描述一次你在团队中主导解决技术难题的经历，重点说明你是如何推动问题解决的。";
         }
         return "请详细介绍一下 " + domain + " 的核心原理，并结合你的项目经验说明实际应用场景和遇到过的挑战。";
+    }
+
+    private String buildMockIntroRewrite(IntroRewriteInput input) {
+        String base = input.getBasePrompt();
+        if (base == null || base.isBlank()) {
+            return "请先做一个简短的自我介绍，重点讲讲你的技术背景和最近的项目经历。";
+        }
+        return base.trim();
     }
 
     /**

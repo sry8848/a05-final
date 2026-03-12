@@ -1,4 +1,4 @@
-﻿# Planner Prompt
+# Planner Prompt
 
 promptCode: planner
 promptVersion: v1

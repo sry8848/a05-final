@@ -1,5 +1,7 @@
-﻿/**
- * 绠€鍘嗙鐞嗙浉鍏?API锛屼笌 docs/api-design.md 搂5 绾﹀畾涓€鑷淬€? * code=0 鎴愬姛锛岄潪 0 鎶?Error(message)銆? */
+/**
+ * 简历管理相关 API，与 docs/api-design.md 第5 约定一致。
+ * code=0 成功，非 0 报 Error(message)。
+ */
 
 const BASE = '/api/v1'
 
@@ -16,12 +18,12 @@ async function request(path, options = {}) {
   }
   const res = await fetch(url, { ...options, headers, body })
   const json = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(json.message || res.statusText || '璇锋眰澶辫触')
-  if (json.code !== 0) throw new Error(json.message || '璇锋眰澶辫触')
+  if (!res.ok) throw new Error(json.message || res.statusText || '请求失败')
+  if (json.code !== 0) throw new Error(json.message || '请求失败')
   return json.data
 }
 
-/** 涓婁紶鏂囦欢锛氫笉璁剧疆 Content-Type锛岀敱娴忚鍣ㄨ缃?multipart/form-data */
+/** 上传文件：不设置 Content-Type，由浏览器设置 multipart/form-data */
 async function uploadRequest(path, formData) {
   const url = BASE + path
   const res = await fetch(url, {
@@ -30,7 +32,7 @@ async function uploadRequest(path, formData) {
     body: formData
   })
   const json = await res.json().catch(() => ({}))
-  const rawMessage = json.message || res.statusText || '涓婁紶澶辫触'
+  const rawMessage = json.message || res.statusText || '上传失败'
   const message = toResumeUploadMessage(res.status, rawMessage)
   if (!res.ok) throw new Error(message)
   if (json.code !== 0) throw new Error(message)
@@ -38,17 +40,17 @@ async function uploadRequest(path, formData) {
 }
 
 /**
- * 灏嗕笂浼犵浉鍏抽敊璇浆涓轰腑鏂囨彁绀猴紝渚夸簬鍓嶇灞曠ず
- * @param {number} status - HTTP 鐘舵€佺爜
- * @param {string} rawMessage - 鏈嶅姟绔垨娴忚鍣ㄨ繑鍥炵殑鍘熷鏂囨
+ * 将上传相关错误转为中文提示，便于前端展示
+ * @param {number} status - HTTP 状态码
+ * @param {string} rawMessage - 服务端或浏览器返回的原始文案
  */
 function toResumeUploadMessage(status, rawMessage) {
-  if (status === 413) return '涓婁紶鏂囦欢杩囧ぇ锛岃閫夋嫨涓嶈秴杩?20MB 鐨?PDF 鎴?DOCX 鏂囦欢'
+  if (status === 413) return '上传文件过大，请选择不超过 20MB 的 PDF 或 DOCX 文件'
   const lower = (rawMessage || '').toLowerCase()
   if (/maximum.*size|size.*exceeded|exceeded.*size|file.*too large|payload too large/.test(lower)) {
-    return '涓婁紶鏂囦欢杩囧ぇ锛岃閫夋嫨涓嶈秴杩?20MB 鐨?PDF 鎴?DOCX 鏂囦欢'
+    return '上传文件过大，请选择不超过 20MB 的 PDF 或 DOCX 文件'
   }
-  return rawMessage || '涓婁紶澶辫触'
+  return rawMessage || '上传失败'
 }
 
 function getAuthHeader() {
@@ -57,15 +59,16 @@ function getAuthHeader() {
 }
 
 /**
- * 鑾峰彇绠€鍘嗗垪琛? * @returns {Promise<Array<{ id: number, name: string, sourceType: string, parseStatus: string, isDefault: boolean, createdAt: string }>>
+ * 获取简历列表
+ * @returns {Promise<Array<{ id: number, name: string, sourceType: string, parseStatus: string, isDefault: boolean, createdAt: string }>>}
  */
 export function getResumes() {
   return request('/resumes', { method: 'GET' })
 }
 
 /**
- * 涓婁紶绠€鍘嗗苟鍙戣捣瑙ｆ瀽
- * @param {File} file - PDF 鎴?DOCX
+ * 上传简历并发起解析
+ * @param {File} file - PDF 或 DOCX
  * @returns {Promise<{ resumeId: number, parseStatus: string }>}
  */
 export function uploadResume(file) {
@@ -75,7 +78,8 @@ export function uploadResume(file) {
 }
 
 /**
- * 鏌ヨ绠€鍘嗚В鏋愮姸鎬? * @param {number} resumeId
+ * 查询简历解析状态
+ * @param {number} resumeId
  * @returns {Promise<{ resumeId: number, parseStatus: string, parsedTextPreview?: string }>}
  */
 export function getParseStatus(resumeId) {
@@ -83,14 +87,15 @@ export function getParseStatus(resumeId) {
 }
 
 /**
- * 鑾峰彇绠€鍘嗚鎯咃紙鍚?parsedText锛? * @param {number} resumeId
+ * 获取简历详情（含 parsedText）
+ * @param {number} resumeId
  */
 export function getResume(resumeId) {
   return request(`/resumes/${resumeId}`, { method: 'GET' })
 }
 
 /**
- * 鏇存柊绠€鍘嗭紙鍚嶇О銆佽瘑鍒枃鏈€佹槸鍚﹂粯璁わ級
+ * 更新简历（名称、识别文本、是否默认）
  * @param {number} resumeId
  * @param {{ name?: string, parsedText?: string, isDefault?: boolean }} payload
  */
@@ -101,12 +106,12 @@ export function updateResume(resumeId, payload) {
   })
 }
 
-/** 璁句负榛樿绠€鍘?*/
+/** 设为默认简历 */
 export function setDefaultResume(resumeId) {
   return request(`/resumes/${resumeId}/set-default`, { method: 'POST' })
 }
 
-/** 鍒犻櫎绠€鍘?*/
+/** 删除简历 */
 export function deleteResume(resumeId) {
   return request(`/resumes/${resumeId}`, { method: 'DELETE' })
 }
@@ -146,6 +151,7 @@ export function getInterviewReport(sessionId) {
 export function getLearningRecommendations(sessionId) {
   return request('/interviews/' + sessionId + '/report/learning-recommendations', { method: 'GET' })
 }
+
 function parseSsePayload(raw) {
   if (!raw) return null
   try {
@@ -154,7 +160,6 @@ function parseSsePayload(raw) {
     return { text: raw }
   }
 }
-
 
 /** Stream interview question via fetch-based SSE */
 export async function streamInterviewQuestion(sessionId, attemptId, handlers = {}, signal) {
@@ -236,12 +241,3 @@ export async function streamInterviewQuestion(sessionId, attemptId, handlers = {
     reader.releaseLock()
   }
 }
-
-
-
-
-
-
-
-
-

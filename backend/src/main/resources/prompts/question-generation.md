@@ -43,6 +43,9 @@ promptVersion: v1
 候选人岗位：{{positionCode}}，工作年限：{{experienceLevel}}
 面试模式：{{mode}}
 
+参考知识库内容：
+{{ragContext}}
+
 已问过的题目（避免重复）：
 {{askedQuestions}}
 

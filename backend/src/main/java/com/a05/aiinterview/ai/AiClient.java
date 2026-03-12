@@ -3,6 +3,7 @@ package com.a05.aiinterview.ai;
 import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionInput;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
+import com.a05.aiinterview.ai.dto.IntroRewriteInput;
 import com.a05.aiinterview.ai.dto.PlannerInput;
 import com.a05.aiinterview.ai.dto.PlannerOutput;
 import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
@@ -47,6 +48,14 @@ public interface AiClient {
      * @return 字符 Token 的响应式流
      */
     Flux<String> callQuestionGenerationStream(QuestionGenerationInput input);
+
+    /**
+     * 调用 INTRO 改写服务，将底稿改写为更自然的首题提问话术。
+     *
+     * @param input 包含候选人上下文、底稿和历史禁用语句
+     * @return 改写后的纯文本题干及 Prompt 元数据
+     */
+    AiCallResult<String> callIntroRewrite(IntroRewriteInput input);
 
     /**
      * 调用评估决策服务，对候选人回答评估并决策下一题策略。

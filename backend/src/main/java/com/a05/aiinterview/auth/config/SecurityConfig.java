@@ -1,5 +1,6 @@
 package com.a05.aiinterview.auth.config;
 
+import com.a05.aiinterview.common.TraceContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
@@ -64,7 +65,12 @@ public class SecurityConfig {
                             res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                             res.setContentType(MediaType.APPLICATION_JSON_VALUE);
                             res.setCharacterEncoding(StandardCharsets.UTF_8.name());
-                            res.getWriter().write("{\"code\":401,\"message\":\"未登录\",\"data\":null,\"traceId\":null}");
+                            String traceId = TraceContext.getOrCreateTraceId();
+                            String requestId = TraceContext.getOrCreateRequestId();
+                            res.setHeader(TraceContext.TRACE_ID_HEADER, traceId);
+                            res.setHeader(TraceContext.REQUEST_ID_HEADER, requestId);
+                            res.getWriter().write("{\"code\":401,\"message\":\"未登录\",\"data\":null,\"traceId\":\""
+                                    + traceId + "\"}");
                         })
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

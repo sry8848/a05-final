@@ -1,8 +1,12 @@
 package com.a05.aiinterview.ai.config;
 
+import com.a05.aiinterview.ai.prompt.PromptCode;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
+
+import java.util.EnumMap;
+import java.util.Map;
 
 /**
  * Prompt version configuration for each prompt code.
@@ -20,14 +24,25 @@ public class PromptProperties {
     private String introRewrite = "v1";
 
     public String resolveVersion(String promptCode) {
+        return resolveVersion(PromptCode.fromCode(promptCode));
+    }
+
+    public String resolveVersion(PromptCode promptCode) {
         return switch (promptCode) {
-            case "planner" -> planner;
-            case "question_generation" -> questionGeneration;
-            case "question_generation_stream" -> questionGenerationStream;
-            case "evaluation_decision" -> evaluationDecision;
-            case "report_generation" -> reportGeneration;
-            case "intro_rewrite" -> introRewrite;
-            default -> throw new IllegalArgumentException("Unsupported promptCode: " + promptCode);
+            case PLANNER -> planner;
+            case QUESTION_GENERATION -> questionGeneration;
+            case QUESTION_GENERATION_STREAM -> questionGenerationStream;
+            case EVALUATION_DECISION -> evaluationDecision;
+            case REPORT_GENERATION -> reportGeneration;
+            case INTRO_REWRITE -> introRewrite;
         };
+    }
+
+    public Map<PromptCode, String> asVersionMap() {
+        Map<PromptCode, String> versions = new EnumMap<>(PromptCode.class);
+        for (PromptCode promptCode : PromptCode.values()) {
+            versions.put(promptCode, resolveVersion(promptCode));
+        }
+        return Map.copyOf(versions);
     }
 }

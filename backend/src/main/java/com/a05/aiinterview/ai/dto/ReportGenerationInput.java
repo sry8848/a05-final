@@ -15,6 +15,15 @@ import java.util.Map;
 @Builder
 public class ReportGenerationInput {
 
+    /** 面试会话 ID（审计透传） */
+    private Long interviewId;
+
+    /** 当前题目 ID（报告生成场景通常为空，统一审计字段保留） */
+    private Long questionId;
+
+    /** 题目变体 ID（报告生成场景通常为空，统一审计字段保留） */
+    private String variantId;
+
     /** 岗位编码，如 JAVA_BACKEND */
     private String positionCode;
 

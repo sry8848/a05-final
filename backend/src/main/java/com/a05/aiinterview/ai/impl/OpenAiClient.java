@@ -1,7 +1,14 @@
 package com.a05.aiinterview.ai.impl;
 
 import com.a05.aiinterview.ai.AiClient;
+import com.a05.aiinterview.ai.config.PromptProperties;
 import com.a05.aiinterview.ai.dto.*;
+import com.a05.aiinterview.ai.prompt.PromptTemplateService;
+import com.a05.aiinterview.ai.prompt.RenderedPrompt;
+import com.a05.aiinterview.common.TraceContext;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.metadata.Usage;
@@ -9,8 +16,15 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 
 /**
@@ -25,10 +39,23 @@ import reactor.core.publisher.Flux;
 @ConditionalOnProperty(name = "ai.openai.mock-enabled", havingValue = "false")
 public class OpenAiClient implements AiClient {
 
-    private final ChatClient chatClient;
+    private static final int RESPONSE_PREVIEW_MAX_LEN = 120;
 
-    public OpenAiClient(ChatModel chatModel) {
+    private final ChatClient chatClient;
+    private final PromptTemplateService promptTemplateService;
+    private final PromptProperties promptProperties;
+    private final ObjectMapper objectMapper;
+    @Value("${ai.openai.model:${OPENAI_MODEL:gpt-4o-mini}}")
+    private String configuredModel = "unknown";
+
+    public OpenAiClient(ChatModel chatModel,
+                        PromptTemplateService promptTemplateService,
+                        PromptProperties promptProperties,
+                        ObjectMapper objectMapper) {
         this.chatClient = ChatClient.builder(chatModel).build();
+        this.promptTemplateService = promptTemplateService;
+        this.promptProperties = promptProperties;
+        this.objectMapper = objectMapper;
         log.info("OpenAiClient 已初始化（Spring AI ChatClient 模式）");
     }
 
@@ -40,14 +67,49 @@ public class OpenAiClient implements AiClient {
                 input.getPositionCode(), input.getExperienceLevel());
 
         BeanOutputConverter<PlannerOutput> converter = new BeanOutputConverter<>(PlannerOutput.class);
-        String userPrompt = buildPlannerUserPrompt(input) + "\n\n" + converter.getFormat();
-
+        RenderedPrompt rendered = null;
         long startMs = System.currentTimeMillis();
-        ChatResponse response = callChat(PLANNER_SYSTEM_PROMPT, userPrompt);
-        PlannerOutput output = requireConvert(converter, response, "planner");
-        log.info("Planner 调用成功，规划知识域数={}",
-                output.getDomains() != null ? output.getDomains().size() : 0);
-        return buildResult(output, response, System.currentTimeMillis() - startMs);
+        try {
+            rendered = renderPrompt(PROMPT_CODE_PLANNER, buildPlannerVariables(input));
+            String userPrompt = rendered.getUserPrompt() + "\n\n" + converter.getFormat();
+
+            ChatResponse response = callChat(rendered.getSystemPrompt(), userPrompt);
+            PlannerOutput output = requireConvert(converter, response, "planner");
+            long latencyMs = System.currentTimeMillis() - startMs;
+
+            auditLite(
+                    rendered.getPromptCode(),
+                    rendered.getPromptVersion(),
+                    input.getInterviewId(),
+                    input.getQuestionId(),
+                    input.getVariantId(),
+                    latencyMs,
+                    "success",
+                    null,
+                    response.getResult().getOutput().getText(),
+                    null,
+                    null
+            );
+            log.info("Planner 调用成功，规划知识域数={}",
+                    output.getDomains() != null ? output.getDomains().size() : 0);
+            return buildResult(output, response, latencyMs, rendered);
+        } catch (Exception e) {
+            long latencyMs = System.currentTimeMillis() - startMs;
+            auditLite(
+                    resolvePromptCode(rendered, PROMPT_CODE_PLANNER),
+                    resolvePromptVersion(rendered, PROMPT_CODE_PLANNER),
+                    input.getInterviewId(),
+                    input.getQuestionId(),
+                    input.getVariantId(),
+                    latencyMs,
+                    "error",
+                    null,
+                    null,
+                    null,
+                    e
+            );
+            throw e;
+        }
     }
 
     // ────────────────────────── QuestionGeneration ──────────────────────────
@@ -59,26 +121,142 @@ public class OpenAiClient implements AiClient {
 
         BeanOutputConverter<QuestionGenerationOutput> converter =
                 new BeanOutputConverter<>(QuestionGenerationOutput.class);
-        String userPrompt = buildQuestionGenUserPrompt(input) + "\n\n" + converter.getFormat();
-
+        RenderedPrompt rendered = null;
         long startMs = System.currentTimeMillis();
-        ChatResponse response = callChat(QUESTION_GEN_SYSTEM_PROMPT, userPrompt);
-        QuestionGenerationOutput output = requireConvert(converter, response, "question_generation");
-        log.info("出题调用成功，stem 长度={}",
-                output.getStem() != null ? output.getStem().length() : 0);
-        return buildResult(output, response, System.currentTimeMillis() - startMs);
+        try {
+            rendered = renderPrompt(PROMPT_CODE_QUESTION_GENERATION,
+                    buildQuestionGenerationVariables(input));
+            String userPrompt = rendered.getUserPrompt() + "\n\n" + converter.getFormat();
+
+            ChatResponse response = callChat(rendered.getSystemPrompt(), userPrompt);
+            QuestionGenerationOutput output = requireConvert(converter, response, "question_generation");
+            long latencyMs = System.currentTimeMillis() - startMs;
+            auditLite(
+                    rendered.getPromptCode(),
+                    rendered.getPromptVersion(),
+                    input.getInterviewId(),
+                    input.getQuestionId(),
+                    input.getVariantId(),
+                    latencyMs,
+                    "success",
+                    null,
+                    response.getResult().getOutput().getText(),
+                    null,
+                    null
+            );
+            log.info("出题调用成功，stem 长度={}",
+                    output.getStem() != null ? output.getStem().length() : 0);
+            return buildResult(output, response, latencyMs, rendered);
+        } catch (Exception e) {
+            long latencyMs = System.currentTimeMillis() - startMs;
+            auditLite(
+                    resolvePromptCode(rendered, PROMPT_CODE_QUESTION_GENERATION),
+                    resolvePromptVersion(rendered, PROMPT_CODE_QUESTION_GENERATION),
+                    input.getInterviewId(),
+                    input.getQuestionId(),
+                    input.getVariantId(),
+                    latencyMs,
+                    "error",
+                    null,
+                    null,
+                    null,
+                    e
+            );
+            throw e;
+        }
     }
 
     @Override
     public Flux<String> callQuestionGenerationStream(QuestionGenerationInput input) {
         log.info("调用 OpenAI 出题（流式）, domainCode={}", input.getNextDomainCode());
-        String userPrompt = buildQuestionGenUserPrompt(input)
-                + "\n\n请以纯文本输出题目正文，不要输出 JSON，不要包含任何额外说明。";
+        RenderedPrompt rendered = renderPrompt(PROMPT_CODE_QUESTION_GENERATION_STREAM,
+                buildQuestionGenerationStreamVariables(input));
+        long startMs = System.currentTimeMillis();
+        AtomicInteger responseLength = new AtomicInteger(0);
         return chatClient.prompt()
-                .system(QUESTION_GEN_STREAM_SYSTEM_PROMPT)
-                .user(userPrompt)
+                .system(rendered.getSystemPrompt())
+                .user(rendered.getUserPrompt())
                 .stream()
-                .content();
+                .content()
+                .doOnNext(token -> {
+                    if (token != null) {
+                        responseLength.addAndGet(token.length());
+                    }
+                })
+                .doOnComplete(() -> auditLite(
+                        rendered.getPromptCode(),
+                        rendered.getPromptVersion(),
+                        input.getInterviewId(),
+                        input.getQuestionId(),
+                        input.getVariantId(),
+                        System.currentTimeMillis() - startMs,
+                        "success",
+                        null,
+                        null,
+                        responseLength.get(),
+                        null
+                ))
+                .doOnError(error -> auditLite(
+                        rendered.getPromptCode(),
+                        rendered.getPromptVersion(),
+                        input.getInterviewId(),
+                        input.getQuestionId(),
+                        input.getVariantId(),
+                        System.currentTimeMillis() - startMs,
+                        "error",
+                        null,
+                        null,
+                        responseLength.get(),
+                        asException(error)
+                ));
+    }
+
+    @Override
+    public AiCallResult<String> callIntroRewrite(IntroRewriteInput input) {
+        log.info("调用 OpenAI 首题改写, positionCode={}, experienceLevel={}",
+                input.getPositionCode(), input.getExperienceLevel());
+
+        RenderedPrompt rendered = null;
+        long startMs = System.currentTimeMillis();
+        try {
+            rendered = renderPrompt(PROMPT_CODE_INTRO_REWRITE, buildIntroRewriteVariables(input));
+            ChatResponse response = callChat(rendered.getSystemPrompt(), rendered.getUserPrompt());
+            String rewritten = response.getResult().getOutput().getText();
+            if (rewritten == null || rewritten.isBlank()) {
+                throw new RuntimeException("intro_rewrite AI 返回空文本");
+            }
+            long latencyMs = System.currentTimeMillis() - startMs;
+            auditLite(
+                    rendered.getPromptCode(),
+                    rendered.getPromptVersion(),
+                    input.getInterviewId(),
+                    input.getQuestionId(),
+                    input.getVariantId(),
+                    latencyMs,
+                    "success",
+                    null,
+                    rewritten,
+                    null,
+                    null
+            );
+            return buildResult(rewritten.trim(), response, latencyMs, rendered);
+        } catch (Exception e) {
+            long latencyMs = System.currentTimeMillis() - startMs;
+            auditLite(
+                    resolvePromptCode(rendered, PROMPT_CODE_INTRO_REWRITE),
+                    resolvePromptVersion(rendered, PROMPT_CODE_INTRO_REWRITE),
+                    input.getInterviewId(),
+                    input.getQuestionId(),
+                    input.getVariantId(),
+                    latencyMs,
+                    "error",
+                    null,
+                    null,
+                    null,
+                    e
+            );
+            throw e;
+        }
     }
 
     // ────────────────────────── EvaluationDecision ──────────────────────────
@@ -89,13 +267,48 @@ public class OpenAiClient implements AiClient {
 
         BeanOutputConverter<EvaluationDecisionOutput> converter =
                 new BeanOutputConverter<>(EvaluationDecisionOutput.class);// 评估决策输出转换器
-        String userPrompt = buildEvalDecisionUserPrompt(input) + "\n\n" + converter.getFormat();// 评估决策用户提示
-
+        RenderedPrompt rendered = null;
         long startMs = System.currentTimeMillis();
-        ChatResponse response = callChat(EVAL_DECISION_SYSTEM_PROMPT, userPrompt);
-        EvaluationDecisionOutput output = requireConvert(converter, response, "evaluation_decision");
-        log.info("评估决策调用成功，signal={}", output.getSignal());
-        return buildResult(output, response, System.currentTimeMillis() - startMs);
+        try {
+            String evaluationPayload = buildEvalDecisionUserPrompt(input) + "\n\n" + converter.getFormat();
+            rendered = renderPrompt(PROMPT_CODE_EVALUATION_DECISION,
+                    Map.of("evaluationPayload", evaluationPayload));
+
+            ChatResponse response = callChat(rendered.getSystemPrompt(), rendered.getUserPrompt());
+            EvaluationDecisionOutput output = requireConvert(converter, response, "evaluation_decision");
+            long latencyMs = System.currentTimeMillis() - startMs;
+            auditLite(
+                    rendered.getPromptCode(),
+                    rendered.getPromptVersion(),
+                    input.getInterviewId(),
+                    input.getCurrentQuestionId(),
+                    input.getVariantId(),
+                    latencyMs,
+                    "success",
+                    null,
+                    response.getResult().getOutput().getText(),
+                    null,
+                    null
+            );
+            log.info("评估决策调用成功，signal={}", output.getSignal());
+            return buildResult(output, response, latencyMs, rendered);
+        } catch (Exception e) {
+            long latencyMs = System.currentTimeMillis() - startMs;
+            auditLite(
+                    resolvePromptCode(rendered, PROMPT_CODE_EVALUATION_DECISION),
+                    resolvePromptVersion(rendered, PROMPT_CODE_EVALUATION_DECISION),
+                    input.getInterviewId(),
+                    input.getCurrentQuestionId(),
+                    input.getVariantId(),
+                    latencyMs,
+                    "error",
+                    null,
+                    null,
+                    null,
+                    e
+            );
+            throw e;
+        }
     }
 
     // ─────────────────────────── ReportGeneration ───────────────────────────
@@ -108,13 +321,48 @@ public class OpenAiClient implements AiClient {
 
         BeanOutputConverter<ReportGenerationOutput> converter =
                 new BeanOutputConverter<>(ReportGenerationOutput.class);
-        String userPrompt = buildReportGenUserPrompt(input) + "\n\n" + converter.getFormat();
-
+        RenderedPrompt rendered = null;
         long startMs = System.currentTimeMillis();
-        ChatResponse response = callChat(REPORT_GEN_SYSTEM_PROMPT, userPrompt);
-        ReportGenerationOutput output = requireConvert(converter, response, "report_generation");
-        log.info("报告生成调用成功，overallScore={}", output.getOverallScore());
-        return buildResult(output, response, System.currentTimeMillis() - startMs);
+        try {
+            String reportPayload = buildReportGenUserPrompt(input) + "\n\n" + converter.getFormat();
+            rendered = renderPrompt(PROMPT_CODE_REPORT_GENERATION,
+                    Map.of("reportPayload", reportPayload));
+
+            ChatResponse response = callChat(rendered.getSystemPrompt(), rendered.getUserPrompt());
+            ReportGenerationOutput output = requireConvert(converter, response, "report_generation");
+            long latencyMs = System.currentTimeMillis() - startMs;
+            auditLite(
+                    rendered.getPromptCode(),
+                    rendered.getPromptVersion(),
+                    input.getInterviewId(),
+                    input.getQuestionId(),
+                    input.getVariantId(),
+                    latencyMs,
+                    "success",
+                    null,
+                    response.getResult().getOutput().getText(),
+                    null,
+                    null
+            );
+            log.info("报告生成调用成功，overallScore={}", output.getOverallScore());
+            return buildResult(output, response, latencyMs, rendered);
+        } catch (Exception e) {
+            long latencyMs = System.currentTimeMillis() - startMs;
+            auditLite(
+                    resolvePromptCode(rendered, PROMPT_CODE_REPORT_GENERATION),
+                    resolvePromptVersion(rendered, PROMPT_CODE_REPORT_GENERATION),
+                    input.getInterviewId(),
+                    input.getQuestionId(),
+                    input.getVariantId(),
+                    latencyMs,
+                    "error",
+                    null,
+                    null,
+                    null,
+                    e
+            );
+            throw e;
+        }
     }
 
     // ──────────────────────────── 公共工具 ──────────────────────────────────
@@ -154,7 +402,10 @@ public class OpenAiClient implements AiClient {
     /**
      * 从 ChatResponse 中提取 Token 消耗，包装为 AiCallResult。
      */
-    private <T> AiCallResult<T> buildResult(T output, ChatResponse response, long latencyMs) {
+    private <T> AiCallResult<T> buildResult(T output,
+                                            ChatResponse response,
+                                            long latencyMs,
+                                            RenderedPrompt renderedPrompt) {
         Usage usage = response.getMetadata().getUsage();
         int promptTokens = 0;
         int responseTokens = 0;
@@ -170,90 +421,138 @@ public class OpenAiClient implements AiClient {
         }
         return AiCallResult.<T>builder()
                 .output(output)
+                .promptCode(renderedPrompt.getPromptCode())
+                .promptVersion(renderedPrompt.getPromptVersion())
                 .promptTokens(promptTokens)
                 .responseTokens(responseTokens)
                 .latencyMs(latencyMs)
                 .build();
     }
 
-    // ──────────────────────────── Prompt 构造 ────────────────────────────────
+    private void auditLite(String promptCode,
+                           String promptVersion,
+                           Long interviewId,
+                           Long questionId,
+                           String variantId,
+                           long latencyMs,
+                           String status,
+                           String fallbackReason,
+                           String responseText,
+                           Integer responseLength,
+                           Exception error) {
+        try {
+            ObjectNode audit = objectMapper.createObjectNode();
+            audit.put("traceId", TraceContext.getOrCreateTraceId());
+            audit.put("requestId", TraceContext.getOrCreateRequestId());
+            putNullableLong(audit, "interviewId", interviewId);
+            putNullableLong(audit, "questionId", questionId);
+            audit.put("promptCode", safeString(promptCode));
+            audit.put("variantId", variantId == null ? "" : variantId);
+            audit.put("model", resolveModelName());
+            audit.put("latencyMs", Math.max(0, latencyMs));
+            audit.put("status", status);
+            audit.put("fallbackReason", fallbackReason == null ? "" : fallbackReason);
+            audit.put("promptVersion", safeString(promptVersion));
 
-    private static final String PLANNER_SYSTEM_PROMPT = """
-            你是一名经验丰富的技术面试官，擅长设计面试考纲。
-            请根据候选人信息生成结构化的面试考纲，严格按照 JSON Schema 格式输出，不要输出任何额外文字。
-            """;
+            if (responseText != null) {
+                audit.put("responsePreview", truncateForLog(responseText, RESPONSE_PREVIEW_MAX_LEN));
+                audit.put("responseLength", responseText.length());
+            } else if (responseLength != null) {
+                audit.put("responseLength", Math.max(0, responseLength));
+            } else {
+                audit.put("responseLength", 0);
+            }
 
-    private static final String QUESTION_GEN_SYSTEM_PROMPT = """
-            你是一名技术面试官，正在进行一场模拟面试。
-            请根据要求出一道面试题，严格按照 JSON Schema 格式输出，不要输出任何额外文字。
-            """;
-
-    private static final String QUESTION_GEN_STREAM_SYSTEM_PROMPT = """
-            你是一名技术面试官，正在进行一场模拟面试。
-            请用自然语言口语化地提问，直接输出题目文本，不要包含 JSON 或 Markdown。
-            """;
-
-    private static final String EVAL_DECISION_SYSTEM_PROMPT = """
-            你是一名技术面试考官，需要对候选人的回答进行评估，并决定下一步面试策略。
-            请严格按照 JSON Schema 格式输出评估决策结果，不要输出任何额外文字。
-            """;
-
-    private static final String REPORT_GEN_SYSTEM_PROMPT = """
-            你是一名技术面试评委，需要根据本场面试的完整 Q/A 记录生成评估报告。
-            请严格按照 JSON Schema 格式输出报告，不要输出任何额外文字。
-            """;
-
-    private String buildPlannerUserPrompt(PlannerInput input) {
-        StringBuilder sb = new StringBuilder("请为以下候选人生成面试考纲：\n\n");
-        sb.append("岗位：").append(input.getPositionName())
-                .append("（").append(input.getPositionCode()).append("）\n");
-        sb.append("工作年限：").append(input.getExperienceLevel()).append("\n");
-        sb.append("面试模式：").append(input.getMode()).append("\n");
-
-        if (input.getJobDescription() != null && !input.getJobDescription().isBlank()) {
-            sb.append("JD 内容：\n")
-                    .append(input.getJobDescription(), 0,
-                            Math.min(500, input.getJobDescription().length()))
-                    .append("\n");
+            if (error != null) {
+                audit.put("errorType", error.getClass().getSimpleName());
+                audit.put("errorMessage", truncateForLog(error.getMessage(), 200));
+            }
+            log.info("ai_lite_audit={}", audit);
+        } catch (Exception logError) {
+            log.warn("ai_lite_audit 记录失败, promptCode={}, status={}", promptCode, status, logError);
         }
-        if (input.getResumeText() != null && !input.getResumeText().isBlank()) {
-            sb.append("简历内容：\n")
-                    .append(input.getResumeText(), 0,
-                            Math.min(1000, input.getResumeText().length()))
-                    .append("\n");
-        }
-        if (input.getFocusTopics() != null && !input.getFocusTopics().isBlank()) {
-            sb.append("候选人希望重点考察：").append(input.getFocusTopics()).append("\n");
-        }
-        if (input.getDomains() != null && !input.getDomains().isEmpty()) {
-            sb.append("\n可考察的知识域列表：\n");
-            input.getDomains().forEach(d ->
-                    sb.append("- id=").append(d.getDomainId())
-                            .append(", code=").append(d.getDomainCode())
-                            .append(", name=").append(d.getDomainName()).append("\n"));
-        }
-        return sb.toString();
     }
 
-    private String buildQuestionGenUserPrompt(QuestionGenerationInput input) {
-        StringBuilder sb = new StringBuilder("请出一道面试题，要求如下：\n\n");
-        sb.append("知识域：").append(input.getNextDomainName())
-                .append("（").append(input.getNextDomainCode()).append("）\n");
-        sb.append("题目类型：").append(input.getNextQuestionType()).append("\n");
-        sb.append("目标深度：").append(input.getTargetDepth()).append("\n");
-        sb.append("候选人岗位：").append(input.getPositionCode())
-                .append("，年限：").append(input.getExperienceLevel()).append("\n");
-        sb.append("面试模式：").append(input.getMode()).append("\n");
+    private void putNullableLong(ObjectNode audit, String fieldName, Long value) {
+        if (value == null) {
+            audit.putNull(fieldName);
+            return;
+        }
+        audit.put(fieldName, value);
+    }
 
-        if (input.getRagContext() != null && !input.getRagContext().isBlank()) {
-            sb.append("\n参考知识库内容：\n").append(input.getRagContext()).append("\n");
+    private String resolvePromptCode(RenderedPrompt rendered, String defaultCode) {
+        if (rendered == null || rendered.getPromptCode() == null || rendered.getPromptCode().isBlank()) {
+            return defaultCode;
         }
-        if (input.getAskedQuestions() != null && !input.getAskedQuestions().isEmpty()) {
-            sb.append("\n已问过的题目（避免重复）：\n");
-            input.getAskedQuestions().forEach(q ->
-                    sb.append("- ").append(q.getStemSummary()).append("\n"));
+        return rendered.getPromptCode();
+    }
+
+    private String resolvePromptVersion(RenderedPrompt rendered, String promptCode) {
+        if (rendered == null || rendered.getPromptVersion() == null || rendered.getPromptVersion().isBlank()) {
+            return promptProperties.resolveVersion(promptCode);
         }
-        return sb.toString();
+        return rendered.getPromptVersion();
+    }
+
+    private String resolveModelName() {
+        if (configuredModel == null || configuredModel.isBlank()) {
+            return "unknown";
+        }
+        return configuredModel;
+    }
+
+    private Exception asException(Throwable throwable) {
+        if (throwable instanceof Exception e) {
+            return e;
+        }
+        return new RuntimeException(throwable);
+    }
+
+    // ──────────────────────────── Prompt 构造 ────────────────────────────────
+
+    private static final String PROMPT_CODE_PLANNER = "planner";
+    private static final String PROMPT_CODE_QUESTION_GENERATION = "question_generation";
+    private static final String PROMPT_CODE_EVALUATION_DECISION = "evaluation_decision";
+    private static final String PROMPT_CODE_REPORT_GENERATION = "report_generation";
+    private static final String PROMPT_CODE_QUESTION_GENERATION_STREAM = "question_generation_stream";
+    private static final String PROMPT_CODE_INTRO_REWRITE = "intro_rewrite";
+
+    private Map<String, Object> buildPlannerVariables(PlannerInput input) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("position", safeString(input.getPositionName()));
+        variables.put("positionCode", safeString(input.getPositionCode()));
+        variables.put("experienceLevel", safeString(input.getExperienceLevel()));
+        variables.put("mode", safeString(input.getMode()));
+        variables.put("jd", truncate(input.getJobDescription(), 500));
+        variables.put("resumeText", truncate(input.getResumeText(), 1000));
+        variables.put("focusTopics", safeString(input.getFocusTopics()));
+        variables.put("domains", formatDomains(input.getDomains()));
+        return variables;
+    }
+
+    private Map<String, Object> buildQuestionGenerationVariables(QuestionGenerationInput input) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("nextDomainName", safeString(input.getNextDomainName()));
+        variables.put("nextDomainCode", safeString(input.getNextDomainCode()));
+        variables.put("nextQuestionType", safeString(input.getNextQuestionType()));
+        variables.put("targetDepth", safeString(input.getTargetDepth()));
+        variables.put("positionCode", safeString(input.getPositionCode()));
+        variables.put("experienceLevel", safeString(input.getExperienceLevel()));
+        variables.put("mode", safeString(input.getMode()));
+        variables.put("askedQuestions", formatAskedQuestions(input.getAskedQuestions()));
+        variables.put("ragContext", safeString(input.getRagContext()));
+        variables.put("syllabus", stringifyAsJson(input.getSyllabus()));
+        return variables;
+    }
+
+    private Map<String, Object> buildIntroRewriteVariables(IntroRewriteInput input) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("candidateContext", buildCandidateContext(input));
+        variables.put("basePrompt", safeString(input.getBasePrompt()));
+        variables.put("recentPrompts", formatBulletLines(input.getRecentPrompts()));
+        variables.put("avoidPhrases", formatBulletLines(input.getAvoidPhrases()));
+        return variables;
     }
 
     private String buildEvalDecisionUserPrompt(EvaluationDecisionInput input) {
@@ -315,5 +614,125 @@ public class OpenAiClient implements AiClient {
             });
         }
         return sb.toString();
+    }
+
+    private RenderedPrompt renderPrompt(String promptCode, Map<String, Object> variables) {
+        String promptVersion = promptProperties.resolveVersion(promptCode);
+        RenderedPrompt rendered = promptTemplateService.render(promptCode, promptVersion, variables);
+        log.info("Prompt 渲染完成, promptCode={}, promptVersion={}",
+                rendered.getPromptCode(), rendered.getPromptVersion());
+        return rendered;
+    }
+
+    private Map<String, Object> buildQuestionGenerationStreamVariables(QuestionGenerationInput input) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("nextDomainName", safeString(input.getNextDomainName()));
+        variables.put("nextDomainCode", safeString(input.getNextDomainCode()));
+        variables.put("nextQuestionType", safeString(input.getNextQuestionType()));
+        variables.put("targetDepth", safeString(input.getTargetDepth()));
+        variables.put("positionCode", safeString(input.getPositionCode()));
+        variables.put("experienceLevel", safeString(input.getExperienceLevel()));
+        variables.put("mode", safeString(input.getMode()));
+        variables.put("askedQuestions", formatAskedQuestions(input.getAskedQuestions()));
+        variables.put("syllabus", stringifyAsJson(input.getSyllabus()));
+        return variables;
+    }
+
+    private String formatAskedQuestions(List<QuestionGenerationInput.AskedQuestion> askedQuestions) {
+        if (askedQuestions == null || askedQuestions.isEmpty()) {
+            return "- 无";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (QuestionGenerationInput.AskedQuestion question : askedQuestions) {
+            String summary = question != null ? safeString(question.getStemSummary()) : "";
+            if (summary.isBlank()) {
+                continue;
+            }
+            if (!sb.isEmpty()) {
+                sb.append("\n");
+            }
+            sb.append("- ").append(summary);
+        }
+        return sb.isEmpty() ? "- 无" : sb.toString();
+    }
+
+    private String formatBulletLines(List<String> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return "- 无";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String line : lines) {
+            if (line == null || line.isBlank()) {
+                continue;
+            }
+            if (!sb.isEmpty()) {
+                sb.append("\n");
+            }
+            sb.append("- ").append(line);
+        }
+        return sb.isEmpty() ? "- 无" : sb.toString();
+    }
+
+    private String buildCandidateContext(IntroRewriteInput input) {
+        return "positionCode=" + safeString(input.getPositionCode())
+                + ", experienceLevel=" + safeString(input.getExperienceLevel())
+                + ", mode=" + safeString(input.getMode());
+    }
+
+    private String formatDomains(List<PlannerInput.DomainInfo> domains) {
+        if (domains == null || domains.isEmpty()) {
+            return "- 无";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (PlannerInput.DomainInfo domain : domains) {
+            if (domain == null) {
+                continue;
+            }
+            if (!sb.isEmpty()) {
+                sb.append("\n");
+            }
+            sb.append("- id=").append(domain.getDomainId())
+                    .append(", code=").append(safeString(domain.getDomainCode()))
+                    .append(", name=").append(safeString(domain.getDomainName()));
+        }
+        return sb.isEmpty() ? "- 无" : sb.toString();
+    }
+
+    private String stringifyAsJson(Object value) {
+        if (value == null) {
+            return "{}";
+        }
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            log.warn("Prompt 变量 JSON 序列化失败，回退为字符串, valueType={}",
+                    value.getClass().getName(), e);
+            return String.valueOf(value);
+        }
+    }
+
+    private String truncateForLog(String value, int maxLen) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = value.replace("\r", " ").replace("\n", " ").trim();
+        if (normalized.length() <= maxLen) {
+            return normalized;
+        }
+        return normalized.substring(0, maxLen);
+    }
+
+    private String safeString(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String truncate(String value, int maxLen) {
+        if (value == null) {
+            return "";
+        }
+        if (value.length() <= maxLen) {
+            return value;
+        }
+        return value.substring(0, maxLen);
     }
 }

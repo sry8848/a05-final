@@ -1,0 +1,19 @@
+# 仅用于自动化测试。
+# 由测试类通过 @ActiveProfiles("test") 启用，不用于手动启动应用。
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration
+
+ai:
+  openai:
+    mock-enabled: true
+
+rag:
+  enabled: false
+
+speech:
+  asr:
+    enabled: false
+  tts:
+    enabled: false
