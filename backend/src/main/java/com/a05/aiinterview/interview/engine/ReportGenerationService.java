@@ -27,23 +27,27 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * 閹躲儱鎲￠悽鐔稿灇閺堝秴濮熼敍鍫濈磽濮濄儲澧界悰宀嬬礆閵? *
- * <p>閻㈠彉浜掓稉瀣╄⒈娑擃亜鍙嗛崣锝埿曢崣鎴窗
+ * 报告生成服务——异步生成面试评估报告。
+ *
+ * <p>触发时机：
  * <ol>
- *   <li>{@code AnswerSubmitService}閿涙俺鐦庢导鏉垮枀缁涙牔淇婇崣铚傝礋 {@code END} 閺冩儼鍤滈崝銊ㄐ曢崣?/li>
- *   <li>{@code InterviewController}閿涙@code POST /interviews/{sessionId}/finish} 閹靛濮╃憴锕€褰?/li>
+ *   <li>{@code AnswerSubmitService}检测到评估信号为 {@code END} 时自动调用</li>
+ *   <li>{@code InterviewController}的{@code POST /interviews/{sessionId}/finish} 手动触发</li>
  * </ol>
  *
- * <p>閹笛嗩攽濞翠胶鈻奸敍? * <ol>
- *   <li>楠炲倻鐡戝Λ鈧弻銉⑩偓鏂衡偓鏃囧閹躲儱鎲″鎻掔摠閸︺劌鍨捄瀹犵箖閿涘矂浼╅崗宥夊櫢婢跺秶鏁撻幋?/li>
- *   <li>鐏忓棔绱扮拠婵堝Ц閹胶鐤嗘稉?{@code report_generating}閿涘牆鍑￠悽杈殶閻劍鏌熺拋鍓х枂閿涘本顒濇径鍕晙濞嗭紕鈥樻穱婵撶礆</li>
- *   <li>閸旂姾娴囬崗銊╁劥妫版娲伴崪灞芥礀缁涙棑绱濋弸鍕紦 Q/A 闁板秴顕崚妤勩€?/li>
- *   <li>鐠嬪啰鏁?AI 閻㈢喐鍨氶幎銉ユ啞閿涘牆缍嬮崜宥勮礋 Mock閿涘瞼绮ㄩ弸鍕暚閺佽揪绱?/li>
- *   <li>閹镐椒绠欓崠鏍ㄥГ閸涘﹤鍩?{@code interview_reports} 鐞?/li>
- *   <li>鐏忓棔绱扮拠婵堝Ц閹胶鐤嗘稉?{@code completed}</li>
+ * <p>核心流程：
+ * <ol>
+ *   <li>检查是否已存在报告（幂等），若存在则直接更新会话状态为 completed</li>
+ *   <li>更新会话状态为 {@code report_generating}，防止重复生成</li>
+ *   <li>查询该会话所有题目及对应回答，组装完整 Q/A 列表</li>
+ *   <li>调用 AI 生成报告（真实或 Mock）</li>
+ *   <li>持久化报告到 {@code interview_reports} 表</li>
+ *   <li>更新会话状态为 {@code completed}</li>
  * </ol>
  *
- * <p>娴犺缍嶅銉╊€冨鍌氱埗閸?catch 閸氬氦顔囪ぐ鏇熸）韫囨鑻熼弴瀛樻煀 session 閻樿埖鈧椒璐?{@code aborted}閿? * 娑撳秴鎮滄径鏍ㄥ閸戠尨绱欐穱婵囧瘮瀵倹顒炵痪璺ㄢ柤鐎瑰鍙忛敍澶堚偓? */
+ * <p>任何步骤失败都会在 catch 块中记录错误日志，session 状态保持为 {@code aborted}，
+ * 用户可稍后重试或联系管理员排查。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -58,37 +62,39 @@ public class ReportGenerationService {
     private final AiInvocationLogService aiInvocationLogService;
 
     /**
-     * 瀵倹顒為悽鐔稿灇闂堛垼鐦幎銉ユ啞閵?     * 閻?AnswerSubmitService閿涘澃ignal=END閿涘鍨ㄩ幍瀣З finish 閹恒儱褰涚憴锕€褰傞妴?     *
-     * @param sessionId 闂堛垼鐦导姘崇樈 ID
+     * 异步生成面试报告。
+     * 由 AnswerSubmitService在 signal=END 时调用，或由 finish 接口手动触发。
+     *
+     * @param sessionId 面试会话 ID
      */
     @Async
     public void generateAsync(Long sessionId) {
-        log.info("閹躲儱鎲￠悽鐔稿灇娴犺濮熷鈧慨? sessionId={}", sessionId);
+        log.info("报告生成流程开始, sessionId={}", sessionId);
 
         InterviewSession session = interviewSessionMapper.selectById(sessionId);
         if (session == null) {
-            log.error("閹躲儱鎲￠悽鐔稿灇婢惰精瑙﹂敍姘娑撳秴鍩屾导姘崇樈, sessionId={}", sessionId);
+            log.error("报告生成流程找不到会话，可能已被删除, sessionId={}", sessionId);
             return;
         }
 
         if (interviewReportMapper.selectBySessionId(sessionId) != null) {
-            log.info("閹躲儱鎲″鎻掔摠閸︻煉绱濈捄瀹犵箖闁插秴顦查悽鐔稿灇, sessionId={}", sessionId);
+            log.info("报告已存在，跳过重复生成，直接更新状态, sessionId={}", sessionId);
             ensureCompleted(sessionId);
             return;
         }
 
         try {
-                List<InterviewQuestion> questions = interviewQuestionMapper.selectList(
+            List<InterviewQuestion> questions = interviewQuestionMapper.selectList(
                     new LambdaQueryWrapper<InterviewQuestion>()
                             .eq(InterviewQuestion::getSessionId, sessionId)
                             .orderByAsc(InterviewQuestion::getQuestionNo)
             );
 
-                Map<Long, String> answerMap = buildAnswerMap(sessionId);
+            Map<Long, String> answerMap = buildAnswerMap(sessionId);
 
-                List<ReportGenerationInput.QuestionAnswerPair> pairs = buildQaPairs(questions, answerMap, session);
+            List<ReportGenerationInput.QuestionAnswerPair> pairs = buildQaPairs(questions, answerMap, session);
 
-                ReportGenerationInput input = ReportGenerationInput.builder()
+            ReportGenerationInput input = ReportGenerationInput.builder()
                     .positionCode(session.getTargetRole())
                     .experienceLevel(session.getExperienceLevel())
                     .mode(session.getMode())
@@ -98,9 +104,9 @@ public class ReportGenerationService {
                     .questionAnswerPairs(pairs)
                     .build();
 
-            log.info("鐠嬪啰鏁ら幎銉ユ啞閻㈢喐鍨?AI, sessionId={}, qaCount={}", sessionId, pairs.size());
+            log.info("调用 AI 生成报告, sessionId={}, qaCount={}", sessionId, pairs.size());
 
-                boolean success = true;
+            boolean success = true;
             String errorMsg = null;
             ReportGenerationOutput output = null;
             AiCallResult<ReportGenerationOutput> reportResult = null;
@@ -111,27 +117,27 @@ public class ReportGenerationService {
             } catch (Exception e) {
                 success = false;
                 errorMsg = e.getMessage();
-                log.error("閹躲儱鎲￠悽鐔稿灇 AI 鐠嬪啰鏁ゆ径杈Е, sessionId={}", sessionId, e);
+                log.error("报告生成 AI 调用失败, sessionId={}", sessionId, e);
                 throw e;
             } finally {
                 recordReportLog(session, success, errorMsg, reportResult);
             }
 
-                InterviewReport report = buildReport(sessionId, output);
+            InterviewReport report = buildReport(sessionId, output);
             interviewReportMapper.insert(report);
 
-            // 閺囧瓨鏌婃导姘崇樈閻樿埖鈧椒璐?completed
+            // 更新会话状态为 completed
             interviewSessionMapper.update(null, new LambdaUpdateWrapper<InterviewSession>()
                     .eq(InterviewSession::getId, sessionId)
                     .set(InterviewSession::getStatus, "completed")
                     .set(InterviewSession::getUpdatedAt, LocalDateTime.now()));
 
-            log.info("閹躲儱鎲￠悽鐔稿灇鐎瑰本鍨? sessionId={}, overallScore={}, status=completed",
+            log.info("报告生成完成, sessionId={}, overallScore={}, status=completed",
                     sessionId, report.getOverallScore());
 
         } catch (Exception e) {
-            log.error("閹躲儱鎲￠悽鐔稿灇瀵倸鐖? sessionId={}", sessionId, e);
-            // 閻㈢喐鍨氭径杈Е閺冭泛娲栭柅鈧崚?report_generating閿涘奔绗夌拋鍙ヨ礋 aborted閿涘牆鍘戠拋鍛婂閸斻劑鍣哥拠鏇礆
+            log.error("报告生成异常, sessionId={}", sessionId, e);
+            // 调用失败时保持状态为 report_generating，或改为 aborted 并通知用户重试
             interviewSessionMapper.update(null, new LambdaUpdateWrapper<InterviewSession>()
                     .eq(InterviewSession::getId, sessionId)
                     .set(InterviewSession::getStatus, "report_generating")
@@ -139,12 +145,12 @@ public class ReportGenerationService {
         }
     }
 
-    // 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
-    // 缁変焦婀侀弬瑙勭《
-    // 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+    // ==================== 私有方法 ====================
 
     /**
-     * 閺嬪嫬缂?questionId 閳?answerText 閻ㄥ嫬娲栫粵鏃傚偍瀵洏鈧?     * 閸氬奔绔存０妯垮閺堝顦块弶?attempt閿涘苯褰?isFinal=true 閻ㄥ嫭娓堕弬棰佺閺壜扳偓?     */
+     * 构建 questionId 到 answerText 的映射表。
+     * 同一题可能有多条 attempt，取 isFinal=true 的最新一条。
+     */
     private Map<Long, String> buildAnswerMap(Long sessionId) {
         List<InterviewAttempt> attempts = interviewAttemptMapper.selectList(
                 new LambdaQueryWrapper<InterviewAttempt>()
@@ -152,7 +158,7 @@ public class ReportGenerationService {
                         .eq(InterviewAttempt::getIsFinal, true)
                         .orderByDesc(InterviewAttempt::getCreatedAt)
         );
-        // 閸氬奔绔?questionId 娣囨繄鏆€閺堚偓閺傞绔撮弶鈽呯礄閻㈠彉绨鍙夊瘻 createdAt 閸婃帒绨敍瀹紀Map 娣囨繄鏆€ first 閸楄櫕娓堕弬甯礆
+        // 按 questionId 分组，取每组第一条（即最新），因为已按 createdAt 倒序，所以 first 即最新
         return attempts.stream()
                 .collect(Collectors.toMap(
                         InterviewAttempt::getQuestionId,
@@ -163,7 +169,8 @@ public class ReportGenerationService {
     }
 
     /**
-     * 鐏忓棝顣介惄顔煎灙鐞涖劌鎷伴崶鐐电摕缁便垹绱╅柊宥咁嚠閿涘苯鎮撻弮鏈电矤 syllabusJson 娑擃叀藟閸忋劎鐓＄拠鍡楃厵娑擃厽鏋冮崥宥冣偓?     */
+     * 组装题目与回答配对列表，并从 syllabusJson 补充知识域名称。
+     */
     private List<ReportGenerationInput.QuestionAnswerPair> buildQaPairs(
             List<InterviewQuestion> questions,
             Map<Long, String> answerMap,
@@ -201,7 +208,9 @@ public class ReportGenerationService {
     }
 
     /**
-     * 鐏?AI 鏉堟挸鍤潪顑胯礋 InterviewReport 鐎圭偘缍嬮妴?     * skillDomainScores 鎼村繐鍨崠鏍﹁礋 List<Map> 鐎涙ê鍋嶉敍灞肩┒娴?JSON 閻╁瓨甯撮幐浣风畽閸栨牓鈧?     */
+     * 将 AI 返回结果转换为 InterviewReport 实体。
+     * skillDomainScores 单独存储为 List<Map> 以便前端 JSON 解析。
+     */
     private InterviewReport buildReport(Long sessionId, ReportGenerationOutput output) {
         List<Map<String, Object>> domainScoreMaps = null;
         if (output.getSkillDomainScores() != null) {
@@ -232,7 +241,8 @@ public class ReportGenerationService {
     }
 
     /**
-     * 娴犲酣顣介惄顔炬畱 generationContextJson 娑擃厽褰侀崣?domainCode閿涘牆鍘规惔?"intro"閿涘鈧?     */
+     * 从题目的 generationContextJson 中取 domainCode，兜底返回 "intro"。
+     */
     private String extractDomainCode(InterviewQuestion q) {
         if (q.getGenerationContextJson() == null) return "intro";
         Object code = q.getGenerationContextJson().get("domainCode");
@@ -240,7 +250,8 @@ public class ReportGenerationService {
     }
 
     /**
-     * 鐠佹澘缍嶉幎銉ユ啞閻㈢喐鍨?AI 鐠嬪啰鏁ょ€孤ゎ吀閺冦儱绻旈敍鍫濇儓 Token 鐠佲剝鏆熼敍澶堚偓?     */
+     * 记录报告生成 AI 调用审计日志（含 Token 计数）。
+     */
     private void recordReportLog(InterviewSession session, boolean success, String errorMsg,
                                   AiCallResult<ReportGenerationOutput> result) {
         AiInvocationLog logEntry = AiInvocationLog.builder()
@@ -260,7 +271,7 @@ public class ReportGenerationService {
         aiInvocationLogService.saveAsync(logEntry);
     }
 
-    /** 绾喕绻氭导姘崇樈閻樿埖鈧椒璐?completed閿涘牆绠撶粵澶婃簚閺咁垰鍘规惔鏇＄殶閻㈩煉绱氶妴?*/
+    /** 确保会话状态为 completed（若已存在报告则补充更新状态）。 */
     private void ensureCompleted(Long sessionId) {
         interviewSessionMapper.update(null, new LambdaUpdateWrapper<InterviewSession>()
                 .eq(InterviewSession::getId, sessionId)

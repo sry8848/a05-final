@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="result-page">
     <div class="result-container">
       <header class="result-header glass-card">

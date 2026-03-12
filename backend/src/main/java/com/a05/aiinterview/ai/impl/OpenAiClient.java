@@ -1,7 +1,12 @@
 package com.a05.aiinterview.ai.impl;
 
 import com.a05.aiinterview.ai.AiClient;
+import com.a05.aiinterview.ai.config.PromptProperties;
 import com.a05.aiinterview.ai.dto.*;
+import com.a05.aiinterview.ai.prompt.PromptTemplateService;
+import com.a05.aiinterview.ai.prompt.RenderedPrompt;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.metadata.Usage;
@@ -11,6 +16,10 @@ import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 
 /**
@@ -26,9 +35,18 @@ import reactor.core.publisher.Flux;
 public class OpenAiClient implements AiClient {
 
     private final ChatClient chatClient;
+    private final PromptTemplateService promptTemplateService;
+    private final PromptProperties promptProperties;
+    private final ObjectMapper objectMapper;
 
-    public OpenAiClient(ChatModel chatModel) {
+    public OpenAiClient(ChatModel chatModel,
+                        PromptTemplateService promptTemplateService,
+                        PromptProperties promptProperties,
+                        ObjectMapper objectMapper) {
         this.chatClient = ChatClient.builder(chatModel).build();
+        this.promptTemplateService = promptTemplateService;
+        this.promptProperties = promptProperties;
+        this.objectMapper = objectMapper;
         log.info("OpenAiClient 已初始化（Spring AI ChatClient 模式）");
     }
 
@@ -72,11 +90,11 @@ public class OpenAiClient implements AiClient {
     @Override
     public Flux<String> callQuestionGenerationStream(QuestionGenerationInput input) {
         log.info("调用 OpenAI 出题（流式）, domainCode={}", input.getNextDomainCode());
-        String userPrompt = buildQuestionGenUserPrompt(input)
-                + "\n\n请以纯文本输出题目正文，不要输出 JSON，不要包含任何额外说明。";
+        RenderedPrompt rendered = renderPrompt(PROMPT_CODE_QUESTION_GENERATION_STREAM,
+                buildQuestionGenerationStreamVariables(input));
         return chatClient.prompt()
-                .system(QUESTION_GEN_STREAM_SYSTEM_PROMPT)
-                .user(userPrompt)
+                .system(rendered.getSystemPrompt())
+                .user(rendered.getUserPrompt())
                 .stream()
                 .content();
     }
@@ -89,10 +107,12 @@ public class OpenAiClient implements AiClient {
 
         BeanOutputConverter<EvaluationDecisionOutput> converter =
                 new BeanOutputConverter<>(EvaluationDecisionOutput.class);// 评估决策输出转换器
-        String userPrompt = buildEvalDecisionUserPrompt(input) + "\n\n" + converter.getFormat();// 评估决策用户提示
+        String evaluationPayload = buildEvalDecisionUserPrompt(input) + "\n\n" + converter.getFormat();
+        RenderedPrompt rendered = renderPrompt(PROMPT_CODE_EVALUATION_DECISION,
+                Map.of("evaluationPayload", evaluationPayload));
 
         long startMs = System.currentTimeMillis();
-        ChatResponse response = callChat(EVAL_DECISION_SYSTEM_PROMPT, userPrompt);
+        ChatResponse response = callChat(rendered.getSystemPrompt(), rendered.getUserPrompt());
         EvaluationDecisionOutput output = requireConvert(converter, response, "evaluation_decision");
         log.info("评估决策调用成功，signal={}", output.getSignal());
         return buildResult(output, response, System.currentTimeMillis() - startMs);
@@ -108,10 +128,12 @@ public class OpenAiClient implements AiClient {
 
         BeanOutputConverter<ReportGenerationOutput> converter =
                 new BeanOutputConverter<>(ReportGenerationOutput.class);
-        String userPrompt = buildReportGenUserPrompt(input) + "\n\n" + converter.getFormat();
+        String reportPayload = buildReportGenUserPrompt(input) + "\n\n" + converter.getFormat();
+        RenderedPrompt rendered = renderPrompt(PROMPT_CODE_REPORT_GENERATION,
+                Map.of("reportPayload", reportPayload));
 
         long startMs = System.currentTimeMillis();
-        ChatResponse response = callChat(REPORT_GEN_SYSTEM_PROMPT, userPrompt);
+        ChatResponse response = callChat(rendered.getSystemPrompt(), rendered.getUserPrompt());
         ReportGenerationOutput output = requireConvert(converter, response, "report_generation");
         log.info("报告生成调用成功，overallScore={}", output.getOverallScore());
         return buildResult(output, response, System.currentTimeMillis() - startMs);
@@ -188,20 +210,9 @@ public class OpenAiClient implements AiClient {
             请根据要求出一道面试题，严格按照 JSON Schema 格式输出，不要输出任何额外文字。
             """;
 
-    private static final String QUESTION_GEN_STREAM_SYSTEM_PROMPT = """
-            你是一名技术面试官，正在进行一场模拟面试。
-            请用自然语言口语化地提问，直接输出题目文本，不要包含 JSON 或 Markdown。
-            """;
-
-    private static final String EVAL_DECISION_SYSTEM_PROMPT = """
-            你是一名技术面试考官，需要对候选人的回答进行评估，并决定下一步面试策略。
-            请严格按照 JSON Schema 格式输出评估决策结果，不要输出任何额外文字。
-            """;
-
-    private static final String REPORT_GEN_SYSTEM_PROMPT = """
-            你是一名技术面试评委，需要根据本场面试的完整 Q/A 记录生成评估报告。
-            请严格按照 JSON Schema 格式输出报告，不要输出任何额外文字。
-            """;
+    private static final String PROMPT_CODE_EVALUATION_DECISION = "evaluation_decision";
+    private static final String PROMPT_CODE_REPORT_GENERATION = "report_generation";
+    private static final String PROMPT_CODE_QUESTION_GENERATION_STREAM = "question_generation_stream";
 
     private String buildPlannerUserPrompt(PlannerInput input) {
         StringBuilder sb = new StringBuilder("请为以下候选人生成面试考纲：\n\n");
@@ -315,5 +326,62 @@ public class OpenAiClient implements AiClient {
             });
         }
         return sb.toString();
+    }
+
+    private RenderedPrompt renderPrompt(String promptCode, Map<String, Object> variables) {
+        String promptVersion = promptProperties.resolveVersion(promptCode);
+        RenderedPrompt rendered = promptTemplateService.render(promptCode, promptVersion, variables);
+        log.info("Prompt 渲染完成, promptCode={}, promptVersion={}",
+                rendered.getPromptCode(), rendered.getPromptVersion());
+        return rendered;
+    }
+
+    private Map<String, Object> buildQuestionGenerationStreamVariables(QuestionGenerationInput input) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("nextDomainName", safeString(input.getNextDomainName()));
+        variables.put("nextDomainCode", safeString(input.getNextDomainCode()));
+        variables.put("nextQuestionType", safeString(input.getNextQuestionType()));
+        variables.put("targetDepth", safeString(input.getTargetDepth()));
+        variables.put("positionCode", safeString(input.getPositionCode()));
+        variables.put("experienceLevel", safeString(input.getExperienceLevel()));
+        variables.put("mode", safeString(input.getMode()));
+        variables.put("askedQuestions", formatAskedQuestions(input.getAskedQuestions()));
+        variables.put("syllabus", stringifyAsJson(input.getSyllabus()));
+        return variables;
+    }
+
+    private String formatAskedQuestions(List<QuestionGenerationInput.AskedQuestion> askedQuestions) {
+        if (askedQuestions == null || askedQuestions.isEmpty()) {
+            return "- 无";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (QuestionGenerationInput.AskedQuestion question : askedQuestions) {
+            String summary = question != null ? safeString(question.getStemSummary()) : "";
+            if (summary.isBlank()) {
+                continue;
+            }
+            if (!sb.isEmpty()) {
+                sb.append("\n");
+            }
+            sb.append("- ").append(summary);
+        }
+        return sb.isEmpty() ? "- 无" : sb.toString();
+    }
+
+    private String stringifyAsJson(Object value) {
+        if (value == null) {
+            return "{}";
+        }
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            log.warn("Prompt 变量 JSON 序列化失败，回退为字符串, valueType={}",
+                    value.getClass().getName(), e);
+            return String.valueOf(value);
+        }
+    }
+
+    private String safeString(String value) {
+        return value == null ? "" : value;
     }
 }

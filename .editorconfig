@@ -1,0 +1,13 @@
+# 告诉编辑器这是最顶层的配置文件，不用再往上级目录找了
+root = true
+
+# 匹配所有文件
+[*]
+# 强制换行符为 LF
+end_of_line = lf
+# 强制文件末尾保留一个空行（POSIX 规范，防止 Git 报 No newline 警告）
+insert_final_newline = true
+# 强制编码为 UTF-8
+charset = utf-8
+# 自动删除行尾多余的空格
+trim_trailing_whitespace = true

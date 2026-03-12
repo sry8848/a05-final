@@ -1,0 +1,6 @@
+# 强制所有被 Git 追踪的文本文件在提交和检出时都使用 LF 换行符
+* text=auto eol=lf
+
+# 针对 Windows 特有的批处理脚本，保留 CRLF（防呆设计）
+*.bat eol=crlf
+*.cmd eol=crlf
