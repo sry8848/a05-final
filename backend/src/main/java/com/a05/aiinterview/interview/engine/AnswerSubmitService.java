@@ -1,6 +1,7 @@
 package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.AiClient;
+import com.a05.aiinterview.ai.config.PromptProperties;
 import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.*;
 import com.a05.aiinterview.ai.entity.AiInvocationLog;
@@ -51,6 +52,7 @@ public class AnswerSubmitService {
     private final StateLedgerPatchService stateLedgerPatchService;
     private final AiInvocationLogService aiInvocationLogService;
     private final ReportGenerationService reportGenerationService;
+    private final PromptProperties promptProperties;
 
     /**
      * 提交候选人回答，完整执行 8 步主链路。
@@ -381,8 +383,9 @@ public class AnswerSubmitService {
                 .sessionId(session.getId())
                 .questionId(question.getId())
                 .userId(session.getUserId())
-                .promptCode("evaluation_decision")
-                .promptVersion("v1")
+                .promptCode(resolvePromptCode(result, "evaluation_decision"))
+                .promptVersion(resolvePromptVersion(result,
+                        promptProperties.resolveVersion("evaluation_decision")))
                 .modelProvider(session.getModelProvider() != null ? session.getModelProvider() : "unknown")
                 .modelName(session.getModelName() != null ? session.getModelName() : "")
                 .requestTokens(result != null ? result.getPromptTokens() : 0)
@@ -393,6 +396,20 @@ public class AnswerSubmitService {
                 .createdAt(LocalDateTime.now())
                 .build();
         aiInvocationLogService.saveAsync(logEntry);
+    }
+
+    private String resolvePromptCode(AiCallResult<?> result, String defaultCode) {
+        if (result == null || result.getPromptCode() == null || result.getPromptCode().isBlank()) {
+            return defaultCode;
+        }
+        return result.getPromptCode();
+    }
+
+    private String resolvePromptVersion(AiCallResult<?> result, String defaultVersion) {
+        if (result == null || result.getPromptVersion() == null || result.getPromptVersion().isBlank()) {
+            return defaultVersion;
+        }
+        return result.getPromptVersion();
     }
 
     /**

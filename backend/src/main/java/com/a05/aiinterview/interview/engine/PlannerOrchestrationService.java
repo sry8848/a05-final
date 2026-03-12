@@ -177,8 +177,8 @@ public class PlannerOrchestrationService {
             AiInvocationLog logEntry = AiInvocationLog.builder()
                     .sessionId(session.getId())
                     .userId(session.getUserId())
-                    .promptCode("planner")
-                    .promptVersion(promptProperties.resolveVersion("planner"))
+                    .promptCode(resolvePromptCode(result, "planner"))
+                    .promptVersion(resolvePromptVersion(result, promptProperties.resolveVersion("planner")))
                     .modelProvider(session.getModelProvider() != null ? session.getModelProvider() : "mock")
                     .modelName(session.getModelName() != null ? session.getModelName() : "")
                     .requestTokens(promptTokens)
@@ -190,6 +190,20 @@ public class PlannerOrchestrationService {
                     .build();
             aiInvocationLogService.saveAsync(logEntry);
         }
+    }
+
+    private String resolvePromptCode(AiCallResult<?> result, String defaultCode) {
+        if (result == null || result.getPromptCode() == null || result.getPromptCode().isBlank()) {
+            return defaultCode;
+        }
+        return result.getPromptCode();
+    }
+
+    private String resolvePromptVersion(AiCallResult<?> result, String defaultVersion) {
+        if (result == null || result.getPromptVersion() == null || result.getPromptVersion().isBlank()) {
+            return defaultVersion;
+        }
+        return result.getPromptVersion();
     }
 
     /**

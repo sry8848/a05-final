@@ -16,6 +16,12 @@ public class AiCallResult<T> {
     /** 解析后的结构化输出对象 */
     private final T output;
 
+    /** 实际使用的 Prompt 标识 */
+    private final String promptCode;
+
+    /** 实际使用的 Prompt 版本 */
+    private final String promptVersion;
+
     /** Prompt Token 数（输入） */
     private final int promptTokens;
 

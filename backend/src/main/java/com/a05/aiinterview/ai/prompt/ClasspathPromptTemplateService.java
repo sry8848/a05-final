@@ -43,8 +43,8 @@ public class ClasspathPromptTemplateService implements PromptTemplateService {
 
         PromptTemplate template = loadTemplate(promptCode);
         if (!promptVersion.equals(template.promptVersion())) {
-            throw new IllegalArgumentException("Prompt 模板版本不匹配: requested="
-                    + promptVersion + ", actual=" + template.promptVersion());
+            throw new IllegalArgumentException("Prompt 模板版本不匹配: promptCode=" + promptCode
+                    + ", requested=" + promptVersion + ", actual=" + template.promptVersion());
         }
 
         Map<String, Object> safeVariables = variables != null ? variables : Map.of();
@@ -64,6 +64,12 @@ public class ClasspathPromptTemplateService implements PromptTemplateService {
                 userRendered.text(),
                 Collections.unmodifiableSet(usedVariables)
         );
+    }
+
+    @Override
+    public PromptTemplateMetadata loadMetadata(String promptCode) {
+        PromptTemplate template = loadTemplate(promptCode);
+        return new PromptTemplateMetadata(template.promptCode(), template.promptVersion(), template.sourcePath());
     }
 
     private PromptTemplate loadTemplate(String promptCode) {
@@ -123,7 +129,7 @@ public class ClasspathPromptTemplateService implements PromptTemplateService {
             throw new PromptTemplateParseException("userPrompt 为空: " + sourcePath);
         }
 
-        return new PromptTemplate(promptCode.trim(), promptVersion.trim(), systemPrompt, userPrompt);
+        return new PromptTemplate(promptCode.trim(), promptVersion.trim(), sourcePath, systemPrompt, userPrompt);
     }
 
     private int findHeading(List<String> lines, String heading) {
@@ -202,7 +208,13 @@ public class ClasspathPromptTemplateService implements PromptTemplateService {
         }
     }
 
-    private record PromptTemplate(String promptCode, String promptVersion, String systemPrompt, String userPrompt) {
+    private record PromptTemplate(
+            String promptCode,
+            String promptVersion,
+            String sourcePath,
+            String systemPrompt,
+            String userPrompt
+    ) {
     }
 
     private record RenderResult(String text, Set<String> usedVariables) {

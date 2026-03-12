@@ -74,7 +74,9 @@ class ClasspathPromptTemplateServiceTest {
 
         assertThatThrownBy(() -> service.render("planner", "v999", vars))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("版本");
+                .hasMessageContaining("planner")
+                .hasMessageContaining("v999")
+                .hasMessageContaining("v1");
     }
 
     @Test
@@ -89,6 +91,7 @@ class ClasspathPromptTemplateServiceTest {
                 "positionCode", "JAVA_BACKEND",
                 "experienceLevel", "SENIOR",
                 "mode", "professional",
+                "ragContext", "线程池参数说明",
                 "askedQuestions", "- 讲讲线程池参数怎么配",
                 "syllabus", "{\"domains\":[]}"
         );
@@ -98,5 +101,17 @@ class ClasspathPromptTemplateServiceTest {
         assertThat(rendered.getPromptCode()).isEqualTo("question_generation");
         assertThat(rendered.getUserPrompt()).contains("知识域：并发编程（concurrency）");
         assertThat(rendered.getUserPrompt()).doesNotContain("{{nextDomainName}}");
+    }
+
+    @Test
+    @DisplayName("loadMetadata should expose prompt code, version and source path")
+    void loadMetadata_shouldExposePromptMeta() {
+        PromptTemplateService service = new ClasspathPromptTemplateService(new ObjectMapper());
+
+        PromptTemplateMetadata metadata = service.loadMetadata("intro_rewrite");
+
+        assertThat(metadata.promptCode()).isEqualTo("intro_rewrite");
+        assertThat(metadata.promptVersion()).isEqualTo("v1");
+        assertThat(metadata.sourcePath()).contains("prompts/intro-rewrite.md");
     }
 }

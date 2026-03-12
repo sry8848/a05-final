@@ -257,8 +257,8 @@ public class ReportGenerationService {
         AiInvocationLog logEntry = AiInvocationLog.builder()
                 .sessionId(session.getId())
                 .userId(session.getUserId())
-                .promptCode("report_generation")
-                .promptVersion(promptProperties.resolveVersion("report_generation"))
+                .promptCode(resolvePromptCode(result, "report_generation"))
+                .promptVersion(resolvePromptVersion(result, promptProperties.resolveVersion("report_generation")))
                 .modelProvider(session.getModelProvider() != null ? session.getModelProvider() : "unknown")
                 .modelName(session.getModelName() != null ? session.getModelName() : "")
                 .requestTokens(result != null ? result.getPromptTokens() : 0)
@@ -278,5 +278,19 @@ public class ReportGenerationService {
                 .ne(InterviewSession::getStatus, "completed")
                 .set(InterviewSession::getStatus, "completed")
                 .set(InterviewSession::getUpdatedAt, LocalDateTime.now()));
+    }
+
+    private String resolvePromptCode(AiCallResult<?> result, String defaultCode) {
+        if (result == null || result.getPromptCode() == null || result.getPromptCode().isBlank()) {
+            return defaultCode;
+        }
+        return result.getPromptCode();
+    }
+
+    private String resolvePromptVersion(AiCallResult<?> result, String defaultVersion) {
+        if (result == null || result.getPromptVersion() == null || result.getPromptVersion().isBlank()) {
+            return defaultVersion;
+        }
+        return result.getPromptVersion();
     }
 }
