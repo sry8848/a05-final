@@ -674,7 +674,6 @@ import {
   getInterviewSessionDetail,
   submitInterviewAttempt,
   finishInterviewSession,
-  getInterviewReport,
   getSystemPing
 } from '../api/resume'
 import CustomSelect from './CustomSelect.vue'
@@ -1615,18 +1614,6 @@ export default {
       throw new Error('面试准备超时，请重试')
     }
 
-    const waitReportReady = async (sessionId, timeoutMs = 90000, intervalMs = 1500) => {
-      const startAt = Date.now()
-      while (Date.now() - startAt < timeoutMs) {
-        const report = await getInterviewReport(sessionId)
-        if (report?.reportStatus === 'ready') {
-          return report
-        }
-        await sleep(intervalMs)
-      }
-      return null
-    }
-
     const buildAttemptId = () => {
       if (globalThis.crypto?.randomUUID) {
         return globalThis.crypto.randomUUID()
@@ -2042,24 +2029,6 @@ export default {
       }
     }
 
-    const buildResultFromReport = (report) => {
-      const scoreNum = Number(report?.overallScore || 0)
-      const score = Number.isFinite(scoreNum) ? Math.round(scoreNum) : 0
-      const correctCount = answers.value.filter(a => a.score >= 60).length
-      const total = answers.value.length
-
-      return {
-        score,
-        correctCount,
-        totalQuestions: total,
-        beatPercent: Math.min(Math.round(score * 0.9 + Math.random() * 8), 99),
-        feedback: report?.summary || '报告已生成，请查看详细分析。',
-        duration: formattedTime.value,
-        reportStatus: report?.reportStatus || 'ready',
-        report
-      }
-    }
-
     const finishInterview = async ({ manual = false } = {}) => {
       if (isFinishing.value) return
       isFinishing.value = true
@@ -2084,15 +2053,14 @@ export default {
             if (manual) {
               await finishInterviewSession(backendSessionId.value)
             }
-            const report = await waitReportReady(backendSessionId.value)
-            if (report && report.reportStatus === 'ready') {
-              resultData = buildResultFromReport(report)
-            } else {
-              resultData.feedback = '报告仍在生成中，请稍后到历史记录页面查看。'
-            }
           } catch (err) {
-            console.warn('[InterviewPage] failed to fetch report, fallback to local result', err)
+            console.warn('[InterviewPage] failed to finish interview session, fallback to generating status', err)
           }
+          resultData.reportStatus = 'generating'
+          resultData.reportStartedAt = new Date().toISOString()
+          resultData.feedback = '报告正在生成中，你可以先返回面试记录页。'
+        } else {
+          resultData.reportStatus = 'ready'
         }
 
         resultData.answers = answers.value
@@ -2105,9 +2073,12 @@ export default {
         const expLabel = experienceLevels.find(e => e.value === config.experience)
         resultData.experienceLabel = expLabel ? expLabel.label : '未知'
 
+        const savedRecord = saveInterviewRecord(resultData)
+        if (savedRecord?.id != null) {
+          resultData.recordId = savedRecord.id
+        }
         isRunning.value = false
         emit('interviewEnd', resultData)
-        saveInterviewRecord(resultData)
       } finally {
         isFinishing.value = false
       }
@@ -2150,6 +2121,10 @@ export default {
 
     const saveInterviewRecord = (resultData) => {
       const hasSessionId = resultData?.sessionId != null && String(resultData.sessionId).trim() !== ''
+      const nowIso = new Date().toISOString()
+      const reportStatus = hasSessionId
+        ? (['ready', 'failed', 'generating'].includes(resultData?.reportStatus) ? resultData.reportStatus : 'generating')
+        : 'ready'
       const record = {
         id: Date.now(),
         job: jobDisplayName.value,
@@ -2163,7 +2138,12 @@ export default {
         answers: answers.value,
         mode: config.interviewMode,
         sessionId: hasSessionId ? String(resultData.sessionId).trim() : null,
-        syncStatus: hasSessionId ? 'synced' : 'local_fallback',
+        reportStatus,
+        reportStartedAt: reportStatus === 'generating' ? (resultData.reportStartedAt || nowIso) : (resultData.reportStartedAt || null),
+        reportReadyAt: reportStatus === 'ready' ? (resultData.reportReadyAt || nowIso) : null,
+        reportFailedAt: reportStatus === 'failed' ? (resultData.reportFailedAt || nowIso) : null,
+        report: reportStatus === 'ready' ? (resultData.report || null) : null,
+        syncStatus: hasSessionId ? (reportStatus === 'ready' ? 'synced' : 'report_generating') : 'local_fallback',
         fallbackReason: hasSessionId ? null : 'missing_session_id'
       }
       
@@ -2171,6 +2151,10 @@ export default {
       records.unshift(record)
       records = records.slice(0, 50)
       localStorage.setItem('interviewRecords', JSON.stringify(records))
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('interview-records-updated'))
+      }
+      return record
     }
 
     const closeModal = () => {

@@ -16,19 +16,50 @@
         v-for="item in historyList" 
         :key="item.id" 
         class="history-item"
-        @click="viewHistoryDetail(item.id)"
+        :class="{ disabled: !isRecordClickable(item) }"
+        @click="viewHistoryDetail(item)"
       >
         <div class="history-info">
           <span class="history-title">{{ item.job }}</span>
           <div class="history-meta">
             <span><i class="fas fa-calendar"></i> {{ item.date }}</span>
             <span><i class="fas fa-clock"></i> 用时 {{ item.duration }}</span>
-            <span><i class="fas fa-check-circle"></i> {{ item.correct }}/{{ item.questions }} 正确</span>
+            <span v-if="normalizeReportStatus(item.reportStatus) === 'ready'">
+              <i class="fas fa-check-circle"></i>
+              {{ item.correct }}/{{ item.questions }} 正确
+            </span>
+            <span v-else-if="normalizeReportStatus(item.reportStatus) === 'generating'" class="status-meta generating">
+              <i class="fas fa-spinner fa-spin"></i>
+              报告生成中
+            </span>
+            <span v-else class="status-meta failed">
+              <i class="fas fa-circle-exclamation"></i>
+              生成失败
+            </span>
           </div>
         </div>
         <div class="history-score">
-          <span class="score-badge">{{ item.score }}分</span>
-          <i class="fas fa-chevron-right" style="color: var(--text-light);"></i>
+          <span
+            class="score-badge"
+            :class="`status-${normalizeReportStatus(item.reportStatus)}`"
+          >
+            {{ getScoreBadgeText(item) }}
+          </span>
+          <i
+            v-if="isRecordClickable(item)"
+            class="fas fa-chevron-right"
+            style="color: var(--text-light);"
+          ></i>
+          <i
+            v-else-if="normalizeReportStatus(item.reportStatus) === 'generating'"
+            class="fas fa-clock"
+            style="color: var(--text-light);"
+          ></i>
+          <i
+            v-else
+            class="fas fa-ban"
+            style="color: var(--text-light);"
+          ></i>
         </div>
       </div>
       
@@ -41,21 +72,39 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 
 export default {
   name: 'HistoryPage',
   emits: ['goToQuestionBank', 'showInterviewDetail'],
   setup(props, { emit }) {
     const historyList = ref([])
+    const INTERVIEW_RECORDS_UPDATED_EVENT = 'interview-records-updated'
+
+    const normalizeReportStatus = (status) => {
+      const normalized = String(status || '').trim().toLowerCase()
+      if (normalized === 'generating' || normalized === 'failed' || normalized === 'ready') {
+        return normalized
+      }
+      return 'ready'
+    }
+
+    const normalizeRecord = (record) => ({
+      ...record,
+      reportStatus: normalizeReportStatus(record?.reportStatus)
+    })
 
     const loadHistory = () => {
-      const records = JSON.parse(localStorage.getItem('interviewRecords') || '[]')
-      if (records.length > 0) {
-        historyList.value = records
-      } else {
-        historyList.value = generateMockHistory()
+      try {
+        const records = JSON.parse(localStorage.getItem('interviewRecords') || '[]')
+        if (Array.isArray(records) && records.length > 0) {
+          historyList.value = records.map(normalizeRecord)
+          return
+        }
+      } catch (error) {
+        console.warn('[HistoryPage] 加载历史记录失败，使用默认数据', error)
       }
+      historyList.value = generateMockHistory()
     }
 
     const generateMockHistory = () => {
@@ -67,7 +116,8 @@ export default {
           score: 85,
           duration: '15:30',
           questions: 10,
-          correct: 8
+          correct: 8,
+          reportStatus: 'ready'
         },
         {
           id: 2,
@@ -76,7 +126,8 @@ export default {
           score: 78,
           duration: '12:45',
           questions: 10,
-          correct: 7
+          correct: 7,
+          reportStatus: 'ready'
         },
         {
           id: 3,
@@ -85,7 +136,8 @@ export default {
           score: 92,
           duration: '18:00',
           questions: 15,
-          correct: 14
+          correct: 14,
+          reportStatus: 'ready'
         },
         {
           id: 4,
@@ -94,7 +146,8 @@ export default {
           score: 70,
           duration: '20:30',
           questions: 12,
-          correct: 8
+          correct: 8,
+          reportStatus: 'ready'
         },
         {
           id: 5,
@@ -103,25 +156,51 @@ export default {
           score: 88,
           duration: '14:20',
           questions: 10,
-          correct: 9
+          correct: 9,
+          reportStatus: 'ready'
         }
       ]
     }
 
-    const viewHistoryDetail = (id) => {
-      emit('showInterviewDetail', id)
+    const isRecordClickable = (item) => {
+      return normalizeReportStatus(item?.reportStatus) === 'ready'
+    }
+
+    const getScoreBadgeText = (item) => {
+      const status = normalizeReportStatus(item?.reportStatus)
+      if (status === 'generating') return '生成中'
+      if (status === 'failed') return '失败'
+      const score = Number(item?.score)
+      return Number.isFinite(score) ? `${Math.round(score)}分` : '--'
+    }
+
+    const viewHistoryDetail = (item) => {
+      if (!isRecordClickable(item)) return
+      emit('showInterviewDetail', item.id)
     }
 
     const goToQuestionBank = () => {
       emit('goToQuestionBank')
     }
 
+    const handleRecordsUpdated = () => {
+      loadHistory()
+    }
+
     onMounted(() => {
       loadHistory()
+      window.addEventListener(INTERVIEW_RECORDS_UPDATED_EVENT, handleRecordsUpdated)
+    })
+
+    onUnmounted(() => {
+      window.removeEventListener(INTERVIEW_RECORDS_UPDATED_EVENT, handleRecordsUpdated)
     })
 
     return {
       historyList,
+      normalizeReportStatus,
+      isRecordClickable,
+      getScoreBadgeText,
       viewHistoryDetail,
       goToQuestionBank
     }
@@ -143,6 +222,34 @@ export default {
   gap: 8px;
   padding: 10px 20px;
   font-size: 14px;
+}
+
+.history-item.disabled {
+  opacity: 0.8;
+  cursor: not-allowed;
+}
+
+.status-meta.generating {
+  color: #f59e0b;
+}
+
+.status-meta.failed {
+  color: var(--danger-color);
+}
+
+.score-badge.status-generating {
+  background: rgba(245, 158, 11, 0.16);
+  color: #d97706;
+}
+
+.score-badge.status-failed {
+  background: rgba(239, 68, 68, 0.14);
+  color: var(--danger-color);
+}
+
+.score-badge.status-ready {
+  background: rgba(16, 185, 129, 0.14);
+  color: #059669;
 }
 
 .empty-state {

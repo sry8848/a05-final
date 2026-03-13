@@ -41,6 +41,12 @@
         @collect="handleCollectQuestion"
         @navigateQuestion="handleNavigateQuestionDetail"
       />
+      <InterviewReportGeneratingPage
+        v-else-if="showReportGeneratingPage"
+        :status="reportGeneratingStatus"
+        :jobName="reportGeneratingJobName"
+        @goHistory="handleGeneratingGoHistory"
+      />
       <InterviewResultPage 
         v-else-if="showResultPage"
         :resultData="interviewResult"
@@ -68,6 +74,7 @@
           v-show="!isInterviewRunning"
           :currentPage="currentPage" 
           :user="user"
+          :historyHasUnread="historyHasUnread"
           @navigate="navigateTo"
           @logout="handleLogout"
         />
@@ -86,7 +93,11 @@
             @interviewStart="isInterviewRunning = true"
             @interviewEnd="handleInterviewEnd"
           />
-          <HistoryPage v-else-if="currentPage === 'history'" @goToQuestionBank="openQuestionBank" @showInterviewDetail="handleShowInterviewDetail" />
+          <HistoryPage
+            v-else-if="currentPage === 'history'"
+            @goToQuestionBank="openQuestionBank"
+            @showInterviewDetail="handleShowInterviewDetail"
+          />
           <QuestionBankPage
             v-else-if="currentPage === 'questionBank'"
             @showDetail="handleShowQuestionDetailFromBank"
@@ -128,10 +139,11 @@ import RadarChartPage from './components/RadarChartPage.vue'
 import ScoreTrendPage from './components/ScoreTrendPage.vue'
 import InterviewDetailPage from './components/InterviewDetailPage.vue'
 import QuestionDetailPage from './components/QuestionDetailPage.vue'
+import InterviewReportGeneratingPage from './components/InterviewReportGeneratingPage.vue'
 import AdminLoginPage from './components/AdminLoginPage.vue'
 import AdminLayout from './components/AdminLayout.vue'
 import ResumesPage from './components/ResumesPage.vue'
-import { getInterviewQuestionDetail } from './api/resume'
+import { getInterviewQuestionDetail, getInterviewReport } from './api/resume'
 
 export default {
   name: 'App',
@@ -151,6 +163,7 @@ export default {
     ScoreTrendPage,
     InterviewDetailPage,
     QuestionDetailPage,
+    InterviewReportGeneratingPage,
     AdminLoginPage,
     AdminLayout
   },
@@ -164,6 +177,12 @@ export default {
     const isInterviewRunning = ref(false)
     const interviewPage = ref(null)
     const showResultPage = ref(false)
+    const showReportGeneratingPage = ref(false)
+    const reportGeneratingStatus = ref('generating')
+    const reportGeneratingJobName = ref('本场面试')
+    const pendingGeneratingResult = ref(null)
+    const pendingGeneratingSessionId = ref(null)
+    const historyHasUnread = ref(false)
     const interviewResult = ref(null)
     const showRadarPage = ref(false)
     const showScoreTrendPage = ref(false)
@@ -174,6 +193,13 @@ export default {
     const selectedQuestionDetail = ref(null)
     const questionDetailContext = ref(null)
     const questionDetailRequestSeq = ref(0)
+    const INTERVIEW_RECORDS_KEY = 'interviewRecords'
+    const INTERVIEW_RECORDS_UPDATED_EVENT = 'interview-records-updated'
+    const HISTORY_UNREAD_DOT_KEY = 'historyUnreadDot'
+    const REPORT_POLL_INTERVAL_MS = 3000
+    const REPORT_GENERATING_TIMEOUT_MS = 10 * 60 * 1000
+    const pollingSessionLocks = new Set()
+    let reportPollingTimer = null
     
     const user = reactive({
       name: '面试者',
@@ -198,6 +224,188 @@ export default {
       }
       return icons[notification.type] || icons.info
     })
+
+    const emitInterviewRecordsUpdated = () => {
+      if (typeof window === 'undefined') return
+      window.dispatchEvent(new CustomEvent(INTERVIEW_RECORDS_UPDATED_EVENT))
+    }
+
+    const readInterviewRecords = () => {
+      try {
+        const raw = localStorage.getItem(INTERVIEW_RECORDS_KEY)
+        const parsed = raw ? JSON.parse(raw) : []
+        return Array.isArray(parsed) ? parsed : []
+      } catch (error) {
+        return []
+      }
+    }
+
+    const writeInterviewRecords = (records) => {
+      localStorage.setItem(INTERVIEW_RECORDS_KEY, JSON.stringify(records))
+      emitInterviewRecordsUpdated()
+    }
+
+    const normalizeReportStatus = (value) => {
+      const normalized = String(value || '').trim().toLowerCase()
+      if (normalized === 'generating' || normalized === 'failed' || normalized === 'ready') {
+        return normalized
+      }
+      return 'ready'
+    }
+
+    const setHistoryUnreadFlag = (value) => {
+      const normalized = !!value
+      historyHasUnread.value = normalized
+      localStorage.setItem(HISTORY_UNREAD_DOT_KEY, normalized ? '1' : '0')
+    }
+
+    const clearHistoryUnreadFlag = () => {
+      setHistoryUnreadFlag(false)
+    }
+
+    const mergeResultWithReport = (baseResult = {}, report = {}) => {
+      const merged = {
+        ...(baseResult || {})
+      }
+      const scoreNum = Number(report?.overallScore)
+      const score = Number.isFinite(scoreNum) ? Math.round(scoreNum) : (Number(merged.score) || 0)
+      const questionSummaries = Array.isArray(report?.questions) ? report.questions : []
+      const totalQuestions = questionSummaries.length || Number(merged.totalQuestions) || 0
+      const correctCount = questionSummaries.length
+        ? questionSummaries.filter((item) => Number(item?.score) >= 60).length
+        : Number(merged.correctCount) || 0
+
+      merged.score = score
+      merged.correctCount = correctCount
+      merged.totalQuestions = totalQuestions
+      merged.feedback = report?.summary || merged.feedback || '报告已生成，请查看详细分析。'
+      merged.reportStatus = 'ready'
+      merged.report = report
+      merged.sessionId = normalizeSessionId(merged.sessionId) || normalizeSessionId(report?.sessionId)
+      if (!Number.isFinite(Number(merged.beatPercent)) && Number.isFinite(scoreNum)) {
+        merged.beatPercent = Math.min(Math.round(score * 0.9 + Math.random() * 8), 99)
+      }
+      return merged
+    }
+
+    const applyReadyReportToRecord = (record, report) => {
+      const updated = { ...record }
+      const scoreNum = Number(report?.overallScore)
+      if (Number.isFinite(scoreNum)) {
+        updated.score = Math.round(scoreNum)
+      }
+      updated.reportStatus = 'ready'
+      updated.reportStartedAt = updated.reportStartedAt || new Date().toISOString()
+      updated.reportReadyAt = new Date().toISOString()
+      updated.reportFailedAt = null
+      updated.report = report
+      updated.syncStatus = 'synced'
+      return updated
+    }
+
+    const applyFailedReportToRecord = (record) => {
+      const updated = { ...record }
+      updated.reportStatus = 'failed'
+      updated.reportFailedAt = new Date().toISOString()
+      updated.syncStatus = 'report_failed'
+      return updated
+    }
+
+    const hasReportGeneratingTimedOut = (record) => {
+      const startedAtMs = Date.parse(record?.reportStartedAt || '')
+      const fallbackMs = Date.parse(record?.date || '')
+      const baseMs = Number.isFinite(startedAtMs)
+        ? startedAtMs
+        : (Number.isFinite(fallbackMs) ? fallbackMs : Date.now())
+      return Date.now() - baseMs >= REPORT_GENERATING_TIMEOUT_MS
+    }
+
+    const finalizeGeneratingResult = (report) => {
+      interviewResult.value = mergeResultWithReport(pendingGeneratingResult.value || {}, report || {})
+      showReportGeneratingPage.value = false
+      reportGeneratingStatus.value = 'generating'
+      pendingGeneratingResult.value = null
+      pendingGeneratingSessionId.value = null
+      showResultPage.value = true
+      showNotification('面试报告已生成', 'success')
+    }
+
+    const pollGeneratingReports = async () => {
+      if (!isLoggedIn.value || isAdmin.value) return
+
+      const records = readInterviewRecords()
+      if (!records.length) return
+
+      let changed = false
+      let shouldSetHistoryUnread = false
+      let reportForGeneratingPage = null
+
+      for (let index = 0; index < records.length; index += 1) {
+        const record = records[index]
+        const status = normalizeReportStatus(record?.reportStatus)
+        if (status !== 'generating') continue
+
+        const sessionId = normalizeSessionId(record?.sessionId)
+        if (!sessionId) continue
+
+        if (hasReportGeneratingTimedOut(record)) {
+          records[index] = applyFailedReportToRecord(record)
+          changed = true
+          if (showReportGeneratingPage.value && normalizeSessionId(pendingGeneratingSessionId.value) === sessionId) {
+            reportGeneratingStatus.value = 'failed'
+          }
+          continue
+        }
+
+        if (pollingSessionLocks.has(sessionId)) continue
+        pollingSessionLocks.add(sessionId)
+        try {
+          const report = await getInterviewReport(sessionId)
+          if (report?.reportStatus === 'ready') {
+            records[index] = applyReadyReportToRecord(record, report)
+            changed = true
+            const isCurrentGeneratingSession =
+              showReportGeneratingPage.value
+              && normalizeSessionId(pendingGeneratingSessionId.value) === sessionId
+            if (currentPage.value !== 'history' && !isCurrentGeneratingSession) {
+              shouldSetHistoryUnread = true
+            }
+            if (showReportGeneratingPage.value && normalizeSessionId(pendingGeneratingSessionId.value) === sessionId) {
+              reportForGeneratingPage = report
+            }
+          }
+        } catch (error) {
+          console.warn('[App] poll report failed', { sessionId, error })
+        } finally {
+          pollingSessionLocks.delete(sessionId)
+        }
+      }
+
+      if (changed) {
+        writeInterviewRecords(records)
+      }
+      if (shouldSetHistoryUnread && currentPage.value !== 'history') {
+        setHistoryUnreadFlag(true)
+      }
+      if (reportForGeneratingPage && showReportGeneratingPage.value) {
+        finalizeGeneratingResult(reportForGeneratingPage)
+      }
+    }
+
+    const startReportPolling = () => {
+      if (reportPollingTimer) return
+      reportPollingTimer = setInterval(() => {
+        pollGeneratingReports().catch((error) => {
+          console.warn('[App] report polling failed', error)
+        })
+      }, REPORT_POLL_INTERVAL_MS)
+    }
+
+    const stopReportPolling = () => {
+      if (!reportPollingTimer) return
+      clearInterval(reportPollingTimer)
+      reportPollingTimer = null
+    }
 
     const mapModeLabel = (mode) => {
       if (mode === 'practice') return '练习模式'
@@ -536,12 +744,32 @@ export default {
       isLoggedIn.value = false
       currentPage.value = 'growth'
       isInterviewRunning.value = false
+      showReportGeneratingPage.value = false
+      pendingGeneratingResult.value = null
+      pendingGeneratingSessionId.value = null
+      reportGeneratingStatus.value = 'generating'
+      clearHistoryUnreadFlag()
       showNotification('已退出登录', 'info')
     }
 
     const handleInterviewEnd = (resultData) => {
       isInterviewRunning.value = false
       if (resultData) {
+        const reportStatus = normalizeReportStatus(resultData.reportStatus)
+        if (reportStatus === 'generating' && normalizeSessionId(resultData.sessionId)) {
+          showResultPage.value = false
+          interviewResult.value = null
+          pendingGeneratingResult.value = { ...resultData }
+          pendingGeneratingSessionId.value = normalizeSessionId(resultData.sessionId)
+          reportGeneratingStatus.value = 'generating'
+          reportGeneratingJobName.value = resultData.jobName || '本场面试'
+          showReportGeneratingPage.value = true
+          return
+        }
+
+        showReportGeneratingPage.value = false
+        pendingGeneratingResult.value = null
+        pendingGeneratingSessionId.value = null
         interviewResult.value = resultData
         showResultPage.value = true
       } else {
@@ -581,6 +809,9 @@ export default {
         isInterviewRunning.value = false
       }
       currentPage.value = page
+      if (page === 'history') {
+        clearHistoryUnreadFlag()
+      }
     }
 
     const openQuestionBank = () => {
@@ -753,6 +984,12 @@ export default {
       showResultPage.value = false
       interviewResult.value = null
       currentPage.value = 'interview'
+    }
+
+    const handleGeneratingGoHistory = () => {
+      showReportGeneratingPage.value = false
+      currentPage.value = 'history'
+      clearHistoryUnreadFlag()
     }
 
     const handleShowQuestionDetailFromResult = ({ index = 0, questionId = null, sessionId = null } = {}) => {
@@ -930,6 +1167,10 @@ export default {
       }
     }
 
+    const loadHistoryUnreadFlag = () => {
+      historyHasUnread.value = localStorage.getItem(HISTORY_UNREAD_DOT_KEY) === '1'
+    }
+
     const handleKeyboardShortcuts = (event) => {
       if (!isLoggedIn.value) return
       
@@ -945,10 +1186,16 @@ export default {
 
     onMounted(() => {
       loadUserSettings()
+      loadHistoryUnreadFlag()
+      startReportPolling()
+      pollGeneratingReports().catch((error) => {
+        console.warn('[App] initial report polling failed', error)
+      })
       document.addEventListener('keydown', handleKeyboardShortcuts)
     })
 
     onUnmounted(() => {
+      stopReportPolling()
       document.removeEventListener('keydown', handleKeyboardShortcuts)
     })
 
@@ -965,6 +1212,10 @@ export default {
       notificationIcon,
       interviewPage,
       showResultPage,
+      showReportGeneratingPage,
+      reportGeneratingStatus,
+      reportGeneratingJobName,
+      historyHasUnread,
       interviewResult,
       showRadarPage,
       showScoreTrendPage,
@@ -992,6 +1243,7 @@ export default {
       saveSettings,
       handleResultGoBack,
       handleResultRestart,
+      handleGeneratingGoHistory,
       handleShowInterviewDetail,
       handleShowQuestionDetailFromRecord,
       handleShowQuestionDetailFromResult,

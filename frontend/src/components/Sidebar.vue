@@ -31,7 +31,10 @@
           @click="$emit('navigate', 'history')"
         >
           <i class="fas fa-history"></i>
-          <span>面试记录</span>
+          <span class="history-label">
+            面试记录
+            <span v-if="historyHasUnread" class="history-dot"></span>
+          </span>
         </li>
         <li 
           class="nav-item" 
@@ -101,6 +104,10 @@ export default {
         name: '面试者',
         level: 'Lv.1 初级工程师'
       })
+    },
+    historyHasUnread: {
+      type: Boolean,
+      default: false
     }
   },
   emits: ['navigate', 'logout']
@@ -108,6 +115,20 @@ export default {
 </script>
 
 <style scoped>
+.history-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.history-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+}
+
 .sidebar-bottom {
   margin-top: auto;
   display: flex;
