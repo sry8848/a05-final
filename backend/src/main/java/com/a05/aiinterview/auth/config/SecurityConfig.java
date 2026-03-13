@@ -58,6 +58,10 @@ public class SecurityConfig {
                         .requestMatchers("/interviews/**").authenticated()
                         // 面试偏好接口：需要登录
                         .requestMatchers("/interview-preferences/**").authenticated()
+                        // 用户档案：需要登录
+                        .requestMatchers("/profile/**").authenticated()
+                        // 问答库：需要登录
+                        .requestMatchers("/question-bank/**").authenticated()
                         .anyRequest().permitAll()
                 )
                 .exceptionHandling(e -> e

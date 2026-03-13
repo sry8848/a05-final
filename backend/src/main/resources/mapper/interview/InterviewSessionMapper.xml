@@ -43,4 +43,66 @@
         WHERE id = #{sessionId}
         FOR UPDATE
     </select>
+
+    <resultMap id="InterviewHistoryItemResultMap" type="com.a05.aiinterview.interview.dto.InterviewHistoryItemDto">
+        <result column="session_id" property="sessionId"/>
+        <result column="title" property="title"/>
+        <result column="target_role" property="targetRole"/>
+        <result column="mode" property="mode"/>
+        <result column="overall_score" property="overallScore"/>
+        <result column="question_count" property="questionCount"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <sql id="historyWhere">
+        s.user_id = #{userId}
+        <if test="status != null and status != ''">
+            AND s.status = #{status}
+        </if>
+        <if test="targetRole != null and targetRole != ''">
+            AND s.target_role = #{targetRole}
+        </if>
+        <if test="dateFrom != null">
+            AND s.created_at &gt;= #{dateFrom}
+        </if>
+        <if test="dateTo != null">
+            AND s.created_at &lt;= #{dateTo}
+        </if>
+    </sql>
+
+    <select id="selectHistoryPage" resultMap="InterviewHistoryItemResultMap">
+        SELECT s.id AS session_id,
+               s.title,
+               s.target_role,
+               s.mode,
+               r.overall_score,
+               s.current_question_no AS question_count,
+               s.status,
+               s.created_at
+        FROM interview_sessions s
+                 LEFT JOIN interview_reports r ON r.session_id = s.id
+        WHERE <include refid="historyWhere"/>
+        ORDER BY
+        <choose>
+            <when test="sortBy == 'overallScore'">
+                r.overall_score
+            </when>
+            <otherwise>
+                s.created_at
+            </otherwise>
+        </choose>
+        <choose>
+            <when test="sortOrder == 'asc'">ASC</when>
+            <otherwise>DESC</otherwise>
+        </choose>,
+        s.id DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countHistory" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM interview_sessions s
+        WHERE <include refid="historyWhere"/>
+    </select>
 </mapper>

@@ -4,15 +4,22 @@ import com.a05.aiinterview.common.ApiResponse;
 import com.a05.aiinterview.interview.dto.CreateInterviewRequest;
 import com.a05.aiinterview.interview.dto.CreateInterviewResponse;
 import com.a05.aiinterview.interview.dto.InterviewDetailDto;
+import com.a05.aiinterview.interview.dto.InterviewHistoryPageDto;
+import com.a05.aiinterview.interview.dto.InterviewHintRequest;
+import com.a05.aiinterview.interview.dto.InterviewHintResponse;
 import com.a05.aiinterview.interview.dto.InterviewQuestionReviewDto;
 import com.a05.aiinterview.interview.dto.InterviewReportDto;
 import com.a05.aiinterview.interview.dto.LearningRecommendationDto;
+import com.a05.aiinterview.interview.dto.SkipAndNextRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptResponse;
 import com.a05.aiinterview.interview.engine.AnswerSubmitService;
+import com.a05.aiinterview.interview.service.InterviewHistoryService;
 import com.a05.aiinterview.interview.service.InterviewQuestionReviewService;
 import com.a05.aiinterview.interview.service.InterviewReportService;
 import com.a05.aiinterview.interview.service.InterviewService;
+import com.a05.aiinterview.interview.service.InterviewHintService;
+import com.a05.aiinterview.interview.service.InterviewSkipService;
 import com.a05.aiinterview.interview.service.LearningRecommendationService;
 import com.a05.aiinterview.interview.service.QuestionStreamService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -23,6 +30,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -32,6 +40,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
+
+import java.time.LocalDateTime;
 
 /**
  * Interview session APIs.
@@ -43,11 +53,32 @@ import reactor.core.publisher.Flux;
 public class InterviewController {
 
     private final InterviewService interviewService;
+    private final InterviewHistoryService interviewHistoryService;
     private final AnswerSubmitService answerSubmitService;
+    private final InterviewHintService interviewHintService;
+    private final InterviewSkipService interviewSkipService;
     private final InterviewQuestionReviewService interviewQuestionReviewService;
     private final InterviewReportService interviewReportService;
     private final LearningRecommendationService learningRecommendationService;
     private final QuestionStreamService questionStreamService;
+
+    @Operation(summary = "Get interview history list")
+    @GetMapping
+    public ApiResponse<InterviewHistoryPageDto> getInterviews(
+            @AuthenticationPrincipal Long userId,
+            @RequestParam(value = "page", defaultValue = "1") int page,
+            @RequestParam(value = "pageSize", defaultValue = "10") int pageSize,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "targetRole", required = false) String targetRole,
+            @RequestParam(value = "dateFrom", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime dateFrom,
+            @RequestParam(value = "dateTo", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime dateTo,
+            @RequestParam(value = "sortBy", required = false) String sortBy,
+            @RequestParam(value = "sortOrder", required = false) String sortOrder) {
+        return ApiResponse.ok(interviewHistoryService.list(
+                userId, page, pageSize, status, targetRole, dateFrom, dateTo, sortBy, sortOrder));
+    }
 
     @Operation(summary = "Create interview session")
     @PostMapping
@@ -79,6 +110,25 @@ public class InterviewController {
             @PathVariable Long sessionId,
             @Valid @RequestBody SubmitAttemptRequest request) {
         return ApiResponse.ok(answerSubmitService.submitAnswer(sessionId, userId, request));
+    }
+
+    @Operation(summary = "Get interview hint")
+    @PostMapping("/{sessionId}/hint")
+    public ApiResponse<InterviewHintResponse> getHint(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId,
+            @Valid @RequestBody InterviewHintRequest request) {
+        return ApiResponse.ok(interviewHintService.getHint(sessionId, request.getQuestionId(), userId));
+    }
+
+    @Operation(summary = "Skip question and continue to next")
+    @PostMapping("/{sessionId}/questions/{questionId}/skip-and-next")
+    public ApiResponse<SubmitAttemptResponse> skipAndNext(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId,
+            @PathVariable Long questionId,
+            @Valid @RequestBody SkipAndNextRequest request) {
+        return ApiResponse.ok(interviewSkipService.skipAndNext(sessionId, questionId, userId, request));
     }
 
     /**

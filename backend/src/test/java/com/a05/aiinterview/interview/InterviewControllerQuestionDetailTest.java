@@ -3,8 +3,11 @@ package com.a05.aiinterview.interview;
 import com.a05.aiinterview.common.ApiResponse;
 import com.a05.aiinterview.interview.dto.InterviewQuestionReviewDto;
 import com.a05.aiinterview.interview.engine.AnswerSubmitService;
+import com.a05.aiinterview.interview.service.InterviewHistoryService;
+import com.a05.aiinterview.interview.service.InterviewHintService;
 import com.a05.aiinterview.interview.service.InterviewQuestionReviewService;
 import com.a05.aiinterview.interview.service.InterviewReportService;
+import com.a05.aiinterview.interview.service.InterviewSkipService;
 import com.a05.aiinterview.interview.service.InterviewService;
 import com.a05.aiinterview.interview.service.LearningRecommendationService;
 import com.a05.aiinterview.interview.service.QuestionStreamService;
@@ -20,7 +23,10 @@ class InterviewControllerQuestionDetailTest {
     @Test
     void getQuestionReview_shouldReturnApiResponseOk() {
         InterviewService interviewService = mock(InterviewService.class);
+        InterviewHistoryService historyService = mock(InterviewHistoryService.class);
         AnswerSubmitService answerSubmitService = mock(AnswerSubmitService.class);
+        InterviewHintService hintService = mock(InterviewHintService.class);
+        InterviewSkipService skipService = mock(InterviewSkipService.class);
         InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
         InterviewReportService reportService = mock(InterviewReportService.class);
         LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
@@ -28,7 +34,10 @@ class InterviewControllerQuestionDetailTest {
 
         InterviewController controller = new InterviewController(
                 interviewService,
+                historyService,
                 answerSubmitService,
+                hintService,
+                skipService,
                 reviewService,
                 reportService,
                 recommendationService,
@@ -47,7 +56,10 @@ class InterviewControllerQuestionDetailTest {
     @Test
     void getQuestionReview_shouldPropagateBusinessException() {
         InterviewService interviewService = mock(InterviewService.class);
+        InterviewHistoryService historyService = mock(InterviewHistoryService.class);
         AnswerSubmitService answerSubmitService = mock(AnswerSubmitService.class);
+        InterviewHintService hintService = mock(InterviewHintService.class);
+        InterviewSkipService skipService = mock(InterviewSkipService.class);
         InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
         InterviewReportService reportService = mock(InterviewReportService.class);
         LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
@@ -55,7 +67,10 @@ class InterviewControllerQuestionDetailTest {
 
         InterviewController controller = new InterviewController(
                 interviewService,
+                historyService,
                 answerSubmitService,
+                hintService,
+                skipService,
                 reviewService,
                 reportService,
                 recommendationService,

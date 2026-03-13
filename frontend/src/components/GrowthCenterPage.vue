@@ -2,8 +2,9 @@
   <section id="page-growth" class="page-section active">
     <header class="welcome-header">
       <div class="welcome-text">
-        <h2>欢迎回来，{{ user.name }}</h2>
+        <h2>欢迎回来，{{ displayName }}</h2>
         <p>准备好开始你的AI模拟面试之旅了吗？</p>
+        <p v-if="loadError" class="header-error">{{ loadError }}</p>
       </div>
       <div class="quick-actions">
         <button class="btn btn-primary glass-btn" @click="goToInterview()">
@@ -179,10 +180,9 @@
 </template>
 
 <script>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { getProfile, getProfileSkillOverview, getProfileStatistics } from '../api/resume'
 import CustomSelect from './CustomSelect.vue'
-
-const RADAR_LABELS = ['专业底层功底', '工程实战经验', '沟通与表达能力', '逻辑分析与解决问题', '场景与架构思维']
 
 export default {
   name: 'GrowthCenterPage',
@@ -201,50 +201,56 @@ export default {
   },
   emits: ['navigate', 'goToInterview'],
   setup(props, { emit }) {
+    const loading = ref(false)
+    const loadError = ref('')
+    const profileNickname = ref(props.user.name || '面试者')
+    const displayName = computed(() => profileNickname.value || props.user.name || '面试者')
+
     const stats = reactive({
-      totalInterviews: props.user.totalInterviews ?? 12,
-      avgScore: props.user.avgScore ?? 85,
-      totalHours: props.user.totalHours ?? 36,
+      totalInterviews: props.user.totalInterviews ?? 0,
+      avgScore: props.user.avgScore ?? '--',
+      totalHours: props.user.totalHours ?? 0,
       points: props.user.points ?? 0
     })
 
-    const radarLabels = RADAR_LABELS
-    const radarData = reactive([78, 72, 80, 75, 68])
+    const skillDomains = ref([])
+    const trendPoints = ref([])
+
+    const radarDomainSlots = computed(() => {
+      const sorted = [...skillDomains.value].sort((a, b) => Number(b.averageScore || 0) - Number(a.averageScore || 0))
+      const top = sorted.slice(0, 5)
+      while (top.length < 5) {
+        top.push({
+          domainCode: `none-${top.length}`,
+          domainName: '暂无数据',
+          averageScore: 0
+        })
+      }
+      return top
+    })
+    const radarLabels = computed(() => radarDomainSlots.value.map((item) => item.domainName || '暂无数据'))
+    const radarData = computed(() => radarDomainSlots.value.map((item) => Math.max(0, Math.min(100, Number(item.averageScore || 0)))))
     const radarLevels = [20, 40, 60, 80, 100]
 
     const selectedTrendDimension = ref('all')
     const trendDimensionOptions = [
-      { value: 'all', label: '综合评分' },
-      { value: '0', label: '专业底层功底' },
-      { value: '1', label: '工程实战经验' },
-      { value: '2', label: '沟通与表达能力' },
-      { value: '3', label: '逻辑分析与解决问题' },
-      { value: '4', label: '场景与架构思维' }
+      { value: 'all', label: '综合评分' }
     ]
-
-    const trendDataByDimension = {
-      all: [70, 74, 76, 78, 80, 82, 85],
-      '0': [68, 72, 74, 76, 78, 80, 78],
-      '1': [70, 71, 73, 75, 72, 74, 72],
-      '2': [75, 76, 78, 80, 82, 80, 80],
-      '3': [72, 74, 76, 78, 76, 78, 75],
-      '4': [65, 68, 70, 72, 70, 68, 68]
-    }
-    const trendXLabels = ['第1周', '第2周', '第3周', '第4周', '第5周', '第6周', '第7周']
-
-    const trendSeries = computed(() => trendDataByDimension[selectedTrendDimension.value] || trendDataByDimension.all)
+    const trendSeries = computed(() => trendPoints.value.map((item) => Number(item.score || 0)))
+    const trendXLabels = computed(() => trendPoints.value.map((item) => String(item.date || '').slice(5)))
 
     const trendChartPoints = computed(() => {
       const data = trendSeries.value
+      if (!data.length) return []
       const w = 400
       const h = 160
       const padding = 20
       const max = Math.max(...data)
       const min = Math.min(...data)
       const range = max - min || 1
-      const step = (w - 2 * padding) / (data.length - 1)
+      const step = data.length > 1 ? (w - 2 * padding) / (data.length - 1) : 0
       return data.map((v, i) => ({
-        x: padding + i * step,
+        x: data.length > 1 ? padding + i * step : w / 2,
         y: padding + (h - 2 * padding) * (1 - (v - min) / range),
         value: v
       }))
@@ -290,7 +296,7 @@ export default {
     }
 
     const radarPointsStr = computed(() =>
-      radarData.map((v, i) => getPointPosition(i, v)).map(p => `${p.x},${p.y}`).join(' ')
+      radarData.value.map((v, i) => getPointPosition(i, v)).map(p => `${p.x},${p.y}`).join(' ')
     )
 
     function getLabelStyle(index) {
@@ -307,48 +313,59 @@ export default {
       { value: 'fullstack', label: '全栈开发' }
     ]
     const selectedPosition = ref('frontend')
-
-    const skillByPosition = {
-      frontend: {
-        strengths: [
-          { name: 'Vue.js', score: 92, code: 'vue' },
-          { name: 'JavaScript', score: 88, code: 'js' },
-          { name: 'CSS3', score: 85, code: 'css' }
-        ],
-        weaknesses: [
-          { name: 'TypeScript', score: 45, code: 'ts' },
-          { name: 'Webpack', score: 52, code: 'webpack' },
-          { name: 'Node.js', score: 58, code: 'node' }
-        ]
-      },
-      backend: {
-        strengths: [
-          { name: 'Java', score: 90, code: 'java' },
-          { name: 'MySQL', score: 85, code: 'mysql' },
-          { name: 'Spring', score: 82, code: 'spring' }
-        ],
-        weaknesses: [
-          { name: 'Redis', score: 48, code: 'redis' },
-          { name: 'Docker', score: 55, code: 'docker' },
-          { name: '微服务', score: 60, code: 'micro' }
-        ]
-      },
-      fullstack: {
-        strengths: [
-          { name: 'Vue.js', score: 88, code: 'vue' },
-          { name: 'Node.js', score: 85, code: 'node' },
-          { name: 'MongoDB', score: 80, code: 'mongo' }
-        ],
-        weaknesses: [
-          { name: 'DevOps', score: 42, code: 'devops' },
-          { name: 'GraphQL', score: 50, code: 'graphql' },
-          { name: 'Kubernetes', score: 55, code: 'k8s' }
-        ]
-      }
+    const positionCodeMap = {
+      frontend: 'FRONTEND',
+      backend: 'JAVA_BACKEND',
+      fullstack: 'FRONTEND'
     }
 
-    const topStrengths = computed(() => skillByPosition[selectedPosition.value]?.strengths || skillByPosition.frontend.strengths)
-    const topWeaknesses = computed(() => skillByPosition[selectedPosition.value]?.weaknesses || skillByPosition.frontend.weaknesses)
+    const topStrengths = computed(() =>
+      [...skillDomains.value]
+        .filter((item) => item.averageScore != null)
+        .sort((a, b) => Number(b.averageScore) - Number(a.averageScore))
+        .slice(0, 3)
+        .map((item) => ({
+          name: item.domainName || item.domainCode,
+          score: Math.round(Number(item.averageScore)),
+          code: item.domainCode
+        }))
+    )
+    const topWeaknesses = computed(() =>
+      [...skillDomains.value]
+        .filter((item) => item.averageScore != null)
+        .sort((a, b) => Number(a.averageScore) - Number(b.averageScore))
+        .slice(0, 3)
+        .map((item) => ({
+          name: item.domainName || item.domainCode,
+          score: Math.round(Number(item.averageScore)),
+          code: item.domainCode
+        }))
+    )
+
+    const loadGrowthData = async () => {
+      loading.value = true
+      loadError.value = ''
+      const positionCode = positionCodeMap[selectedPosition.value]
+      try {
+        const [profile, statistics, skillOverview] = await Promise.all([
+          getProfile(),
+          getProfileStatistics(positionCode),
+          getProfileSkillOverview(positionCode)
+        ])
+
+        profileNickname.value = profile?.nickname || props.user.name || '面试者'
+        stats.totalInterviews = Number(statistics?.totalSessions) || 0
+        stats.totalHours = Math.round(((Number(statistics?.totalMinutes) || 0) / 60) * 10) / 10
+        stats.avgScore = statistics?.averageScore == null ? '--' : Math.round(Number(statistics.averageScore))
+        trendPoints.value = Array.isArray(statistics?.scoreTrend) ? statistics.scoreTrend : []
+        skillDomains.value = Array.isArray(skillOverview?.domains) ? skillOverview.domains : []
+      } catch (error) {
+        console.error('[GrowthCenterPage] 加载成长中心数据失败', error)
+        loadError.value = error?.message || '成长数据加载失败'
+      } finally {
+        loading.value = false
+      }
+    }
 
     function goToInterview(autoFocus, autoPosition) {
       emit('goToInterview', {
@@ -357,7 +374,18 @@ export default {
       })
     }
 
+    watch(selectedPosition, () => {
+      loadGrowthData()
+    })
+
+    onMounted(() => {
+      loadGrowthData()
+    })
+
     return {
+      loading,
+      loadError,
+      displayName,
       stats,
       radarLabels,
       radarData,
@@ -414,6 +442,12 @@ export default {
 
 .block-title i {
   color: var(--primary-color);
+}
+
+.header-error {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #f87171;
 }
 
 .radar-wrap {

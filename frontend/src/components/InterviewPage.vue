@@ -673,6 +673,8 @@ import {
   createInterviewSession,
   getInterviewSessionDetail,
   submitInterviewAttempt,
+  getInterviewHint,
+  skipInterviewQuestion,
   finishInterviewSession,
   getSystemPing
 } from '../api/resume'
@@ -1767,27 +1769,41 @@ export default {
       scrollToBottom()
     }
 
-    const getHint = () => {
-      if (hintUsed.value) return
+    const buildLocalHint = (question) => {
+      if (Array.isArray(question.keywords) && question.keywords.length) {
+        return '提示：可以优先覆盖这些要点：' + question.keywords.slice(0, 2).join('、')
+      }
+      if (question.targetSkill) {
+        return '提示：重点讲清你对「' + question.targetSkill + '」的理解和实践。'
+      }
+      return '提示：可按“定义 -> 原理 -> 实战场景”来组织回答。'
+    }
+
+    const getHint = async () => {
+      if (hintUsed.value || isSubmittingAnswer.value || isWaitingNextQuestion.value || isFinishing.value) return
 
       const question = questions.value[currentQuestion.value]
       if (!question) return
+      const questionId = Number(question.questionId)
 
       let hint = ''
-      if (Array.isArray(question.keywords) && question.keywords.length) {
-        hint = '提示：可以优先覆盖这些要点：' + question.keywords.slice(0, 2).join('、')
-      } else if (question.targetSkill) {
-        hint = '提示：重点讲清你对「' + question.targetSkill + '」的理解和实践。'
-      } else {
-        hint = '提示：可按“定义 -> 原理 -> 实战场景”来组织回答。'
+      if (!singleQuestionMode.value && backendSessionId.value && Number.isInteger(questionId) && questionId > 0) {
+        try {
+          const resp = await getInterviewHint(backendSessionId.value, questionId)
+          hint = String(resp?.hintText || resp?.hint || '').trim()
+        } catch (err) {
+          console.error('[InterviewPage] failed to get backend hint', err)
+        }
       }
-
+      if (!hint) {
+        hint = buildLocalHint(question)
+      }
       messages.value.push({
         type: 'ai',
         content: hint
       })
       hintUsed.value = true
-      scrollToBottom()
+      await scrollToBottom()
     }
 
     const toggleVoiceInput = async () => {
@@ -2017,8 +2033,72 @@ export default {
       if (isSubmittingAnswer.value || isWaitingNextQuestion.value || isFinishing.value) return
       const question = questions.value[currentQuestion.value]
       if (!question) return
+
+      if (singleQuestionMode.value) {
+        ttsPlayerService.skip()
+        await submitAnswerText('[skip]', true)
+        return
+      }
+
+      if (!backendSessionId.value) {
+        alert('面试会话尚未初始化')
+        return
+      }
+      const questionId = Number(question.questionId)
+      if (!Number.isInteger(questionId) || questionId <= 0) {
+        alert('当前题目尚未完全就绪，请稍后重试。')
+        return
+      }
+
       ttsPlayerService.skip()
-      await submitAnswerText('[skip]', true)
+      messages.value.push({
+        type: 'user',
+        content: '[skip]'
+      })
+      answerInput.value = ''
+      recognizedText.value = ''
+      lastPauseStats.value = null
+      lastAsrSegments.value = []
+      hintUsed.value = false
+
+      isSubmittingAnswer.value = true
+      try {
+        const attemptId = buildAttemptId()
+        const resp = await skipInterviewQuestion(backendSessionId.value, questionId, attemptId)
+
+        const signal = resp?.evaluationSignal || 'NEXT_DOMAIN'
+        answers.value.push({
+          questionId,
+          question: question.question,
+          answer: '[skip]',
+          score: 0,
+          keywords: question.keywords || []
+        })
+
+        const signalText = SIGNAL_TEXT_MAP[signal]
+        if (signalText) {
+          messages.value.push({
+            type: 'ai',
+            content: signalText
+          })
+        }
+
+        if (signal === 'END' || !resp?.streamAttemptId) {
+          await finishInterview({ manual: false })
+        } else {
+          await streamNextQuestion(resp.streamAttemptId)
+        }
+      } catch (err) {
+        if (isAbortLikeError(err)) {
+          console.info('[InterviewPage] skip flow aborted by user action')
+        } else {
+          console.error('[InterviewPage] failed to skip question', err)
+          alert(err?.message || '跳过本题失败，请重试。')
+        }
+      } finally {
+        isSubmittingAnswer.value = false
+        await scrollToBottom()
+      }
     }
 
     const endInterview = async () => {

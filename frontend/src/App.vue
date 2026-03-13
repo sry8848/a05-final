@@ -143,7 +143,7 @@ import InterviewReportGeneratingPage from './components/InterviewReportGeneratin
 import AdminLoginPage from './components/AdminLoginPage.vue'
 import AdminLayout from './components/AdminLayout.vue'
 import ResumesPage from './components/ResumesPage.vue'
-import { getInterviewQuestionDetail, getInterviewReport } from './api/resume'
+import { createQuestionBankItem, getInterviewQuestionDetail, getInterviewReport } from './api/resume'
 
 export default {
   name: 'App',
@@ -203,6 +203,8 @@ export default {
     
     const user = reactive({
       name: '面试者',
+      email: '',
+      avatarUrl: '',
       level: 'Lv.1 初级工程师',
       totalInterviews: 12,
       avgScore: 85,
@@ -996,6 +998,7 @@ export default {
       const explicitQuestionId = normalizeQuestionId(item.questionId)
       const localQuestionKey = normalizeQuestionId(item.localQuestionKey) || explicitQuestionId || normalizeQuestionId(item.id) || `question-bank-${index}`
       const isLocalFallback = !resolvedSessionId || !explicitQuestionId
+      const bankScore = normalizeNullableScore(item.score)
 
       const detail = {
         source: 'questionBank',
@@ -1014,15 +1017,15 @@ export default {
         answerStatus: !(item.userAnswer || item.answer) ? 'skipped' : 'answered',
         evaluationStatus: isLocalFallback ? 'ready' : 'pending',
         userAnswer: item.userAnswer || item.answer || '',
-        highlightedSegments: buildHighlightedSegments(item.userAnswer || item.answer || '', item.keywords || [], item.score || 0),
-        score: item.score || 0,
-        commentary: item.analysis || buildCommentary({ score: item.score || 0, answer: item.userAnswer || item.answer || '' }, item.domainName || '通用技术能力'),
-        strengthPoints: buildStrengthPoints({ score: item.score || 0, answer: item.userAnswer || item.answer || '' }, item.keywords || []),
-        weakPoints: buildWeakPoints({ score: item.score || 0, answer: item.userAnswer || item.answer || '' }, item.keywords || []),
+        highlightedSegments: buildHighlightedSegments(item.userAnswer || item.answer || '', item.keywords || [], bankScore ?? 0),
+        score: bankScore,
+        commentary: item.analysis || buildCommentary({ score: bankScore ?? 0, answer: item.userAnswer || item.answer || '' }, item.domainName || '通用技术能力'),
+        strengthPoints: buildStrengthPoints({ score: bankScore ?? 0, answer: item.userAnswer || item.answer || '' }, item.keywords || []),
+        weakPoints: buildWeakPoints({ score: bankScore ?? 0, answer: item.userAnswer || item.answer || '' }, item.keywords || []),
         evaluatedDomains: [
           {
             domainName: item.domainName || inferDomainName(item.questionStem || item.question, item.keywords || [], item.jobName || item.job || ''),
-            score: item.score || 0,
+            score: bankScore,
             note: item.analysis || '建议围绕核心概念、原理和实际场景继续补强。'
           }
         ],
@@ -1098,7 +1101,10 @@ export default {
       showNotification('设置已保存', 'success')
     }
 
-    const saveSettings = () => {
+    const saveSettings = (updatedUser) => {
+      if (updatedUser && typeof updatedUser === 'object') {
+        Object.assign(user, updatedUser)
+      }
       saveUserSettings()
     }
 
@@ -1135,7 +1141,33 @@ export default {
       openQuestionDetail(detail, context)
     }
 
-    const handleShowInterviewDetail = (recordId) => {
+    const handleShowInterviewDetail = (recordOrItem) => {
+      let recordId = recordOrItem
+      if (recordOrItem && typeof recordOrItem === 'object') {
+        const sessionId = normalizeSessionId(recordOrItem.sessionId || recordOrItem.id)
+        const records = readInterviewRecords()
+        let record = records.find((item) => normalizeSessionId(item.sessionId) === sessionId)
+
+        if (!record && sessionId != null) {
+          record = {
+            id: sessionId,
+            sessionId,
+            job: recordOrItem.job || recordOrItem.title || '模拟面试',
+            company: '模拟面试',
+            round: '一面',
+            date: recordOrItem.date || new Date().toLocaleString('zh-CN'),
+            score: Number(recordOrItem.score) || 0,
+            duration: recordOrItem.duration || '--',
+            questions: Number(recordOrItem.questions) || 0,
+            correct: Number(recordOrItem.correct) || 0,
+            answers: [],
+            reportStatus: recordOrItem.reportStatus || 'ready'
+          }
+          records.unshift(record)
+          writeInterviewRecords(records.slice(0, 50))
+        }
+        recordId = record?.id ?? recordOrItem.id
+      }
       selectedRecordId.value = recordId
       showInterviewDetail.value = true
     }
@@ -1215,61 +1247,66 @@ export default {
       openQuestionDetail(detail, context)
     }
 
-    const handleCollectQuestion = (detail) => {
+    const handleCollectQuestion = async (detail) => {
       if (!detail) return
+      if (!detail.sessionId || !detail.questionId) {
+        showNotification('当前题目缺少后端上下文，暂不支持收藏', 'info')
+        return
+      }
 
       const storageKey = 'questionBank'
       const savedItems = JSON.parse(localStorage.getItem(storageKey) || '[]')
-      const localQuestionKey = detail.localQuestionKey || detail.questionId || `${detail.recordId}-${detail.questionIndex || 0}`
-      const exists = savedItems.some((item) => {
-        const itemQuestionKey = item.localQuestionKey || item.questionId || item.id
-        return item.recordId === detail.recordId && itemQuestionKey === localQuestionKey
-      })
+      try {
+        const collected = await createQuestionBankItem({
+          sessionId: detail.sessionId,
+          questionId: detail.questionId,
+          tag: detail.domainName || null
+        })
 
-      if (exists) {
+        const localItem = {
+          id: collected?.id || `${detail.sessionId}-${detail.questionId}`,
+          recordId: detail.recordId || detail.sessionId,
+          sessionId: collected?.sessionId || detail.sessionId,
+          questionId: collected?.questionId || detail.questionId,
+          localQuestionKey: detail.localQuestionKey || detail.questionId,
+          questionStem: collected?.questionStem || detail.questionStem,
+          question: collected?.questionStem || detail.questionStem,
+          tag: collected?.tag || detail.domainName,
+          createdAt: collected?.createdAt || detail.interviewDate,
+          answer: collected?.answerSummary || '',
+          userAnswer: collected?.answerSummary || '',
+          score: collected?.score ?? null,
+          keywords: detail.keywords || [],
+          jobName: detail.jobName,
+          job: detail.jobName,
+          jobType: mapJobType(detail.jobName),
+          modeLabel: detail.modeLabel,
+          date: detail.interviewDate,
+          timestamp: new Date(collected?.createdAt || detail.interviewDate || Date.now()).getTime() || Date.now(),
+          rewrittenAnswer: detail.rewrittenAnswer,
+          standardAnswer: detail.rewrittenAnswer,
+          analysis: detail.commentary,
+          domainName: collected?.domainName || detail.domainName,
+          questionType: collected?.questionType || detail.questionType,
+          targetDepth: collected?.targetDepth || detail.targetDepth,
+          isLocalFallback: false
+        }
+
+        const index = savedItems.findIndex((item) => String(item.id) === String(localItem.id))
+        if (index >= 0) {
+          savedItems[index] = localItem
+        } else {
+          savedItems.unshift(localItem)
+        }
+        localStorage.setItem(storageKey, JSON.stringify(savedItems))
         selectedQuestionDetail.value = {
           ...detail,
           isCollected: true
         }
-        showNotification('该题已经在成长问答库中了', 'info')
-        return
+        showNotification('已收藏到成长问答库', 'success')
+      } catch (error) {
+        showNotification(error?.message || '收藏失败，请稍后重试', 'error')
       }
-
-      savedItems.unshift({
-        id: `${detail.recordId}-${localQuestionKey}`,
-        recordId: detail.recordId,
-        sessionId: detail.sessionId || null,
-        questionId: detail.questionId || null,
-        localQuestionKey,
-        questionStem: detail.questionStem,
-        question: detail.questionStem,
-        tag: detail.domainName,
-        createdAt: detail.interviewDate,
-        answer: detail.userAnswer || '',
-        userAnswer: detail.userAnswer || '',
-        score: detail.score,
-        keywords: detail.keywords || [],
-        jobName: detail.jobName,
-        job: detail.jobName,
-        jobType: mapJobType(detail.jobName),
-        modeLabel: detail.modeLabel,
-        date: detail.interviewDate,
-        timestamp: new Date(detail.interviewDate).getTime() || Date.now(),
-        rewrittenAnswer: detail.rewrittenAnswer,
-        standardAnswer: detail.rewrittenAnswer,
-        analysis: detail.commentary,
-        domainName: detail.domainName,
-        questionType: detail.questionType,
-        targetDepth: detail.targetDepth,
-        isLocalFallback: !!detail.isLocalFallback
-      })
-
-      localStorage.setItem(storageKey, JSON.stringify(savedItems))
-      selectedQuestionDetail.value = {
-        ...detail,
-        isCollected: true
-      }
-      showNotification('已收藏到成长问答库', 'success')
     }
 
     const handleRetryInterview = (record) => {

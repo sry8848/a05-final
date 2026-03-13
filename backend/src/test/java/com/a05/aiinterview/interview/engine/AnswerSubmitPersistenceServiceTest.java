@@ -86,4 +86,36 @@ class AnswerSubmitPersistenceServiceTest {
 
         verify(eventPublisher, never()).publishEvent(any(Object.class));
     }
+
+    @Test
+    void persist_shouldMarkQuestionSkippedWhenAnswerIsSkip() {
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        StateLedgerPatchService patchService = mock(StateLedgerPatchService.class);
+        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+        AnswerSubmitPersistenceService service = new AnswerSubmitPersistenceService(
+                attemptMapper, questionMapper, sessionMapper, patchService, eventPublisher
+        );
+
+        when(attemptMapper.insert(any())).thenReturn(1);
+
+        SubmitAttemptRequest request = new SubmitAttemptRequest();
+        request.setAttemptId("attempt-3");
+        request.setAnswerText("[skip]");
+        request.setIsFinal(true);
+
+        InterviewQuestion question = new InterviewQuestion();
+        question.setId(5L);
+
+        EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
+                .signal("NEXT_DOMAIN")
+                .build();
+
+        service.persist(1L, question, request, output);
+
+        ArgumentCaptor<InterviewQuestion> captor = ArgumentCaptor.forClass(InterviewQuestion.class);
+        verify(questionMapper).updateById(captor.capture());
+        assertEquals("skipped", captor.getValue().getStatus());
+    }
 }

@@ -26,7 +26,7 @@
             <span><i class="fas fa-clock"></i> 用时 {{ item.duration }}</span>
             <span v-if="normalizeReportStatus(item.reportStatus) === 'ready'">
               <i class="fas fa-check-circle"></i>
-              {{ item.correct }}/{{ item.questions }} 正确
+              {{ Number.isFinite(Number(item.correct)) ? item.correct : '--' }}/{{ item.questions || '--' }} 正确
             </span>
             <span v-else-if="normalizeReportStatus(item.reportStatus) === 'generating'" class="status-meta generating">
               <i class="fas fa-spinner fa-spin"></i>
@@ -73,6 +73,7 @@
 
 <script>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { getInterviewHistory } from '../api/resume'
 
 export default {
   name: 'HistoryPage',
@@ -80,13 +81,16 @@ export default {
   setup(props, { emit }) {
     const historyList = ref([])
     const INTERVIEW_RECORDS_UPDATED_EVENT = 'interview-records-updated'
+    const STATUS_READY = 'ready'
+    const STATUS_GENERATING = 'generating'
+    const STATUS_FAILED = 'failed'
 
     const normalizeReportStatus = (status) => {
       const normalized = String(status || '').trim().toLowerCase()
-      if (normalized === 'generating' || normalized === 'failed' || normalized === 'ready') {
+      if (normalized === STATUS_GENERATING || normalized === STATUS_FAILED || normalized === STATUS_READY) {
         return normalized
       }
-      return 'ready'
+      return STATUS_READY
     }
 
     const normalizeRecord = (record) => ({
@@ -94,89 +98,97 @@ export default {
       reportStatus: normalizeReportStatus(record?.reportStatus)
     })
 
-    const loadHistory = () => {
+    const mapRoleLabel = (targetRole) => {
+      const map = {
+        FRONTEND: '前端开发工程师',
+        JAVA_BACKEND: '后端开发工程师',
+        GO_BACKEND: '后端开发工程师',
+        DATA_ENGINEER: '数据工程师',
+        QA: '测试工程师',
+        DEVOPS: '运维工程师'
+      }
+      return map[targetRole] || targetRole || '模拟面试'
+    }
+
+    const toDateText = (value) => {
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return value || ''
+      return date.toLocaleString('zh-CN', { hour12: false })
+    }
+
+    const mapBackendStatusToReportStatus = (status) => {
+      const normalized = String(status || '').trim().toLowerCase()
+      if (normalized === 'completed') return STATUS_READY
+      if (normalized === 'aborted') return STATUS_FAILED
+      if (normalized === 'report_generating' || normalized === 'planning' || normalized === 'in_progress') {
+        return STATUS_GENERATING
+      }
+      return STATUS_READY
+    }
+
+    const mapBackendItem = (item) => {
+      const score = Number(item?.overallScore)
+      const sessionId = item?.sessionId
+      return normalizeRecord({
+        id: sessionId,
+        sessionId,
+        job: mapRoleLabel(item?.targetRole),
+        targetRole: item?.targetRole,
+        date: toDateText(item?.createdAt),
+        duration: '--',
+        score: Number.isFinite(score) ? Math.round(score) : null,
+        questions: Number(item?.questionCount) || 0,
+        correct: null,
+        reportStatus: mapBackendStatusToReportStatus(item?.status)
+      })
+    }
+
+    const loadLocalHistory = () => {
       try {
         const records = JSON.parse(localStorage.getItem('interviewRecords') || '[]')
         if (Array.isArray(records) && records.length > 0) {
-          historyList.value = records.map(normalizeRecord)
+          return records.map(normalizeRecord)
+        }
+      } catch (error) {
+        console.warn('[HistoryPage] 加载本地历史记录失败', error)
+      }
+      return []
+    }
+
+    const loadHistory = async () => {
+      try {
+        const page = await getInterviewHistory({
+          page: 1,
+          pageSize: 50,
+          sortBy: 'createdAt',
+          sortOrder: 'desc'
+        })
+        const backendItems = Array.isArray(page?.items) ? page.items : []
+        if (backendItems.length > 0) {
+          historyList.value = backendItems.map(mapBackendItem)
           return
         }
       } catch (error) {
-        console.warn('[HistoryPage] 加载历史记录失败，使用默认数据', error)
+        console.warn('[HistoryPage] 加载后端历史记录失败，切换本地兜底', error)
       }
-      historyList.value = generateMockHistory()
-    }
-
-    const generateMockHistory = () => {
-      return [
-        {
-          id: 1,
-          job: '前端开发工程师',
-          date: '2024-01-15 14:30',
-          score: 85,
-          duration: '15:30',
-          questions: 10,
-          correct: 8,
-          reportStatus: 'ready'
-        },
-        {
-          id: 2,
-          job: '前端开发工程师',
-          date: '2024-01-14 10:00',
-          score: 78,
-          duration: '12:45',
-          questions: 10,
-          correct: 7,
-          reportStatus: 'ready'
-        },
-        {
-          id: 3,
-          job: '全栈开发工程师',
-          date: '2024-01-13 16:20',
-          score: 92,
-          duration: '18:00',
-          questions: 15,
-          correct: 14,
-          reportStatus: 'ready'
-        },
-        {
-          id: 4,
-          job: '后端开发工程师',
-          date: '2024-01-12 09:15',
-          score: 70,
-          duration: '20:30',
-          questions: 12,
-          correct: 8,
-          reportStatus: 'ready'
-        },
-        {
-          id: 5,
-          job: '前端开发工程师',
-          date: '2024-01-10 11:00',
-          score: 88,
-          duration: '14:20',
-          questions: 10,
-          correct: 9,
-          reportStatus: 'ready'
-        }
-      ]
+      historyList.value = loadLocalHistory()
     }
 
     const isRecordClickable = (item) => {
-      return normalizeReportStatus(item?.reportStatus) === 'ready'
+      return normalizeReportStatus(item?.reportStatus) === STATUS_READY
     }
 
     const getScoreBadgeText = (item) => {
       const status = normalizeReportStatus(item?.reportStatus)
-      if (status === 'generating') return '生成中'
-      if (status === 'failed') return '失败'
+      if (status === STATUS_GENERATING) return '生成中'
+      if (status === STATUS_FAILED) return '失败'
       const score = Number(item?.score)
       return Number.isFinite(score) ? `${Math.round(score)}分` : '--'
     }
 
     const viewHistoryDetail = (item) => {
       if (!isRecordClickable(item)) return
-      emit('showInterviewDetail', item.id)
+      emit('showInterviewDetail', item)
     }
 
     const goToQuestionBank = () => {

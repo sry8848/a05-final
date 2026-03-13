@@ -65,6 +65,11 @@
     </section>
 
     <div class="question-grid">
+      <div v-if="isLoading" class="empty-state glass-card">
+        <i class="fas fa-spinner fa-spin"></i>
+        <p>正在加载问答库...</p>
+      </div>
+
       <article
         v-for="item in filteredQuestions"
         :key="item.id"
@@ -76,7 +81,7 @@
             <span v-if="item.tag" class="sub-tag">{{ item.tag }}</span>
           </div>
           <div class="card-score" :class="getScoreClass(item.score)">
-            {{ item.score }}分
+            {{ item.score == null ? '--' : `${item.score}分` }}
           </div>
         </div>
 
@@ -108,9 +113,9 @@
         </div>
       </article>
 
-      <div v-if="filteredQuestions.length === 0" class="empty-state glass-card">
+      <div v-if="!isLoading && filteredQuestions.length === 0" class="empty-state glass-card">
         <i class="fas fa-book-open"></i>
-        <p>{{ totalQuestions === 0 ? '你还没有收藏题目，去单题复盘页积累第一道题吧。' : '暂无符合条件的题目。' }}</p>
+        <p>{{ loadError || (totalQuestions === 0 ? '你还没有收藏题目，去单题复盘页积累第一道题吧。' : '暂无符合条件的题目。') }}</p>
         <button v-if="hasActiveFilters" class="btn btn-secondary glass-btn" @click="clearFilters">
           清除筛选条件
         </button>
@@ -121,6 +126,7 @@
 
 <script>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { deleteQuestionBankItem, getQuestionBank } from '../api/resume'
 import CustomSelect from './CustomSelect.vue'
 
 export default {
@@ -132,6 +138,8 @@ export default {
   setup(props, { emit }) {
     const STORAGE_KEY = 'questionBank'
     const allQuestions = ref([])
+    const isLoading = ref(false)
+    const loadError = ref('')
 
     const filters = reactive({
       timeRange: 'all',
@@ -162,11 +170,14 @@ export default {
     ]
 
     const totalQuestions = computed(() => allQuestions.value.length)
-    const weakQuestions = computed(() => allQuestions.value.filter((item) => item.score < 60).length)
+    const weakQuestions = computed(() =>
+      allQuestions.value.filter((item) => item.score != null && item.score < 60).length
+    )
     const averageScore = computed(() => {
-      if (allQuestions.value.length === 0) return 0
-      const total = allQuestions.value.reduce((sum, item) => sum + item.score, 0)
-      return Math.round(total / allQuestions.value.length)
+      const scored = allQuestions.value.filter((item) => item.score != null)
+      if (!scored.length) return '--'
+      const total = scored.reduce((sum, item) => sum + Number(item.score || 0), 0)
+      return Math.round(total / scored.length)
     })
 
     const domainOptions = computed(() => {
@@ -205,7 +216,7 @@ export default {
           high: [80, 100]
         }
         const [min, max] = scoreRangeMap[filters.scoreRange]
-        result = result.filter((item) => item.score >= min && item.score <= max)
+        result = result.filter((item) => item.score != null && item.score >= min && item.score <= max)
       }
 
       const sorterMap = {
@@ -236,13 +247,15 @@ export default {
     const normalizeQuestion = (item = {}, index = 0) => {
       const timestamp = Number(item.timestamp) || new Date(item.createdAt || item.date || Date.now()).getTime() || Date.now() + index
       const domainName = inferDomainName(item)
+      const score = item.score == null || item.score === '' ? null : Number(item.score)
 
       return {
         id: item.id || `${item.recordId || item.sessionId || 'bank'}-${item.questionId || index}`,
         questionStem: item.questionStem || item.question || '未命名题目',
         domainName,
-        score: Number(item.score) || 0,
+        score: Number.isFinite(score) ? score : null,
         sessionId: item.sessionId || item.recordId || '',
+        questionId: item.questionId || null,
         tag: item.tag || domainName,
         createdAt: normalizeCreatedAt(item.createdAt || item.date, timestamp),
         timestamp,
@@ -251,27 +264,59 @@ export default {
         questionType: item.questionType || '综合题',
         targetDepth: item.targetDepth || 'L2',
         modeLabel: item.modeLabel || '练习模式',
-        userAnswer: item.userAnswer || item.answer || '',
+        userAnswer: item.userAnswer || item.answerSummary || item.answer || '',
         rewrittenAnswer: item.rewrittenAnswer || item.standardAnswer || '',
         analysis: item.analysis || ''
       }
     }
 
-    const loadQuestions = () => {
+    const syncLocalCache = (items) => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
+    }
+
+    const buildScoreFilter = () => {
+      if (filters.scoreRange === 'low') return { minScore: 0, maxScore: 59 }
+      if (filters.scoreRange === 'medium') return { minScore: 60, maxScore: 79 }
+      if (filters.scoreRange === 'high') return { minScore: 80, maxScore: 100 }
+      return { minScore: null, maxScore: null }
+    }
+
+    const toSortParams = () => {
+      if (filters.sortBy === 'oldest') return { sortBy: 'createdAt', sortOrder: 'asc' }
+      if (filters.sortBy === 'scoreAsc') return { sortBy: 'score', sortOrder: 'asc' }
+      if (filters.sortBy === 'scoreDesc') return { sortBy: 'score', sortOrder: 'desc' }
+      return { sortBy: 'createdAt', sortOrder: 'desc' }
+    }
+
+    const loadQuestions = async () => {
+      isLoading.value = true
+      loadError.value = ''
       try {
-        const storedItems = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
-        allQuestions.value = storedItems.map((item, index) => normalizeQuestion(item, index))
+        const scoreFilter = buildScoreFilter()
+        const sortParams = toSortParams()
+        const pageData = await getQuestionBank({
+          page: 1,
+          pageSize: 200,
+          minScore: scoreFilter.minScore,
+          maxScore: scoreFilter.maxScore,
+          sortBy: sortParams.sortBy,
+          sortOrder: sortParams.sortOrder
+        })
+        const items = Array.isArray(pageData?.items) ? pageData.items : []
+        const mapped = items.map((item, index) => normalizeQuestion(item, index))
+        allQuestions.value = mapped
+        syncLocalCache(mapped)
       } catch (error) {
+        console.error('[QuestionBankPage] 加载问答库失败', error)
         allQuestions.value = []
+        loadError.value = error?.message || '加载问答库失败，请稍后重试'
+      } finally {
+        isLoading.value = false
       }
     }
 
-    const saveQuestions = () => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(allQuestions.value))
-    }
-
     const applyFilters = () => {
-      // 筛选由计算属性驱动，这里仅保留给下拉组件的事件回调。
+      loadQuestions()
     }
 
     const clearFilters = () => {
@@ -279,6 +324,7 @@ export default {
       filters.domainTag = 'all'
       filters.scoreRange = 'all'
       filters.sortBy = 'newest'
+      loadQuestions()
     }
 
     const getTimeRangeLabel = (value) => {
@@ -305,6 +351,7 @@ export default {
     }
 
     const getScoreClass = (score) => {
+      if (score == null) return 'none'
       if (score >= 80) return 'high'
       if (score >= 60) return 'medium'
       return 'low'
@@ -327,11 +374,15 @@ export default {
       emit('redo', item)
     }
 
-    const deleteQuestion = (id) => {
+    const deleteQuestion = async (id) => {
       if (!confirm('确定从成长问答库中删除这道题目吗？')) return
 
-      allQuestions.value = allQuestions.value.filter((item) => item.id !== id)
-      saveQuestions()
+      try {
+        await deleteQuestionBankItem(id)
+        await loadQuestions()
+      } catch (error) {
+        alert(error?.message || '删除失败，请稍后重试')
+      }
     }
 
     const showDetail = (item) => {
@@ -352,6 +403,8 @@ export default {
       scoreRangeOptions,
       sortOptions,
       filteredQuestions,
+      isLoading,
+      loadError,
       hasActiveFilters,
       applyFilters,
       clearFilters,
@@ -583,6 +636,11 @@ export default {
 .card-score.low {
   background: rgba(239, 68, 68, 0.15);
   color: #ef4444;
+}
+
+.card-score.none {
+  background: rgba(148, 163, 184, 0.2);
+  color: #94a3b8;
 }
 
 .question-text {

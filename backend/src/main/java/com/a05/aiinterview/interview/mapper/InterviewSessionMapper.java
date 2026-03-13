@@ -1,9 +1,13 @@
 package com.a05.aiinterview.interview.mapper;
 
 import com.a05.aiinterview.interview.entity.InterviewSession;
+import com.a05.aiinterview.interview.dto.InterviewHistoryItemDto;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+
+import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 面试会话 Mapper。
@@ -19,4 +23,20 @@ public interface InterviewSessionMapper extends BaseMapper<InterviewSession> {
      * @return 加锁的会话实体
      */
     InterviewSession selectForUpdate(@Param("sessionId") Long sessionId);
+
+    List<InterviewHistoryItemDto> selectHistoryPage(@Param("userId") Long userId,
+                                                    @Param("status") String status,
+                                                    @Param("targetRole") String targetRole,
+                                                    @Param("dateFrom") LocalDateTime dateFrom,
+                                                    @Param("dateTo") LocalDateTime dateTo,
+                                                    @Param("sortBy") String sortBy,
+                                                    @Param("sortOrder") String sortOrder,
+                                                    @Param("offset") Integer offset,
+                                                    @Param("limit") Integer limit);
+
+    Long countHistory(@Param("userId") Long userId,
+                      @Param("status") String status,
+                      @Param("targetRole") String targetRole,
+                      @Param("dateFrom") LocalDateTime dateFrom,
+                      @Param("dateTo") LocalDateTime dateTo);
 }

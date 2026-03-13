@@ -8,6 +8,28 @@
     <div class="settings-container glass-card">
       <div class="settings-group">
         <h4>基本信息</h4>
+        <div class="setting-item avatar-item">
+          <label>头像</label>
+          <div class="avatar-editor">
+            <div class="avatar-preview">
+              <img v-if="avatarPreview" :src="avatarPreview" alt="avatar">
+              <i v-else class="fas fa-user"></i>
+            </div>
+            <div class="avatar-actions">
+              <input
+                ref="avatarInput"
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp"
+                class="avatar-file-input"
+                @change="handleAvatarChange"
+              >
+              <button class="btn btn-secondary glass-btn" :disabled="uploadingAvatar" @click="pickAvatar">
+                <i :class="uploadingAvatar ? 'fas fa-spinner fa-spin' : 'fas fa-upload'"></i>
+                {{ uploadingAvatar ? '上传中...' : '上传头像' }}
+              </button>
+            </div>
+          </div>
+        </div>
         <div class="setting-item">
           <label>用户名</label>
           <input type="text" class="glass-input" v-model="localUser.name">
@@ -76,7 +98,7 @@
         </button>
         <button class="btn btn-primary glass-btn" @click="saveSettings">
           <i class="fas fa-save"></i>
-          保存设置
+          {{ saving ? '保存中...' : '保存设置' }}
         </button>
       </div>
     </div>
@@ -84,7 +106,8 @@
 </template>
 
 <script>
-import { reactive, watch } from 'vue'
+import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { getProfile, updateProfile, uploadProfileAvatar } from '../api/resume'
 
 export default {
   name: 'SettingsPage',
@@ -100,9 +123,19 @@ export default {
   },
   emits: ['toggleDarkMode', 'saveSettings'],
   setup(props, { emit }) {
+    const avatarInput = ref(null)
+    const saving = ref(false)
+    const uploadingAvatar = ref(false)
+    const originalProfile = ref({
+      name: '面试者',
+      email: 'user@example.com',
+      avatarUrl: ''
+    })
+
     const localUser = reactive({
       name: '面试者',
       email: 'user@example.com',
+      avatarUrl: '',
       targetJob: '前端开发工程师',
       soundEnabled: true,
       autoSave: true,
@@ -110,15 +143,74 @@ export default {
       weeklyReport: false
     })
 
+    const avatarPreview = ref('')
+    let avatarObjectUrl = ''
+
+    const getAuthHeader = () => {
+      const token = localStorage.getItem('aiInterviewToken') || localStorage.getItem('token')
+      return token ? `Bearer ${token}` : ''
+    }
+
+    const clearAvatarObjectUrl = () => {
+      if (avatarObjectUrl) {
+        URL.revokeObjectURL(avatarObjectUrl)
+        avatarObjectUrl = ''
+      }
+    }
+
+    const loadProtectedAvatar = async (avatarUrl) => {
+      if (!avatarUrl) {
+        clearAvatarObjectUrl()
+        avatarPreview.value = ''
+        return
+      }
+      const headers = {}
+      const auth = getAuthHeader()
+      if (auth) {
+        headers.Authorization = auth
+      }
+      const response = await fetch(avatarUrl, { headers })
+      if (!response.ok) {
+        throw new Error('加载头像失败')
+      }
+      const blob = await response.blob()
+      clearAvatarObjectUrl()
+      avatarObjectUrl = URL.createObjectURL(blob)
+      avatarPreview.value = avatarObjectUrl
+    }
+
     watch(() => props.user, (newUser) => {
       if (newUser) {
         Object.assign(localUser, newUser)
       }
     }, { immediate: true })
 
+    const loadProfile = async () => {
+      try {
+        const profile = await getProfile()
+        if (profile) {
+          localUser.name = profile.nickname || localUser.name
+          localUser.email = profile.email || ''
+          localUser.avatarUrl = profile.avatarUrl || ''
+          await loadProtectedAvatar(localUser.avatarUrl)
+          originalProfile.value = {
+            name: localUser.name,
+            email: localUser.email,
+            avatarUrl: localUser.avatarUrl
+          }
+        }
+      } catch (error) {
+        console.error('[SettingsPage] 加载个人资料失败', error)
+      }
+    }
+
     const resetSettings = () => {
-      localUser.name = '面试者'
-      localUser.email = 'user@example.com'
+      localUser.name = originalProfile.value.name
+      localUser.email = originalProfile.value.email
+      localUser.avatarUrl = originalProfile.value.avatarUrl
+      loadProtectedAvatar(localUser.avatarUrl).catch(() => {
+        avatarPreview.value = ''
+      })
       localUser.targetJob = '前端开发工程师'
       localUser.soundEnabled = true
       localUser.autoSave = true
@@ -126,14 +218,71 @@ export default {
       localUser.weeklyReport = false
     }
 
-    const saveSettings = () => {
-      emit('saveSettings', { ...localUser })
+    const pickAvatar = () => {
+      avatarInput.value?.click()
     }
 
+    const handleAvatarChange = async (event) => {
+      const file = event?.target?.files?.[0]
+      if (!file) return
+      uploadingAvatar.value = true
+      try {
+        const profile = await uploadProfileAvatar(file)
+        localUser.avatarUrl = profile?.avatarUrl || localUser.avatarUrl
+        await loadProtectedAvatar(localUser.avatarUrl)
+        originalProfile.value.avatarUrl = localUser.avatarUrl
+        emit('saveSettings', { ...localUser })
+      } catch (error) {
+        alert(error?.message || '头像上传失败')
+      } finally {
+        uploadingAvatar.value = false
+        event.target.value = ''
+      }
+    }
+
+    const saveSettings = async () => {
+      if (saving.value) return
+      saving.value = true
+      try {
+        const profile = await updateProfile({
+          nickname: localUser.name,
+          email: localUser.email
+        })
+        localUser.name = profile?.nickname || localUser.name
+        localUser.email = profile?.email || localUser.email
+        localUser.avatarUrl = profile?.avatarUrl || localUser.avatarUrl
+        await loadProtectedAvatar(localUser.avatarUrl)
+        originalProfile.value = {
+          name: localUser.name,
+          email: localUser.email,
+          avatarUrl: localUser.avatarUrl
+        }
+        emit('saveSettings', { ...localUser })
+      } catch (error) {
+        alert(error?.message || '保存失败，请稍后重试')
+      } finally {
+        saving.value = false
+      }
+    }
+
+    onMounted(() => {
+      loadProfile()
+    })
+
+    onUnmounted(() => {
+      clearAvatarObjectUrl()
+    })
+
     return {
+      avatarInput,
       localUser,
+      avatarPreview,
+      saving,
+      uploadingAvatar,
       resetSettings,
-      saveSettings
+      saveSettings,
+      pickAvatar,
+      handleAvatarChange
     }
   }
 }
@@ -167,6 +316,44 @@ export default {
   align-items: center;
   justify-content: space-between;
   padding: 12px 0;
+}
+
+.avatar-item {
+  align-items: flex-start;
+}
+
+.avatar-editor {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.avatar-preview {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-actions {
+  display: flex;
+  align-items: center;
+}
+
+.avatar-file-input {
+  display: none;
 }
 
 .setting-item label {
@@ -250,5 +437,10 @@ export default {
   margin-top: 32px;
   padding-top: 24px;
   border-top: 1px solid var(--glass-border);
+}
+
+.settings-actions .btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 </style>

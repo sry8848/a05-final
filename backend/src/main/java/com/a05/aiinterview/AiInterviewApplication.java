@@ -13,7 +13,8 @@ import org.springframework.scheduling.annotation.EnableAsync;
         "com.a05.aiinterview.resume.mapper",
         "com.a05.aiinterview.position.mapper",
         "com.a05.aiinterview.interview.mapper",
-        "com.a05.aiinterview.ai.mapper"
+        "com.a05.aiinterview.ai.mapper",
+        "com.a05.aiinterview.questionbank.mapper"
 })
 public class AiInterviewApplication {
 

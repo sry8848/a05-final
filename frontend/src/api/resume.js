@@ -124,6 +124,29 @@ export function createInterviewSession(payload) {
   })
 }
 
+/** Get interview history list */
+export function getInterviewHistory(params = {}) {
+  const query = new URLSearchParams()
+  const append = (key, value) => {
+    if (value == null) return
+    const text = String(value).trim()
+    if (!text) return
+    query.set(key, text)
+  }
+
+  append('page', params.page)
+  append('pageSize', params.pageSize)
+  append('status', params.status)
+  append('targetRole', params.targetRole)
+  append('dateFrom', params.dateFrom)
+  append('dateTo', params.dateTo)
+  append('sortBy', params.sortBy)
+  append('sortOrder', params.sortOrder)
+
+  const suffix = query.toString() ? `?${query}` : ''
+  return request('/interviews' + suffix, { method: 'GET' })
+}
+
 /** Get interview session detail */
 export function getInterviewSessionDetail(sessionId) {
   return request('/interviews/' + sessionId, { method: 'GET' })
@@ -134,6 +157,22 @@ export function submitInterviewAttempt(sessionId, payload) {
   return request('/interviews/' + sessionId + '/attempts', {
     method: 'POST',
     body: payload
+  })
+}
+
+/** Get hint for current question */
+export function getInterviewHint(sessionId, questionId) {
+  return request('/interviews/' + sessionId + '/hint', {
+    method: 'POST',
+    body: { questionId }
+  })
+}
+
+/** Skip current question and continue by SSE */
+export function skipInterviewQuestion(sessionId, questionId, attemptId) {
+  return request('/interviews/' + sessionId + '/questions/' + questionId + '/skip-and-next', {
+    method: 'POST',
+    body: { attemptId }
   })
 }
 
@@ -155,6 +194,73 @@ export function getInterviewQuestionDetail(sessionId, questionId) {
 /** Get learning recommendations for interview report */
 export function getLearningRecommendations(sessionId) {
   return request('/interviews/' + sessionId + '/report/learning-recommendations', { method: 'GET' })
+}
+
+/** Get current user profile */
+export function getProfile() {
+  return request('/profile', { method: 'GET' })
+}
+
+/** Update current user profile */
+export function updateProfile(payload) {
+  return request('/profile', {
+    method: 'PUT',
+    body: payload
+  })
+}
+
+/** Upload profile avatar */
+export function uploadProfileAvatar(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return uploadRequest('/profile/avatar', formData)
+}
+
+/** Get profile statistics */
+export function getProfileStatistics(positionCode) {
+  const query = positionCode ? `?positionCode=${encodeURIComponent(positionCode)}` : ''
+  return request('/profile/statistics' + query, { method: 'GET' })
+}
+
+/** Get skill overview */
+export function getProfileSkillOverview(positionCode) {
+  const query = positionCode ? `?positionCode=${encodeURIComponent(positionCode)}` : ''
+  return request('/profile/skill-overview' + query, { method: 'GET' })
+}
+
+/** Create question bank item */
+export function createQuestionBankItem(payload) {
+  return request('/question-bank', {
+    method: 'POST',
+    body: payload
+  })
+}
+
+/** List question bank items */
+export function getQuestionBank(params = {}) {
+  const query = new URLSearchParams()
+  const append = (key, value) => {
+    if (value == null) return
+    const text = String(value).trim()
+    if (!text) return
+    query.set(key, text)
+  }
+
+  append('page', params.page)
+  append('pageSize', params.pageSize)
+  append('tag', params.tag)
+  append('minScore', params.minScore)
+  append('maxScore', params.maxScore)
+  append('sortBy', params.sortBy)
+  append('sortOrder', params.sortOrder)
+
+  const suffix = query.toString() ? `?${query}` : ''
+  return request('/question-bank' + suffix, { method: 'GET' })
+}
+
+/** Delete question bank item */
+export function deleteQuestionBankItem(itemId) {
+  return request('/question-bank/' + itemId, { method: 'DELETE' })
 }
 
 /**

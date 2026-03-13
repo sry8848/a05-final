@@ -50,7 +50,7 @@ public class AnswerSubmitPersistenceService {
             evalOutput.getPatch().setEvidenceQuestionId(currentQuestion.getId());
         }
         stateLedgerPatchService.applyPatch(sessionId, evalOutput.getPatch(), request.getAttemptId(), attempt.getId());
-        markQuestionAnswered(currentQuestion.getId());
+        markQuestionStatus(currentQuestion.getId(), request.getAnswerText());
 
         boolean shouldEnd = "END".equals(evalOutput.getSignal());
         if (shouldEnd) {
@@ -114,10 +114,14 @@ public class AnswerSubmitPersistenceService {
         return attempt;
     }
 
-    private void markQuestionAnswered(Long questionId) {
+    private void markQuestionStatus(Long questionId, String answerText) {
         InterviewQuestion update = new InterviewQuestion();
         update.setId(questionId);
-        update.setStatus("answered");
+        if ("[skip]".equals(answerText)) {
+            update.setStatus("skipped");
+        } else {
+            update.setStatus("answered");
+        }
         update.setUpdatedAt(LocalDateTime.now());
         interviewQuestionMapper.updateById(update);
     }
@@ -141,4 +145,3 @@ public class AnswerSubmitPersistenceService {
         private String evaluationSignal;
     }
 }
-
