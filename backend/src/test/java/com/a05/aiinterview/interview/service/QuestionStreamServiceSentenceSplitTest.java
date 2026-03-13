@@ -27,4 +27,31 @@ class QuestionStreamServiceSentenceSplitTest {
         assertEquals("尾句未闭合", trailing);
         assertEquals("", buffer.toString());
     }
+
+    @Test
+    void normalizeDifficultyForStorage_shouldMapLegacyValues() {
+        assertEquals("L1", QuestionStreamService.normalizeDifficultyForStorage("easy", "L3"));
+        assertEquals("L3", QuestionStreamService.normalizeDifficultyForStorage("medium", "L3"));
+        assertEquals("L5", QuestionStreamService.normalizeDifficultyForStorage("hard", "L3"));
+        assertEquals("L4", QuestionStreamService.normalizeDifficultyForStorage("L4", "L3"));
+        assertEquals("L3", QuestionStreamService.normalizeDifficultyForStorage("unknown", "L3"));
+    }
+
+    @Test
+    void trimStemsToMaxChars_shouldDropOldestUntilWithinLimit() {
+        List<String> trimmed = QuestionStreamService.trimStemsToMaxChars(
+                List.of("AAAA", "BBBB", "CCCC"),
+                8
+        );
+        assertEquals(List.of("BBBB", "CCCC"), trimmed);
+    }
+
+    @Test
+    void trimStemsToMaxChars_singleStemTooLong_shouldDropItInsteadOfTruncating() {
+        List<String> trimmed = QuestionStreamService.trimStemsToMaxChars(
+                List.of("123456789"),
+                4
+        );
+        assertEquals(List.of(), trimmed);
+    }
 }

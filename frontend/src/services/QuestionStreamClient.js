@@ -120,7 +120,9 @@ export class QuestionStreamClient {
       onTtsReady: async (payload, eventName, eventId) => {
         this._setState('streaming', handlers)
         if (handlers.onTtsReady) {
-          await handlers.onTtsReady(payload, eventName, eventId)
+          Promise.resolve(handlers.onTtsReady(payload, eventName, eventId)).catch((err) => {
+            console.warn('[QuestionStreamClient] onTtsReady handler failed', err)
+          })
         }
       },
       onDone: async (payload) => {

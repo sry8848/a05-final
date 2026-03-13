@@ -17,7 +17,6 @@ import java.util.Map;
 public class PromptProperties {
 
     private String planner = "v1";
-    private String questionGeneration = "v1";
     private String questionGenerationStream = "v1";
     private String evaluationDecision = "v1";
     private String reportGeneration = "v1";
@@ -30,7 +29,6 @@ public class PromptProperties {
     public String resolveVersion(PromptCode promptCode) {
         return switch (promptCode) {
             case PLANNER -> planner;
-            case QUESTION_GENERATION -> questionGeneration;
             case QUESTION_GENERATION_STREAM -> questionGenerationStream;
             case EVALUATION_DECISION -> evaluationDecision;
             case REPORT_GENERATION -> reportGeneration;

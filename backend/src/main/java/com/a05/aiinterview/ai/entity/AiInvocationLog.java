@@ -28,7 +28,7 @@ public class AiInvocationLog {
     private Long questionId;
     private Long userId;
 
-    /** Prompt 标识，如 planner / question_generation / answer_evaluation */
+    /** Prompt 标识，如 planner / question_generation_stream / evaluation_decision */
     private String promptCode;
 
     /** Prompt 版本，如 v1 */

@@ -7,7 +7,6 @@ import com.a05.aiinterview.ai.dto.IntroRewriteInput;
 import com.a05.aiinterview.ai.dto.PlannerInput;
 import com.a05.aiinterview.ai.dto.PlannerOutput;
 import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
-import com.a05.aiinterview.ai.dto.QuestionGenerationOutput;
 import com.a05.aiinterview.ai.dto.ReportGenerationInput;
 import com.a05.aiinterview.ai.dto.ReportGenerationOutput;
 import reactor.core.publisher.Flux;
@@ -33,18 +32,10 @@ public interface AiClient {
     AiCallResult<PlannerOutput> callPlanner(PlannerInput input);
 
     /**
-     * 调用题目生成服务，根据当前考纲和状态生成一道新题（结构化 JSON）。
-     *
-     * @param input 出题入参（含目标知识域、题型、已问题目列表）
-     * @return 包含题目结构化输出和 Token 消耗的结果包装
-     */
-    AiCallResult<QuestionGenerationOutput> callQuestionGeneration(QuestionGenerationInput input);
-
-    /**
      * 调用题目生成服务（流式版本），返回 Token 字符流，供 SSE 推送给前端。
      * 适合前端"打字机"效果；不包含 Token 计数。
      *
-     * @param input 出题入参，与 callQuestionGeneration 相同
+     * @param input 出题入参（含目标知识域、题型、已问题目列表）
      * @return 字符 Token 的响应式流
      */
     Flux<String> callQuestionGenerationStream(QuestionGenerationInput input);

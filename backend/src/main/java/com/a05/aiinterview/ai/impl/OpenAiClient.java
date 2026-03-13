@@ -23,7 +23,6 @@ import reactor.core.publisher.Flux;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 
@@ -98,60 +97,6 @@ public class OpenAiClient implements AiClient {
             auditLite(
                     resolvePromptCode(rendered, PROMPT_CODE_PLANNER),
                     resolvePromptVersion(rendered, PROMPT_CODE_PLANNER),
-                    input.getInterviewId(),
-                    input.getQuestionId(),
-                    input.getVariantId(),
-                    latencyMs,
-                    "error",
-                    null,
-                    null,
-                    null,
-                    e
-            );
-            throw e;
-        }
-    }
-
-    // ────────────────────────── QuestionGeneration ──────────────────────────
-
-    @Override
-    public AiCallResult<QuestionGenerationOutput> callQuestionGeneration(QuestionGenerationInput input) {
-        log.info("调用 OpenAI 出题, domainCode={}, questionType={}",
-                input.getNextDomainCode(), input.getNextQuestionType());
-
-        BeanOutputConverter<QuestionGenerationOutput> converter =
-                new BeanOutputConverter<>(QuestionGenerationOutput.class);
-        RenderedPrompt rendered = null;
-        long startMs = System.currentTimeMillis();
-        try {
-            rendered = renderPrompt(PROMPT_CODE_QUESTION_GENERATION,
-                    buildQuestionGenerationVariables(input));
-            String userPrompt = rendered.getUserPrompt() + "\n\n" + converter.getFormat();
-
-            ChatResponse response = callChat(rendered.getSystemPrompt(), userPrompt);
-            QuestionGenerationOutput output = requireConvert(converter, response, "question_generation");
-            long latencyMs = System.currentTimeMillis() - startMs;
-            auditLite(
-                    rendered.getPromptCode(),
-                    rendered.getPromptVersion(),
-                    input.getInterviewId(),
-                    input.getQuestionId(),
-                    input.getVariantId(),
-                    latencyMs,
-                    "success",
-                    null,
-                    response.getResult().getOutput().getText(),
-                    null,
-                    null
-            );
-            log.info("出题调用成功，stem 长度={}",
-                    output.getStem() != null ? output.getStem().length() : 0);
-            return buildResult(output, response, latencyMs, rendered);
-        } catch (Exception e) {
-            long latencyMs = System.currentTimeMillis() - startMs;
-            auditLite(
-                    resolvePromptCode(rendered, PROMPT_CODE_QUESTION_GENERATION),
-                    resolvePromptVersion(rendered, PROMPT_CODE_QUESTION_GENERATION),
                     input.getInterviewId(),
                     input.getQuestionId(),
                     input.getVariantId(),
@@ -270,9 +215,8 @@ public class OpenAiClient implements AiClient {
         RenderedPrompt rendered = null;
         long startMs = System.currentTimeMillis();
         try {
-            String evaluationPayload = buildEvalDecisionUserPrompt(input) + "\n\n" + converter.getFormat();
             rendered = renderPrompt(PROMPT_CODE_EVALUATION_DECISION,
-                    Map.of("evaluationPayload", evaluationPayload));
+                    buildEvaluationDecisionVariables(input, converter.getFormat()));
 
             ChatResponse response = callChat(rendered.getSystemPrompt(), rendered.getUserPrompt());
             EvaluationDecisionOutput output = requireConvert(converter, response, "evaluation_decision");
@@ -324,9 +268,8 @@ public class OpenAiClient implements AiClient {
         RenderedPrompt rendered = null;
         long startMs = System.currentTimeMillis();
         try {
-            String reportPayload = buildReportGenUserPrompt(input) + "\n\n" + converter.getFormat();
             rendered = renderPrompt(PROMPT_CODE_REPORT_GENERATION,
-                    Map.of("reportPayload", reportPayload));
+                    buildReportGenerationVariables(input, converter.getFormat()));
 
             ChatResponse response = callChat(rendered.getSystemPrompt(), rendered.getUserPrompt());
             ReportGenerationOutput output = requireConvert(converter, response, "report_generation");
@@ -512,7 +455,6 @@ public class OpenAiClient implements AiClient {
     // ──────────────────────────── Prompt 构造 ────────────────────────────────
 
     private static final String PROMPT_CODE_PLANNER = "planner";
-    private static final String PROMPT_CODE_QUESTION_GENERATION = "question_generation";
     private static final String PROMPT_CODE_EVALUATION_DECISION = "evaluation_decision";
     private static final String PROMPT_CODE_REPORT_GENERATION = "report_generation";
     private static final String PROMPT_CODE_QUESTION_GENERATION_STREAM = "question_generation_stream";
@@ -531,21 +473,6 @@ public class OpenAiClient implements AiClient {
         return variables;
     }
 
-    private Map<String, Object> buildQuestionGenerationVariables(QuestionGenerationInput input) {
-        Map<String, Object> variables = new LinkedHashMap<>();
-        variables.put("nextDomainName", safeString(input.getNextDomainName()));
-        variables.put("nextDomainCode", safeString(input.getNextDomainCode()));
-        variables.put("nextQuestionType", safeString(input.getNextQuestionType()));
-        variables.put("targetDepth", safeString(input.getTargetDepth()));
-        variables.put("positionCode", safeString(input.getPositionCode()));
-        variables.put("experienceLevel", safeString(input.getExperienceLevel()));
-        variables.put("mode", safeString(input.getMode()));
-        variables.put("askedQuestions", formatAskedQuestions(input.getAskedQuestions()));
-        variables.put("ragContext", safeString(input.getRagContext()));
-        variables.put("syllabus", stringifyAsJson(input.getSyllabus()));
-        return variables;
-    }
-
     private Map<String, Object> buildIntroRewriteVariables(IntroRewriteInput input) {
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("candidateContext", buildCandidateContext(input));
@@ -555,65 +482,36 @@ public class OpenAiClient implements AiClient {
         return variables;
     }
 
-    private String buildEvalDecisionUserPrompt(EvaluationDecisionInput input) {
-        StringBuilder sb = new StringBuilder("请对以下候选人回答进行评估：\n\n");
-        sb.append("当前题目：").append(input.getCurrentQuestionStem()).append("\n");
-        sb.append("知识域：").append(input.getCurrentDomainName())
-                .append("（").append(input.getCurrentDomainCode()).append("）\n");
-        sb.append("目标深度：").append(input.getCurrentTargetDepth()).append("\n");
-        sb.append("题目类型：").append(input.getCurrentQuestionType()).append("\n");
-        sb.append("候选人回答：\n").append(input.getAnswerText()).append("\n");
-
-        if (input.getExpectedPoints() != null && !input.getExpectedPoints().isEmpty()) {
-            sb.append("\n期望答到的要点：\n");
-            input.getExpectedPoints().forEach(p -> sb.append("- ").append(p).append("\n"));
-        }
-        if (input.getRecentContext() != null && !input.getRecentContext().isEmpty()) {
-            sb.append("\n近期 Q/A 上下文：\n");
-            input.getRecentContext().forEach(ctx ->
-                    sb.append("Q: ").append(ctx.getStem()).append("\n")
-                            .append("A: ").append(ctx.getAnswer()).append("\n\n"));
-        }
-
-        // 语音模式下，附加表达节奏信息供 AI 评估流畅度维度
-        if (input.getPauseStats() != null && !input.getPauseStats().isEmpty()) {
-            sb.append("\n【表达节奏观察（语音作答）】\n");
-            Object wpm = input.getPauseStats().get("wpm");
-            Object longPauseCount = input.getPauseStats().get("longPauseCount");
-            Object longestPauseMs = input.getPauseStats().get("longestPauseMs");
-            if (wpm != null) sb.append("语速：约 ").append(wpm).append(" 字/分钟\n");
-            if (longPauseCount != null) sb.append("明显停顿次数：").append(longPauseCount).append(" 次\n");
-            if (longestPauseMs != null) {
-                double seconds = ((Number) longestPauseMs).doubleValue() / 1000.0;
-                sb.append("最长单次停顿：").append(String.format("%.1f", seconds)).append(" 秒\n");
-            }
-            sb.append("（回答文本中 [停顿 Xs] 标签为停顿位置标记，供参考）\n");
-            sb.append("请在评估中加入【表达节奏观察】字段，简短评价候选人语言表达的流畅度。\n");
-        }
-
-        return sb.toString();
+    private Map<String, Object> buildEvaluationDecisionVariables(EvaluationDecisionInput input, String outputSchema) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("positionCode", safeString(input.getPositionCode()));
+        variables.put("experienceLevel", safeString(input.getExperienceLevel()));
+        variables.put("mode", safeString(input.getMode()));
+        variables.put("currentQuestionStem", safeString(input.getCurrentQuestionStem()));
+        variables.put("currentDomainName", safeString(input.getCurrentDomainName()));
+        variables.put("currentDomainCode", safeString(input.getCurrentDomainCode()));
+        variables.put("currentTargetDepth", safeString(input.getCurrentTargetDepth()));
+        variables.put("currentQuestionType", safeString(input.getCurrentQuestionType()));
+        variables.put("answerText", safeString(input.getAnswerText()));
+        variables.put("expectedPoints", formatBulletLines(input.getExpectedPoints()));
+        variables.put("recentContext", formatRecentContext(input.getRecentContext()));
+        variables.put("pauseStats", formatPauseStats(input.getPauseStats()));
+        variables.put("stateLedgerJson", stringifyAsJson(input.getStateLedger()));
+        variables.put("syllabusJson", stringifyAsJson(input.getSyllabusJson()));
+        variables.put("outputSchema", safeString(outputSchema));
+        return variables;
     }
 
-    private String buildReportGenUserPrompt(ReportGenerationInput input) {
-        StringBuilder sb = new StringBuilder("请根据以下面试 Q/A 记录生成评估报告：\n\n");
-        sb.append("岗位：").append(input.getPositionCode()).append("\n");
-        sb.append("工作年限：").append(input.getExperienceLevel()).append("\n");
-        sb.append("面试标题：").append(input.getSessionTitle()).append("\n\n");
-
-        if (input.getQuestionAnswerPairs() != null) {
-            sb.append("完整 Q/A 记录（共 ").append(input.getQuestionAnswerPairs().size()).append(" 题）：\n");
-            input.getQuestionAnswerPairs().forEach(pair -> {
-                sb.append("---\n");
-                sb.append("题目（").append(pair.getQuestionType()).append("）：")
-                        .append(pair.getStem()).append("\n");
-                sb.append("候选人回答：").append(pair.getAnswerText()).append("\n");
-                if (pair.getExpectedPoints() != null && !pair.getExpectedPoints().isEmpty()) {
-                    sb.append("参考要点：")
-                            .append(String.join("、", pair.getExpectedPoints())).append("\n");
-                }
-            });
-        }
-        return sb.toString();
+    private Map<String, Object> buildReportGenerationVariables(ReportGenerationInput input, String outputSchema) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("positionCode", safeString(input.getPositionCode()));
+        variables.put("experienceLevel", safeString(input.getExperienceLevel()));
+        variables.put("sessionTitle", safeString(input.getSessionTitle()));
+        variables.put("qaPairs", formatReportQaPairs(input.getQuestionAnswerPairs()));
+        variables.put("stateLedgerJson", stringifyAsJson(input.getStateLedgerJson()));
+        variables.put("syllabusJson", stringifyAsJson(input.getSyllabusJson()));
+        variables.put("outputSchema", safeString(outputSchema));
+        return variables;
     }
 
     private RenderedPrompt renderPrompt(String promptCode, Map<String, Object> variables) {
@@ -630,9 +528,13 @@ public class OpenAiClient implements AiClient {
         variables.put("nextDomainCode", safeString(input.getNextDomainCode()));
         variables.put("nextQuestionType", safeString(input.getNextQuestionType()));
         variables.put("targetDepth", safeString(input.getTargetDepth()));
+        variables.put("difficulty", safeString(input.getDifficulty()));
+        variables.put("targetSkill", safeString(input.getTargetSkill()));
+        variables.put("expectedPoints", formatBulletLines(input.getExpectedPoints()));
         variables.put("positionCode", safeString(input.getPositionCode()));
         variables.put("experienceLevel", safeString(input.getExperienceLevel()));
         variables.put("mode", safeString(input.getMode()));
+        variables.put("ragContext", safeString(input.getRagContext()));
         variables.put("askedQuestions", formatAskedQuestions(input.getAskedQuestions()));
         variables.put("syllabus", stringifyAsJson(input.getSyllabus()));
         return variables;
@@ -644,14 +546,75 @@ public class OpenAiClient implements AiClient {
         }
         StringBuilder sb = new StringBuilder();
         for (QuestionGenerationInput.AskedQuestion question : askedQuestions) {
-            String summary = question != null ? safeString(question.getStemSummary()) : "";
-            if (summary.isBlank()) {
+            String stem = question != null ? safeString(question.getStem()) : "";
+            if (stem.isBlank()) {
                 continue;
             }
             if (!sb.isEmpty()) {
                 sb.append("\n");
             }
-            sb.append("- ").append(summary);
+            sb.append("- ").append(stem);
+        }
+        return sb.isEmpty() ? "- 无" : sb.toString();
+    }
+
+    private String formatRecentContext(List<EvaluationDecisionInput.QaContext> recentContext) {
+        if (recentContext == null || recentContext.isEmpty()) {
+            return "- 无";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (EvaluationDecisionInput.QaContext ctx : recentContext) {
+            if (ctx == null) {
+                continue;
+            }
+            if (!sb.isEmpty()) {
+                sb.append("\n");
+            }
+            sb.append("- [")
+                    .append(safeString(ctx.getQuestionType()))
+                    .append("/")
+                    .append(safeString(ctx.getDomainCode()))
+                    .append("] Q: ")
+                    .append(safeString(ctx.getStem()))
+                    .append(" | A: ")
+                    .append(safeString(ctx.getAnswer()));
+        }
+        return sb.isEmpty() ? "- 无" : sb.toString();
+    }
+
+    private String formatPauseStats(Map<String, Object> pauseStats) {
+        if (pauseStats == null || pauseStats.isEmpty()) {
+            return "无";
+        }
+        Object wpm = pauseStats.get("wpm");
+        Object longPauseCount = pauseStats.get("longPauseCount");
+        Object longestPauseMs = pauseStats.get("longestPauseMs");
+        StringBuilder sb = new StringBuilder();
+        sb.append("wpm=").append(wpm != null ? wpm : "N/A");
+        sb.append(", longPauseCount=").append(longPauseCount != null ? longPauseCount : "N/A");
+        sb.append(", longestPauseMs=").append(longestPauseMs != null ? longestPauseMs : "N/A");
+        return sb.toString();
+    }
+
+    private String formatReportQaPairs(List<ReportGenerationInput.QuestionAnswerPair> pairs) {
+        if (pairs == null || pairs.isEmpty()) {
+            return "- 无";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (ReportGenerationInput.QuestionAnswerPair pair : pairs) {
+            if (pair == null) {
+                continue;
+            }
+            if (!sb.isEmpty()) {
+                sb.append("\n\n");
+            }
+            sb.append("题型: ").append(safeString(pair.getQuestionType())).append("\n");
+            sb.append("知识域: ").append(safeString(pair.getDomainCode())).append("/")
+                    .append(safeString(pair.getDomainName())).append("\n");
+            sb.append("题目: ").append(safeString(pair.getStem())).append("\n");
+            sb.append("回答: ").append(safeString(pair.getAnswerText())).append("\n");
+            sb.append("目标深度: ").append(safeString(pair.getTargetDepth())).append("\n");
+            sb.append("参考要点:\n").append(formatBulletLines(pair.getExpectedPoints()));
         }
         return sb.isEmpty() ? "- 无" : sb.toString();
     }

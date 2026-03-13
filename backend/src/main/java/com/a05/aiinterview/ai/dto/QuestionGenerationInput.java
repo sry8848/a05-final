@@ -47,6 +47,15 @@ public class QuestionGenerationInput {
     /** 本题目标深度，如 L3 */
     private String targetDepth;
 
+    /** 本题难度等级：L1~L5 */
+    private String difficulty;
+
+    /** 本题核心考察点 */
+    private String targetSkill;
+
+    /** 本题理想回答要点列表 */
+    private List<String> expectedPoints;
+
     /** 已问过的题目列表（避免重复出题） */
     private List<AskedQuestion> askedQuestions;
 
@@ -69,6 +78,6 @@ public class QuestionGenerationInput {
         private Long questionId;
         private String questionType;
         private String domainCode;
-        private String stemSummary;
+        private String stem;
     }
 }

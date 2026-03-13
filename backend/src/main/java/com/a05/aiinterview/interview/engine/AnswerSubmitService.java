@@ -304,6 +304,9 @@ public class AnswerSubmitService {
             ns.put("nextDomainName", strat.getNextDomainName());
             ns.put("questionType", strat.getQuestionType());
             ns.put("targetDepth", strat.getTargetDepth());
+            ns.put("difficulty", strat.getDifficulty());
+            ns.put("targetSkill", strat.getTargetSkill());
+            ns.put("expectedPoints", strat.getExpectedPoints());
             ns.put("focusPoint", strat.getFocusPoint());
             evalSnapshot.put("nextStrategy", ns);
         }

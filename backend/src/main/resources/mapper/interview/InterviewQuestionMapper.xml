@@ -20,6 +20,7 @@
                 property="expectedPoints"
                 typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
         <result column="target_depth" property="targetDepth"/>
+        <result column="difficulty" property="difficulty"/>
         <result column="status" property="status"/>
         <result column="hint_text" property="hintText"/>
         <result column="generation_context_json"

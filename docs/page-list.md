@@ -150,15 +150,14 @@
 - 页面目标：展示整场面试的综合分析结果。
 - 核心模块：
   - 总分卡片（综合得分）。
-  - 知识域雷达图（所有模式展示，用于技术成长分析）。
+  - 知识域条形图（所有模式展示，用于技术成长分析）。
   - 综合能力雷达图（专业模式展示，反映沟通、逻辑、表达等综合维度）。
   - 面试官总结评语（先肯定后建议）。
   - 优势总结列表。
   - 薄弱点与提升建议列表。
-  - 知识盲区靶向推送（推荐重点复习的知识域）。
+  - 知识盲区靶向推送学习资源（推荐重点复习的知识域）。
   - 题目列表（仅展示问题，点击进入问答详情页）。
 - 非 MVP 扩展位：
-  - 推送学习资源
   - 历史平均残影雷达图（需 P1 实现）。
   - 综合得分进度条增长动效（需 P1 实现）。
 - 关键字段：`overallScore`、`skillDomainScores`、`comprehensiveRadarScores`、`summary`、`strengths`、`weaknesses`、`improvementSuggestions`、`recommendedTopics`。
@@ -232,28 +231,6 @@
   - 可从成长中心或主导航进入。
 - 主要接口：复用 `GET /api/v1/profile`、`PUT /api/v1/profile`、`POST /api/v1/profile/avatar` 等。
 - 主要动作：保存资料、返回成长中心或上一页。
-
-## 3. 页面跳转关系
-
-```mermaid
-flowchart LR
-Login --> Register
-Register --> Login
-Login --> profile
-Profile --> Settings
-Prepare -->|"下一步(创建会话)"| DeviceTest
-DeviceTest -->|"进入面试"| Loading
-Loading --> Interview
-Interview --> Report
-Report --> QuestionDetail
-Report --> History
-History --> Report
-QuestionDetail --> QuestionBank
-QuestionBank -->|"重做题目(auto_focus=xxx)"| Prepare
-Profile -->|"去练习(auto_focus=xxx)"| Prepare
-```
-
-说明：登录后进入成长中心；开始面试页点击「下一步」创建会话后跳转面试测试页（带 sessionId），设备检测通过后点击「进入面试」进入加载页。
 
 ## 4. 页面与接口映射
 

@@ -374,7 +374,14 @@
               <span>扬声器</span>
               <i :class="deviceTest.speakerReady ? 'fas fa-check-circle' : 'fas fa-times-circle'" class="status-icon"></i>
             </div>
+            <div class="summary-item network-item" :class="networkStatusClass">
+              <i class="fas fa-network-wired"></i>
+              <span>网络</span>
+              <span class="network-value">{{ networkLatencyText }}</span>
+              <i :class="networkStatusIcon" class="status-icon"></i>
+            </div>
           </div>
+          <p class="network-hint" :class="networkStatusClass">{{ networkStatusHint }}</p>
           <div class="summary-actions">
             <button class="btn btn-secondary glass-btn" @click="skipDeviceTest">
               <i class="fas fa-forward"></i>
@@ -667,7 +674,8 @@ import {
   getInterviewSessionDetail,
   submitInterviewAttempt,
   finishInterviewSession,
-  getInterviewReport
+  getInterviewReport,
+  getSystemPing
 } from '../api/resume'
 import CustomSelect from './CustomSelect.vue'
 import AiInterviewerAvatar from './AiInterviewerAvatar.vue'
@@ -727,6 +735,14 @@ export default {
       microphoneLevel: 0,
       isPlayingAudio: false
     })
+    const PING_TIMEOUT_MS = 1000
+    const NETWORK_UNSTABLE_HINT = '网络检测失败或结果不稳定，可继续但建议检查网络'
+    const networkTest = reactive({
+      status: 'testing', // testing | pass | warning | fail
+      latencyMs: null,
+      hint: '正在检测网络连通性...'
+    })
+    let networkTestRunId = 0
     const testVideoElement = ref(null)
     const audioContext = ref(null)
     const analyser = ref(null)
@@ -1259,9 +1275,127 @@ export default {
       return deviceTest.cameraReady && deviceTest.microphoneReady && deviceTest.speakerReady
     })
 
+    const networkStatusClass = computed(() => {
+      const map = {
+        testing: 'network-testing',
+        pass: 'network-pass',
+        warning: 'network-warning',
+        fail: 'network-fail'
+      }
+      return map[networkTest.status] || 'network-warning'
+    })
+
+    const networkStatusIcon = computed(() => {
+      const map = {
+        testing: 'fas fa-spinner fa-spin',
+        pass: 'fas fa-check-circle',
+        warning: 'fas fa-exclamation-circle',
+        fail: 'fas fa-times-circle'
+      }
+      return map[networkTest.status] || 'fas fa-exclamation-circle'
+    })
+
+    const networkLatencyText = computed(() => {
+      if (Number.isFinite(networkTest.latencyMs) && networkTest.latencyMs >= 0) {
+        return `${networkTest.latencyMs}ms`
+      }
+      if (networkTest.status === 'testing') return '检测中'
+      return '--'
+    })
+
+    const networkStatusHint = computed(() => networkTest.hint || '')
+
     const startDeviceTest = async () => {
-      await testCamera()
-      await testMicrophone()
+      networkTest.status = 'testing'
+      networkTest.latencyMs = null
+      networkTest.hint = '正在检测网络连通性...'
+      await Promise.allSettled([
+        testCamera(),
+        testMicrophone(),
+        testNetworkLatency()
+      ])
+    }
+
+    const classifyNetworkStatus = (latencyMs) => {
+      if (latencyMs < 120) return 'pass'
+      if (latencyMs <= 300) return 'warning'
+      return 'fail'
+    }
+
+    const computeMedian = (samples) => {
+      const sorted = [...samples].sort((a, b) => a - b)
+      const mid = Math.floor(sorted.length / 2)
+      if (sorted.length % 2 === 0) {
+        return Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+      }
+      return sorted[mid]
+    }
+
+    const runPingSample = async (timeoutMs = PING_TIMEOUT_MS) => {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+      const startAt = performance.now()
+      try {
+        const response = await getSystemPing(controller.signal)
+        if (!response.ok) {
+          throw new Error(`ping failed with status ${response.status}`)
+        }
+        return Math.max(0, Math.round(performance.now() - startAt))
+      } finally {
+        clearTimeout(timeoutId)
+      }
+    }
+
+    const testNetworkLatency = async () => {
+      const runId = ++networkTestRunId
+      networkTest.status = 'testing'
+      networkTest.latencyMs = null
+      networkTest.hint = '正在检测网络连通性...'
+
+      try {
+        // Warm-up request: amortize first-connection overhead, excluded from stats.
+        await runPingSample(PING_TIMEOUT_MS).catch(() => null)
+
+        const settled = await Promise.allSettled([
+          runPingSample(PING_TIMEOUT_MS),
+          runPingSample(PING_TIMEOUT_MS),
+          runPingSample(PING_TIMEOUT_MS)
+        ])
+        if (runId !== networkTestRunId) return
+
+        const successSamples = settled
+          .filter((item) => item.status === 'fulfilled')
+          .map((item) => item.value)
+          .filter((value) => Number.isFinite(value) && value >= 0)
+
+        if (successSamples.length >= 2) {
+          const latencyMs = computeMedian(successSamples)
+          const status = classifyNetworkStatus(latencyMs)
+          networkTest.latencyMs = latencyMs
+          networkTest.status = status
+          networkTest.hint = status === 'pass'
+            ? `网络延迟 ${latencyMs}ms，连接稳定`
+            : NETWORK_UNSTABLE_HINT
+          return
+        }
+
+        if (successSamples.length === 1) {
+          networkTest.latencyMs = successSamples[0]
+          networkTest.status = 'warning'
+          networkTest.hint = NETWORK_UNSTABLE_HINT
+          return
+        }
+
+        networkTest.latencyMs = null
+        networkTest.status = 'warning'
+        networkTest.hint = NETWORK_UNSTABLE_HINT
+      } catch (err) {
+        if (runId !== networkTestRunId) return
+        console.warn('[InterviewPage] 网络检测失败，降级为 warning', err)
+        networkTest.latencyMs = null
+        networkTest.status = 'warning'
+        networkTest.hint = NETWORK_UNSTABLE_HINT
+      }
     }
 
     const testCamera = async () => {
@@ -1366,6 +1500,7 @@ export default {
     }
 
     const stopDeviceTest = () => {
+      networkTestRunId += 1
       if (animationFrameId) {
         cancelAnimationFrame(animationFrameId)
       }
@@ -1406,6 +1541,13 @@ export default {
     }
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+    const isAbortLikeError = (err) => {
+      if (!err) return false
+      if (err.name === 'AbortError') return true
+      const message = String(err.message || '').toLowerCase()
+      return message.includes('aborted')
+    }
 
     const normalizeQuestion = (raw, fallbackNo = null, fallbackStem = '') => {
       if (!raw) return null
@@ -1541,12 +1683,11 @@ export default {
               messages.value[streamMessageIndex].content = streamedStem || '...'
               await scrollToBottom()
             },
-            onTtsReady: async (payload) => {
-              try {
-                await ttsPlayerService.handleTtsReadyEvent(payload)
-              } catch (err) {
+            onTtsReady: (payload) => {
+              // 不阻塞主 SSE 消费链路，避免 done 事件被 TTS 播放耗时卡住
+              ttsPlayerService.handleTtsReadyEvent(payload).catch((err) => {
                 console.warn('[InterviewPage] 处理 tts_ready 事件失败，降级为文本模式', err)
-              }
+              })
             },
             onDone: (payload) => {
               donePayload = payload || null
@@ -1565,8 +1706,13 @@ export default {
 
         messages.value[streamMessageIndex].content = finalStem
         const nextNo = (questions.value[currentQuestion.value]?.questionNo || currentQuestion.value + 1) + 1
+        const nextQuestionId = Number(donePayload?.questionId)
+        const hasValidQuestionId = Number.isInteger(nextQuestionId) && nextQuestionId > 0
+        if (!hasValidQuestionId) {
+          console.warn('[InterviewPage] done 事件缺少有效 questionId，后续提交将被拦截', donePayload)
+        }
         const nextQuestion = normalizeQuestion({
-          questionId: donePayload?.questionId || null,
+          questionId: hasValidQuestionId ? nextQuestionId : null,
           questionNo: nextNo,
           questionType: 'PRINCIPLE',
           domainName: '',
@@ -1606,7 +1752,9 @@ export default {
     const updateMetrics = () => {
       metrics.speedPercent = 50 + Math.random() * 30
       metrics.fluencyPercent = 60 + Math.random() * 25
-      metrics.latency = Math.floor(80 + Math.random() * 100)
+      if (Number.isFinite(networkTest.latencyMs) && networkTest.latencyMs >= 0) {
+        metrics.latency = networkTest.latencyMs
+      }
       metrics.latencyPercent = Math.min(metrics.latency / 5, 100)
     }
 
@@ -1771,12 +1919,19 @@ export default {
       const answer = text.trim()
       if (!answer || isSubmittingAnswer.value || isWaitingNextQuestion.value || isFinishing.value) return
 
+      // 用户主动提交时，立即打断当前题目播报，避免“旧题语音残留到下一题”。
+      ttsPlayerService.skip()
       await submitAnswerText(answer, false)
     }
 
     const submitAnswerText = async (answer, isSkip = false) => {
       const question = questions.value[currentQuestion.value]
       if (!question) return
+      const questionId = Number(question.questionId)
+      if (!Number.isInteger(questionId) || questionId <= 0) {
+        alert('当前题目尚未完全就绪，请稍后重试。')
+        return
+      }
 
       const currentPauseStats = inputMode.value === 'voice' ? lastPauseStats.value : null
       const currentAsrSegments = inputMode.value === 'voice' ? lastAsrSegments.value : []
@@ -1795,7 +1950,7 @@ export default {
       try {
         if (singleQuestionMode.value) {
           answers.value.push({
-            questionId: question.questionId || question.id,
+            questionId,
             question: question.question,
             answer,
             score: isSkip ? 0 : 80,
@@ -1811,7 +1966,7 @@ export default {
 
         const attemptId = buildAttemptId()
         const resp = await submitInterviewAttempt(backendSessionId.value, {
-          questionId: question.questionId || question.id,
+          questionId,
           attemptId,
           answerText: answer,
           isFinal: true,
@@ -1822,7 +1977,7 @@ export default {
 
         const signal = resp?.evaluationSignal || 'NEXT_DOMAIN'
         answers.value.push({
-          questionId: question.questionId || question.id,
+          questionId,
           question: question.question,
           answer,
           score: mapSignalScore(signal, isSkip),
@@ -1843,8 +1998,12 @@ export default {
           await streamNextQuestion(resp.streamAttemptId)
         }
       } catch (err) {
-        console.error('[InterviewPage] failed to start interview', err)
-        alert(err?.message || '提交回答失败，请重试。')
+        if (isAbortLikeError(err)) {
+          console.info('[InterviewPage] submit flow aborted by user action')
+        } else {
+          console.error('[InterviewPage] failed to submit answer', err)
+          alert(err?.message || '提交回答失败，请重试。')
+        }
       } finally {
         isSubmittingAnswer.value = false
         await scrollToBottom()
@@ -1906,49 +2065,52 @@ export default {
       isFinishing.value = true
       ttsPlayerService.skip()
 
-      stopTimer()
+      try {
+        stopTimer()
 
-      if (mediaStream) {
-        mediaStream.getTracks().forEach(track => track.stop())
-      }
-
-      if (streamAbortController) {
-        streamAbortController.abort()
-        streamAbortController = null
-      }
-
-      let resultData = calculateFinalResult()
-
-      if (!singleQuestionMode.value && backendSessionId.value) {
-        try {
-          if (manual) {
-            await finishInterviewSession(backendSessionId.value)
-          }
-          const report = await waitReportReady(backendSessionId.value)
-          if (report && report.reportStatus === 'ready') {
-            resultData = buildResultFromReport(report)
-          } else {
-            resultData.feedback = '报告仍在生成中，请稍后到历史记录页面查看。'
-          }
-        } catch (err) {
-          console.warn('[InterviewPage] failed to fetch report, fallback to local result', err)
+        if (mediaStream) {
+          mediaStream.getTracks().forEach(track => track.stop())
         }
+
+        if (streamAbortController) {
+          streamAbortController.abort()
+          streamAbortController = null
+        }
+
+        let resultData = calculateFinalResult()
+
+        if (!singleQuestionMode.value && backendSessionId.value) {
+          try {
+            if (manual) {
+              await finishInterviewSession(backendSessionId.value)
+            }
+            const report = await waitReportReady(backendSessionId.value)
+            if (report && report.reportStatus === 'ready') {
+              resultData = buildResultFromReport(report)
+            } else {
+              resultData.feedback = '报告仍在生成中，请稍后到历史记录页面查看。'
+            }
+          } catch (err) {
+            console.warn('[InterviewPage] failed to fetch report, fallback to local result', err)
+          }
+        }
+
+        resultData.answers = answers.value
+        resultData.jobName = jobDisplayName.value
+        resultData.difficulty = config.difficulty === 'easy' ? '简单' : config.difficulty === 'hard' ? '困难' : '中等'
+        resultData.companyName = config.companyName
+        resultData.interviewRound = currentRound.value.label
+        resultData.interviewMode = config.interviewMode
+        resultData.sessionId = backendSessionId.value ?? null
+        const expLabel = experienceLevels.find(e => e.value === config.experience)
+        resultData.experienceLabel = expLabel ? expLabel.label : '未知'
+
+        isRunning.value = false
+        emit('interviewEnd', resultData)
+        saveInterviewRecord(resultData)
+      } finally {
+        isFinishing.value = false
       }
-
-      resultData.answers = answers.value
-      resultData.jobName = jobDisplayName.value
-      resultData.difficulty = config.difficulty === 'easy' ? '简单' : config.difficulty === 'hard' ? '困难' : '中等'
-      resultData.companyName = config.companyName
-      resultData.interviewRound = currentRound.value.label
-      resultData.interviewMode = config.interviewMode
-      resultData.sessionId = backendSessionId.value
-      const expLabel = experienceLevels.find(e => e.value === config.experience)
-      resultData.experienceLabel = expLabel ? expLabel.label : '未知'
-
-      isRunning.value = false
-      emit('interviewEnd', resultData)
-      saveInterviewRecord(resultData)
-      isFinishing.value = false
     }
 
     const showInterviewResult = () => {
@@ -1987,6 +2149,7 @@ export default {
     }
 
     const saveInterviewRecord = (resultData) => {
+      const hasSessionId = resultData?.sessionId != null && String(resultData.sessionId).trim() !== ''
       const record = {
         id: Date.now(),
         job: jobDisplayName.value,
@@ -1999,7 +2162,9 @@ export default {
         correct: resultData.correctCount,
         answers: answers.value,
         mode: config.interviewMode,
-        sessionId: backendSessionId.value
+        sessionId: hasSessionId ? String(resultData.sessionId).trim() : null,
+        syncStatus: hasSessionId ? 'synced' : 'local_fallback',
+        fallbackReason: hasSessionId ? null : 'missing_session_id'
       }
       
       let records = JSON.parse(localStorage.getItem('interviewRecords') || '[]')
@@ -2030,6 +2195,7 @@ export default {
       resultData.difficulty = config.difficulty === 'easy' ? '简单' : config.difficulty === 'hard' ? '困难' : '中等'
       const expLabel = experienceLevels.find(e => e.value === config.experience)
       resultData.experienceLabel = expLabel ? expLabel.label : '未知'
+      resultData.sessionId = backendSessionId.value ?? null
       emit('interviewEnd', resultData)
     }
 
@@ -2095,6 +2261,10 @@ export default {
       loadingSubtitle,
       currentTip,
       deviceTest,
+      networkStatusClass,
+      networkStatusIcon,
+      networkLatencyText,
+      networkStatusHint,
       testVideoElement,
       allDevicesReady,
       currentQuestion,
@@ -4643,7 +4813,9 @@ export default {
 .summary-row {
   display: flex;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 48px;
+  row-gap: 12px;
   margin-bottom: 24px;
 }
 
@@ -4658,9 +4830,39 @@ export default {
   color: rgba(255, 255, 255, 0.85);
 }
 
+.summary-item.network-item {
+  min-width: 220px;
+}
+
+.network-value {
+  min-width: 68px;
+  text-align: right;
+  font-weight: 600;
+}
+
 .summary-item.ready {
   background: rgba(16, 185, 129, 0.1);
   color: #10b981;
+}
+
+.summary-item.network-testing {
+  background: rgba(96, 165, 250, 0.12);
+  color: #93c5fd;
+}
+
+.summary-item.network-pass {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+}
+
+.summary-item.network-warning {
+  background: rgba(245, 158, 11, 0.14);
+  color: #f59e0b;
+}
+
+.summary-item.network-fail {
+  background: rgba(239, 68, 68, 0.14);
+  color: #ef4444;
 }
 
 .summary-item i:first-child {
@@ -4677,6 +4879,41 @@ export default {
 
 .summary-item:not(.ready) .status-icon {
   color: #ef4444;
+}
+
+.summary-item.network-testing .status-icon {
+  color: #93c5fd;
+}
+
+.summary-item.network-pass .status-icon {
+  color: #10b981;
+}
+
+.summary-item.network-warning .status-icon {
+  color: #f59e0b;
+}
+
+.summary-item.network-fail .status-icon {
+  color: #ef4444;
+}
+
+.network-hint {
+  margin: 0 0 20px;
+  text-align: center;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.network-hint.network-pass {
+  color: #34d399;
+}
+
+.network-hint.network-warning {
+  color: #fbbf24;
+}
+
+.network-hint.network-fail {
+  color: #f87171;
 }
 
 .summary-actions {

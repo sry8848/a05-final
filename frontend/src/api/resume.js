@@ -152,6 +152,28 @@ export function getLearningRecommendations(sessionId) {
   return request('/interviews/' + sessionId + '/report/learning-recommendations', { method: 'GET' })
 }
 
+/**
+ * Ping system endpoint for RTT measurement.
+ * Success criteria only depends on HTTP round-trip completion (response.ok),
+ * and does not depend on response body schema.
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<{ok: boolean, status: number}>}
+ */
+export async function getSystemPing(signal) {
+  const res = await fetch(BASE + '/system/ping', {
+    method: 'GET',
+    headers: {
+      Authorization: getAuthHeader()
+    },
+    cache: 'no-store',
+    signal
+  })
+  return {
+    ok: res.ok,
+    status: res.status
+  }
+}
+
 function parseSsePayload(raw) {
   if (!raw) return null
   try {
@@ -159,6 +181,12 @@ function parseSsePayload(raw) {
   } catch (_) {
     return { text: raw }
   }
+}
+
+function isAbortLikeError(err) {
+  if (!err) return false
+  if (err.name === 'AbortError') return true
+  return String(err.message || '').toLowerCase().includes('aborted')
 }
 
 /** Stream interview question via fetch-based SSE */
@@ -251,8 +279,15 @@ export async function streamInterviewQuestion(sessionId, attemptId, handlers = {
         lineEnd = buffer.indexOf('\n')
       }
     }
+  } catch (err) {
+    if (isAbortLikeError(err) || signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+    throw err
   } finally {
-    reader.releaseLock()
+    try {
+      reader.releaseLock()
+    } catch (_) {}
   }
 
   return {

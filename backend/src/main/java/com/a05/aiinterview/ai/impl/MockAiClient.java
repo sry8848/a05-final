@@ -72,29 +72,6 @@ public class MockAiClient implements AiClient {
         return mockResult(output, startMs, "planner");
     }
 
-    // ────────────────────────── QuestionGeneration ──────────────────────────
-
-    @Override
-    public AiCallResult<QuestionGenerationOutput> callQuestionGeneration(QuestionGenerationInput input) {
-        log.info("[MockAI] callQuestionGeneration, domainCode={}, questionType={}",
-                input.getNextDomainCode(), input.getNextQuestionType());
-        long startMs = System.currentTimeMillis();
-
-        QuestionGenerationOutput output = new QuestionGenerationOutput();
-        String stem = buildMockStem(input.getNextDomainName(), input.getNextQuestionType());
-        output.setStem(stem);
-        output.setTargetSkill(input.getNextDomainName() + " 核心概念");
-        output.setExpectedPoints(List.of(
-                "能说出基本原理",
-                "能结合项目经验举例",
-                "能分析常见问题及解决思路"));
-        output.setDifficulty("medium");
-        output.setTargetDepth(input.getTargetDepth() != null ? input.getTargetDepth() : "L3");
-
-        log.info("[MockAI] callQuestionGeneration 完成，stem 长度={}", stem.length());
-        return mockResult(output, startMs, "question_generation");
-    }
-
     /**
      * 流式出题：将 Mock 题目文本按字符逐个发出，模拟打字机效果（间隔 30ms）。
      */
@@ -288,6 +265,12 @@ public class MockAiClient implements AiClient {
                 .nextDomainName(nextDomainName)
                 .questionType("PRINCIPLE")
                 .targetDepth(targetDepth)
+                .difficulty(targetDepth)
+                .targetSkill(nextDomainName + " 核心原理")
+                .expectedPoints(List.of(
+                        "解释核心概念和关键机制",
+                        "结合项目场景说明取舍",
+                        "说明常见风险与优化方式"))
                 .focusPoint(nextDomainName + " 核心原理")
                 .build();
     }

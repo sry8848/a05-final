@@ -36,7 +36,6 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 /**
  * SSE 题目流式生成服务，支持断点续传。
@@ -92,6 +91,10 @@ public class QuestionStreamService {
     private static final String STATUS_DONE = "done";
     private static final String STATUS_ERROR = "error";
     private static final long SEGMENT_TTS_DRAIN_TIMEOUT_SECONDS = 12;
+    private static final int ASKED_QUESTIONS_MAX_CHARS = 4000;
+    private static final String DEFAULT_DIFFICULTY = "L3";
+    private static final String RAG_CONTEXT_FALLBACK =
+            "无外部参考资料，请严格依赖你自身的工程师知识库进行出题。";
 
     /**
      * 题目流式生成入口，支持断点续传和 SSE 事件推送。
@@ -511,6 +514,9 @@ public class QuestionStreamService {
         strategy.setNextDomainName(toStr(ns.get("nextDomainName")));
         strategy.setQuestionType(toStr(ns.get("questionType")));
         strategy.setTargetDepth(toStr(ns.get("targetDepth")));
+        strategy.setDifficulty(normalizeDifficulty(toStr(ns.get("difficulty")), toStr(ns.get("targetDepth"))));
+        strategy.setTargetSkill(resolveTargetSkill(toStr(ns.get("targetSkill")), toStr(ns.get("focusPoint"))));
+        strategy.setExpectedPoints(toStringList(ns.get("expectedPoints")));
         strategy.setFocusPoint(toStr(ns.get("focusPoint")));
         return strategy;
     }
@@ -521,11 +527,12 @@ public class QuestionStreamService {
     private RagContext safeRetrieveRag(InterviewSession session,
                                         EvaluationDecisionOutput.NextQuestionStrategy strategy) {
         try {
+            String retrievalFocus = resolveTargetSkill(strategy.getTargetSkill(), strategy.getFocusPoint());
             RagRetrievalRequest req = RagRetrievalRequest.builder()
                     .domainCode(strategy.getNextDomainCode())
                     .questionType(strategy.getQuestionType())
                     .targetDepth(strategy.getTargetDepth())
-                    .focusPoint(strategy.getFocusPoint())
+                    .focusPoint(retrievalFocus)
                     .positionCode(session.getTargetRole())
                     .build();
             return ragRetrievalService.retrieve(req);
@@ -544,16 +551,8 @@ public class QuestionStreamService {
             List<InterviewQuestion> historyQuestions,
             RagContext ragContext) {
 
-        List<QuestionGenerationInput.AskedQuestion> asked = historyQuestions.stream()
-                .map(q -> QuestionGenerationInput.AskedQuestion.builder()
-                        .questionId(q.getId())
-                        .questionType(q.getQuestionType())
-                        .domainCode(resolveDomainCode(q))
-                        .stemSummary(q.getStem() != null
-                                ? q.getStem().substring(0, Math.min(80, q.getStem().length()))
-                                : "")
-                        .build())
-                .collect(Collectors.toList());
+        List<QuestionGenerationInput.AskedQuestion> asked =
+                buildAskedQuestionsForPrompt(historyQuestions, ASKED_QUESTIONS_MAX_CHARS);
 
         QuestionGenerationInput input = QuestionGenerationInput.builder()
                 .interviewId(session.getId())
@@ -567,6 +566,9 @@ public class QuestionStreamService {
                 .nextDomainName(strategy.getNextDomainName())
                 .nextQuestionType(strategy.getQuestionType())
                 .targetDepth(strategy.getTargetDepth())
+                .difficulty(normalizeDifficulty(strategy.getDifficulty(), strategy.getTargetDepth()))
+                .targetSkill(resolveTargetSkill(strategy.getTargetSkill(), strategy.getFocusPoint()))
+                .expectedPoints(safeList(strategy.getExpectedPoints()))
                 .askedQuestions(asked)
                 .syllabus(session.getSyllabusJson() != null ? session.getSyllabusJson() : new HashMap<>())
                 .build();
@@ -575,6 +577,8 @@ public class QuestionStreamService {
                 && ragContext.getContextText() != null
                 && !ragContext.getContextText().isBlank()) {
             input.setRagContext(ragContext.getContextText());
+        } else {
+            input.setRagContext(RAG_CONTEXT_FALLBACK);
         }
         return input;
     }
@@ -594,8 +598,10 @@ public class QuestionStreamService {
         question.setQuestionType(strategy.getQuestionType());
         question.setDomainId(strategy.getNextDomainId());
         question.setStem(stem);
-        question.setTargetSkill(strategy.getFocusPoint());
+        question.setTargetSkill(resolveTargetSkill(strategy.getTargetSkill(), strategy.getFocusPoint()));
+        question.setExpectedPoints(safeList(strategy.getExpectedPoints()));
         question.setTargetDepth(strategy.getTargetDepth());
+        question.setDifficulty(normalizeDifficulty(strategy.getDifficulty(), strategy.getTargetDepth()));
         question.setStatus("asked");
 
         Map<String, Object> ctx = new LinkedHashMap<>();
@@ -603,6 +609,9 @@ public class QuestionStreamService {
         ctx.put("questionType", strategy.getQuestionType());
         ctx.put("targetDepth", strategy.getTargetDepth());
         ctx.put("focusPoint", strategy.getFocusPoint());
+        ctx.put("targetSkill", question.getTargetSkill());
+        ctx.put("expectedPoints", question.getExpectedPoints());
+        ctx.put("difficulty", question.getDifficulty());
         ctx.put("generatedByStream", true);
         question.setGenerationContextJson(ctx);
 
@@ -767,6 +776,100 @@ public class QuestionStreamService {
 
     static Duration resolveFollowIdleTimeout(long configuredSeconds) {
         return Duration.ofSeconds(Math.max(5L, configuredSeconds));
+    }
+
+    private List<QuestionGenerationInput.AskedQuestion> buildAskedQuestionsForPrompt(
+            List<InterviewQuestion> historyQuestions, int maxChars) {
+        if (historyQuestions == null || historyQuestions.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> allStems = historyQuestions.stream()
+                .map(q -> q.getStem() != null ? q.getStem() : "")
+                .toList();
+        List<String> trimmedStems = trimStemsToMaxChars(allStems, maxChars);
+        int offset = Math.max(0, historyQuestions.size() - trimmedStems.size());
+
+        List<QuestionGenerationInput.AskedQuestion> asked = new ArrayList<>(trimmedStems.size());
+        for (int i = 0; i < trimmedStems.size(); i++) {
+            InterviewQuestion q = historyQuestions.get(offset + i);
+            String stem = trimmedStems.get(i);
+            asked.add(QuestionGenerationInput.AskedQuestion.builder()
+                    .questionId(q.getId())
+                    .questionType(q.getQuestionType())
+                    .domainCode(resolveDomainCode(q))
+                    .stem(stem)
+                    .build());
+        }
+        return asked;
+    }
+
+    private String resolveTargetSkill(String targetSkill, String focusPoint) {
+        if (targetSkill != null && !targetSkill.isBlank()) {
+            return targetSkill;
+        }
+        return focusPoint != null ? focusPoint : "";
+    }
+
+    private List<String> safeList(List<String> values) {
+        return values == null ? List.of() : values;
+    }
+
+    private List<String> toStringList(Object value) {
+        if (!(value instanceof List<?> rawList)) {
+            return List.of();
+        }
+        List<String> result = new ArrayList<>(rawList.size());
+        for (Object item : rawList) {
+            if (item == null) {
+                continue;
+            }
+            String str = String.valueOf(item).trim();
+            if (!str.isBlank()) {
+                result.add(str);
+            }
+        }
+        return result;
+    }
+
+    private String normalizeDifficulty(String difficulty, String fallbackDepth) {
+        String candidate = difficulty;
+        if (candidate == null || candidate.isBlank()) {
+            candidate = fallbackDepth;
+        }
+        if (candidate == null || candidate.isBlank()) {
+            return DEFAULT_DIFFICULTY;
+        }
+        return normalizeDifficultyForStorage(candidate, DEFAULT_DIFFICULTY);
+    }
+
+    static String normalizeDifficultyForStorage(String value, String defaultDifficulty) {
+        if (value == null || value.isBlank()) {
+            return defaultDifficulty;
+        }
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "L1", "L2", "L3", "L4", "L5" -> normalized;
+            case "EASY" -> "L1";
+            case "MEDIUM" -> "L3";
+            case "HARD" -> "L5";
+            default -> defaultDifficulty;
+        };
+    }
+
+    static List<String> trimStemsToMaxChars(List<String> stems, int maxChars) {
+        if (stems == null || stems.isEmpty()) {
+            return List.of();
+        }
+        ArrayList<String> window = new ArrayList<>(stems.stream()
+                .map(stem -> stem != null ? stem : "")
+                .toList());
+        int total = window.stream().mapToInt(String::length).sum();
+        while (total > maxChars && !window.isEmpty()) {
+            String removed = window.remove(0);
+            total -= removed.length();
+        }
+        return window;
     }
 
     private String resolveDomainCode(InterviewQuestion q) {

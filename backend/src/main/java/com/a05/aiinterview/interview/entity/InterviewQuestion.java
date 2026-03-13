@@ -51,6 +51,9 @@ public class InterviewQuestion {
     /** 本题目标深度等级：L1~L5 */
     private String targetDepth;
 
+    /** 本题难度等级：L1~L5 */
+    private String difficulty;
+
     /** 题目状态：pending / asked / answered / skipped */
     private String status;
 

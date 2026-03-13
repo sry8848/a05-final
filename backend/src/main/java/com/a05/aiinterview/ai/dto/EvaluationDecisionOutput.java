@@ -48,7 +48,7 @@ public class EvaluationDecisionOutput {
 
     /**
      * 下一题策略（signal=END 时为 null）。
-     * AnswerSubmitService 根据此策略调用 callQuestionGeneration 生成下一道题。
+     * AnswerSubmitService 将此策略落库，QuestionStreamService 再据此发起流式出题。
      */
     private NextQuestionStrategy nextStrategy;
 
@@ -95,7 +95,7 @@ public class EvaluationDecisionOutput {
     // ────────────────────────────────────────────
 
     /**
-     * 下一题策略，由 AnswerSubmitService 传给 callQuestionGeneration 使用。
+     * 下一题策略，由 QuestionStreamService 用于流式出题。
      */
     @Data
     @Builder
@@ -117,6 +117,15 @@ public class EvaluationDecisionOutput {
 
         /** 下一题目标深度等级，如 L3 */
         private String targetDepth;
+
+        /** 下一题核心考察点，落库到 interview_questions.target_skill */
+        private String targetSkill;
+
+        /** 下一题理想回答要点，落库到 interview_questions.expected_points */
+        private List<String> expectedPoints;
+
+        /** 下一题难度等级：L1~L5 */
+        private String difficulty;
 
         /**
          * 下一题的核心考察焦点（自然语言描述）。

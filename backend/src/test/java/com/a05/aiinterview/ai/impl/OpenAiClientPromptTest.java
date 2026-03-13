@@ -8,8 +8,6 @@ import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.IntroRewriteInput;
 import com.a05.aiinterview.ai.dto.PlannerInput;
 import com.a05.aiinterview.ai.dto.PlannerOutput;
-import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
-import com.a05.aiinterview.ai.dto.QuestionGenerationOutput;
 import com.a05.aiinterview.ai.prompt.ClasspathPromptTemplateService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
@@ -24,7 +22,6 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -86,56 +83,6 @@ class OpenAiClientPromptTest {
     }
 
     @Test
-    @DisplayName("callQuestionGeneration should render prompt from template and return prompt metadata")
-    void callQuestionGeneration_shouldRenderPromptFromTemplate() {
-        ChatModel chatModel = mock(ChatModel.class);
-        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse("""
-                {
-                  "stem": "请解释线程池的核心参数。",
-                  "targetSkill": "线程池",
-                  "expectedPoints": ["corePoolSize"],
-                  "difficulty": "medium",
-                  "targetDepth": "L3"
-                }
-                """));
-
-        OpenAiClient client = new OpenAiClient(
-                chatModel,
-                new ClasspathPromptTemplateService(new ObjectMapper()),
-                new PromptProperties(),
-                new ObjectMapper()
-        );
-
-        QuestionGenerationInput input = QuestionGenerationInput.builder()
-                .positionCode("JAVA_BACKEND")
-                .experienceLevel("SENIOR")
-                .mode("professional")
-                .nextDomainCode("concurrency")
-                .nextDomainName("并发编程")
-                .nextQuestionType("PRINCIPLE")
-                .targetDepth("L3")
-                .askedQuestions(List.of(QuestionGenerationInput.AskedQuestion.builder()
-                        .questionId(1L)
-                        .stemSummary("讲讲 synchronized")
-                        .build()))
-                .syllabus(Map.of("domains", List.of()))
-                .build();
-
-        AiCallResult<QuestionGenerationOutput> result = client.callQuestionGeneration(input);
-
-        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
-        verify(chatModel).call(captor.capture());
-        Prompt prompt = captor.getValue();
-        assertThat(((SystemMessage) prompt.getSystemMessage()).getText())
-                .contains("你的任务是：根据当前考纲和出题策略，生成一道合适的面试题");
-        assertThat(((UserMessage) prompt.getUserMessage()).getText())
-                .contains("知识域：并发编程（concurrency）")
-                .contains("已问过的题目（避免重复）");
-        assertThat(result.getPromptCode()).isEqualTo("question_generation");
-        assertThat(result.getPromptVersion()).isEqualTo("v1");
-    }
-
-    @Test
     @DisplayName("callIntroRewrite should render prompt from template and return prompt metadata")
     void callIntroRewrite_shouldRenderPromptFromTemplate() {
         ChatModel chatModel = mock(ChatModel.class);
@@ -163,9 +110,9 @@ class OpenAiClientPromptTest {
         verify(chatModel).call(captor.capture());
         Prompt prompt = captor.getValue();
         assertThat(((SystemMessage) prompt.getSystemMessage()).getText())
-                .contains("You rewrite an interview opening prompt for self-introduction.");
+                .contains("你负责将“自我介绍首题”改写成更自然的中文面试话术");
         assertThat(((UserMessage) prompt.getUserMessage()).getText())
-                .contains("Base prompt:")
+                .contains("【底稿】")
                 .contains("请先做一个自我介绍。");
         assertThat(result.getPromptCode()).isEqualTo("intro_rewrite");
         assertThat(result.getPromptVersion()).isEqualTo("v1");

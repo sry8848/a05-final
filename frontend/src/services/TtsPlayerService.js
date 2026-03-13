@@ -53,10 +53,13 @@ export class TtsPlayerService {
     if (!payload || this.mode === 'mute') return
 
     const generationId = payload?.generationId || ''
-    if (generationId && this.currentGenerationId && generationId !== this.currentGenerationId) {
-      this.beginGeneration(generationId)
-    } else if (!this.currentGenerationId && generationId) {
-      this.currentGenerationId = generationId
+    if (generationId) {
+      if (!this.currentGenerationId) {
+        this.currentGenerationId = generationId
+      } else if (generationId !== this.currentGenerationId) {
+        // 忽略非当前 generation 的延迟事件，防止跨题音频串播。
+        return
+      }
     }
 
     const segmentIndex = Number(payload?.segmentIndex)

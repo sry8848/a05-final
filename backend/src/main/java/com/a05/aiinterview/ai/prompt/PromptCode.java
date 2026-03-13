@@ -8,7 +8,6 @@ import java.util.Arrays;
 public enum PromptCode {
 
     PLANNER("planner"),
-    QUESTION_GENERATION("question_generation"),
     QUESTION_GENERATION_STREAM("question_generation_stream"),
     EVALUATION_DECISION("evaluation_decision"),
     REPORT_GENERATION("report_generation"),

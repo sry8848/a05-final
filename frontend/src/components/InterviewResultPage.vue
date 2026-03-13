@@ -389,7 +389,12 @@ export default {
     }
 
     const goToQuestionDetail = (index) => {
-      emit('showQuestionDetail', { index, questionId: answers.value[index]?.questionId })
+      const answer = answers.value[index] || null
+      emit('showQuestionDetail', {
+        index,
+        questionId: answer?.questionId ?? null,
+        sessionId: sessionId.value ?? null
+      })
     }
 
     const goBack = () => emit('goBack')
@@ -815,5 +820,4 @@ export default {
   text-decoration: underline;
 }
 </style>
-
 

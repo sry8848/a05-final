@@ -341,16 +341,31 @@ export default {
       return points.slice(0, 3)
     }
 
+    const normalizeSessionId = (value) => {
+      if (value == null) return null
+      const normalized = String(value).trim()
+      return normalized ? normalized : null
+    }
+
+    const normalizeQuestionId = (value) => {
+      if (value == null) return null
+      const normalized = String(value).trim()
+      return normalized ? normalized : null
+    }
+
     const isQuestionCollected = (recordId, questionId) => {
       try {
         const bank = JSON.parse(localStorage.getItem('questionBank') || '[]')
-        return bank.some((item) => item.recordId === recordId && item.questionId === questionId)
+        return bank.some((item) => {
+          const itemQuestionKey = item.localQuestionKey || item.questionId || item.id
+          return item.recordId === recordId && itemQuestionKey === questionId
+        })
       } catch (error) {
         return false
       }
     }
 
-    const buildQuestionDetailViewModel = ({ source, record, result, questionIndex }) => {
+    const buildQuestionDetailViewModel = ({ source, record, result, questionIndex, sessionId = null, questionId = null }) => {
       const questionList = record?.answers || result?.answers || []
       const answer = questionList[questionIndex]
       if (!answer) return null
@@ -360,12 +375,22 @@ export default {
       const modeLabel = mapModeLabel(record?.mode || result?.interviewMode)
       const domainName = inferDomainName(answer.question, answer.keywords || [], jobName)
       const weakPoints = buildWeakPoints(answer, answer.keywords || [])
+      const resolvedSessionId = normalizeSessionId(sessionId)
+        || normalizeSessionId(result?.sessionId)
+        || normalizeSessionId(result?.report?.sessionId)
+        || normalizeSessionId(record?.sessionId)
+      const explicitQuestionId = normalizeQuestionId(questionId) || normalizeQuestionId(answer.questionId)
+      const localQuestionKey = explicitQuestionId || `${recordId}-${questionIndex}`
+      const isLocalFallback = !resolvedSessionId || !explicitQuestionId
+      const answerStatus = (!answer.answer || answer.answer === '[跳过]' || answer.answer === '[skip]') ? 'skipped' : 'answered'
 
       return {
         source,
         recordId,
-        sessionId: record?.id || result?.sessionId || recordId,
-        questionId: answer.questionId || `${recordId}-${questionIndex}`,
+        sessionId: resolvedSessionId,
+        questionId: explicitQuestionId,
+        localQuestionKey,
+        isLocalFallback,
         questionIndex,
         questionNumber: questionIndex + 1,
         totalQuestions: questionList.length,
@@ -373,7 +398,7 @@ export default {
         domainName,
         questionType: inferQuestionType(answer.question, questionIndex),
         targetDepth: inferTargetDepth(answer.score, questionIndex),
-        answerStatus: !answer.answer || answer.answer === '[跳过]' ? 'skipped' : 'answered',
+        answerStatus,
         userAnswer: answer.answer,
         highlightedSegments: buildHighlightedSegments(answer.answer, answer.keywords || [], answer.score),
         score: answer.score || 0,
@@ -389,7 +414,7 @@ export default {
         ],
         idealAnswerOutline: buildAnswerOutline(answer.question, answer.keywords || []),
         rewrittenAnswer: buildRewrittenAnswer(answer.question, answer.keywords || [], domainName),
-        isCollected: isQuestionCollected(recordId, answer.questionId || `${recordId}-${questionIndex}`),
+        isCollected: isQuestionCollected(recordId, localQuestionKey),
         keywords: answer.keywords || [],
         jobName,
         modeLabel,
@@ -516,12 +541,18 @@ export default {
 
     const buildQuestionDetailFromBankItem = (item, index = 0, list = []) => {
       if (!item) return null
+      const resolvedSessionId = normalizeSessionId(item.sessionId)
+      const explicitQuestionId = normalizeQuestionId(item.questionId)
+      const localQuestionKey = normalizeQuestionId(item.localQuestionKey) || explicitQuestionId || normalizeQuestionId(item.id) || `question-bank-${index}`
+      const isLocalFallback = !resolvedSessionId || !explicitQuestionId
 
       const detail = {
         source: 'questionBank',
-        recordId: item.recordId || item.sessionId || 'question-bank',
-        sessionId: item.sessionId || item.recordId || 'question-bank',
-        questionId: item.questionId || item.id,
+        recordId: item.recordId || 'question-bank',
+        sessionId: resolvedSessionId,
+        questionId: explicitQuestionId,
+        localQuestionKey,
+        isLocalFallback,
         questionIndex: index,
         questionNumber: index + 1,
         totalQuestions: list.length || 1,
@@ -630,11 +661,13 @@ export default {
       currentPage.value = 'interview'
     }
 
-    const handleShowQuestionDetailFromResult = ({ index = 0 } = {}) => {
+    const handleShowQuestionDetailFromResult = ({ index = 0, questionId = null, sessionId = null } = {}) => {
       selectedQuestionDetail.value = buildQuestionDetailViewModel({
         source: 'result',
         result: interviewResult.value,
-        questionIndex: index
+        questionIndex: index,
+        questionId,
+        sessionId
       })
       questionDetailContext.value = {
         source: 'result',
@@ -723,7 +756,11 @@ export default {
 
       const storageKey = 'questionBank'
       const savedItems = JSON.parse(localStorage.getItem(storageKey) || '[]')
-      const exists = savedItems.some((item) => item.recordId === detail.recordId && item.questionId === detail.questionId)
+      const localQuestionKey = detail.localQuestionKey || detail.questionId || `${detail.recordId}-${detail.questionIndex || 0}`
+      const exists = savedItems.some((item) => {
+        const itemQuestionKey = item.localQuestionKey || item.questionId || item.id
+        return item.recordId === detail.recordId && itemQuestionKey === localQuestionKey
+      })
 
       if (exists) {
         selectedQuestionDetail.value = {
@@ -735,10 +772,11 @@ export default {
       }
 
       savedItems.unshift({
-        id: `${detail.recordId}-${detail.questionId}`,
+        id: `${detail.recordId}-${localQuestionKey}`,
         recordId: detail.recordId,
-        sessionId: detail.sessionId,
-        questionId: detail.questionId,
+        sessionId: detail.sessionId || null,
+        questionId: detail.questionId || null,
+        localQuestionKey,
         questionStem: detail.questionStem,
         question: detail.questionStem,
         tag: detail.domainName,
@@ -758,7 +796,8 @@ export default {
         analysis: detail.commentary,
         domainName: detail.domainName,
         questionType: detail.questionType,
-        targetDepth: detail.targetDepth
+        targetDepth: detail.targetDepth,
+        isLocalFallback: !!detail.isLocalFallback
       })
 
       localStorage.setItem(storageKey, JSON.stringify(savedItems))

@@ -91,7 +91,6 @@ ai:
   prompt:
     version:
       planner: ${AI_PROMPT_PLANNER_VERSION:v1}
-      question-generation: ${AI_PROMPT_QUESTION_GENERATION_VERSION:v1}
       question-generation-stream: ${AI_PROMPT_QUESTION_GENERATION_STREAM_VERSION:v1}
       evaluation-decision: ${AI_PROMPT_EVALUATION_DECISION_VERSION:v1}
       report-generation: ${AI_PROMPT_REPORT_GENERATION_VERSION:v1}

@@ -2,7 +2,6 @@ package com.a05.aiinterview.ai.contract;
 
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.ai.dto.PlannerOutput;
-import com.a05.aiinterview.ai.dto.QuestionGenerationOutput;
 import com.a05.aiinterview.ai.dto.ReportGenerationOutput;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -17,7 +16,7 @@ import java.util.List;
 /**
  * AI 输出 DTO 契约验证器。
  *
- * <p>职责：对四类核心 AI 调用（Planner / QuestionGeneration / EvaluationDecision / Report）
+ * <p>职责：对三类核心 AI 调用（Planner / EvaluationDecision / Report）
  * 的输出 DTO 进行必填字段校验和兜底降级处理，确保主链路不因 AI 输出格式漂移而中断。
  *
  * <p>降级策略：
@@ -95,56 +94,6 @@ public class AiOutputContractValidator {
             log.error("[契约] Planner 输出解析失败，类型漂移或格式异常，已降级, json摘要={}",
                     safeSnippet(json), e);
             return buildFallbackPlannerOutput();
-        }
-    }
-
-    // ────────────────────────── QuestionGeneration ──────────────────────────
-
-    /**
-     * 验证并修复 QuestionGeneration 输出契约。
-     *
-     * <p>必填契约：
-     * <ol>
-     *   <li>{@code stem} 非空非空白</li>
-     *   <li>{@code expectedPoints} 非 null（允许空列表）</li>
-     * </ol>
-     *
-     * @param output AI 返回的 QuestionGenerationOutput
-     * @return 验证修复后的输出
-     */
-    public QuestionGenerationOutput validateQuestionGeneration(QuestionGenerationOutput output) {
-        if (output == null) {
-            log.warn("[契约] QuestionGeneration 输出为 null，返回最小降级对象");
-            return buildFallbackQuestionGenerationOutput();
-        }
-
-        if (output.getStem() == null || output.getStem().isBlank()) {
-            log.warn("[契约] QuestionGeneration.stem 为空，已填入占位符兜底");
-            output.setStem("（AI 出题失败，请重试）");
-        }
-
-        if (output.getExpectedPoints() == null) {
-            log.warn("[契约] QuestionGeneration.expectedPoints 为 null，已填入空列表兜底");
-            output.setExpectedPoints(new ArrayList<>());
-        }
-
-        return output;
-    }
-
-    /**
-     * 从 JSON 字符串安全解析 QuestionGenerationOutput；解析失败时降级。
-     *
-     * @param json AI 返回的原始 JSON 文本
-     * @return 验证后的输出
-     */
-    public QuestionGenerationOutput parseAndValidateQuestionGeneration(String json) {
-        try {
-            QuestionGenerationOutput output = objectMapper.readValue(json, QuestionGenerationOutput.class);
-            return validateQuestionGeneration(output);
-        } catch (Exception e) {
-            log.error("[契约] QuestionGeneration 输出解析失败，类型漂移或格式异常，已降级, json摘要={}",
-                    safeSnippet(json), e);
-            return buildFallbackQuestionGenerationOutput();
         }
     }
 
@@ -288,13 +237,6 @@ public class AiOutputContractValidator {
         fallback.setDomains(new ArrayList<>());
         fallback.setQuestionMixPlan(buildDefaultQuestionMixPlan());
         fallback.setProjects(new ArrayList<>());
-        return fallback;
-    }
-
-    private QuestionGenerationOutput buildFallbackQuestionGenerationOutput() {
-        QuestionGenerationOutput fallback = new QuestionGenerationOutput();
-        fallback.setStem("（AI 出题失败，请重试）");
-        fallback.setExpectedPoints(new ArrayList<>());
         return fallback;
     }
 

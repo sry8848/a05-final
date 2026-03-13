@@ -80,30 +80,6 @@ class ClasspathPromptTemplateServiceTest {
     }
 
     @Test
-    @DisplayName("question_generation 模板可通过下划线代码加载 question-generation.md")
-    void renderQuestionGeneration_shouldLoadHyphenFile() {
-        PromptTemplateService service = new ClasspathPromptTemplateService(new ObjectMapper());
-        Map<String, Object> vars = Map.of(
-                "nextDomainName", "并发编程",
-                "nextDomainCode", "concurrency",
-                "nextQuestionType", "PRINCIPLE",
-                "targetDepth", "L3",
-                "positionCode", "JAVA_BACKEND",
-                "experienceLevel", "SENIOR",
-                "mode", "professional",
-                "ragContext", "线程池参数说明",
-                "askedQuestions", "- 讲讲线程池参数怎么配",
-                "syllabus", "{\"domains\":[]}"
-        );
-
-        RenderedPrompt rendered = service.render("question_generation", "v1", vars);
-
-        assertThat(rendered.getPromptCode()).isEqualTo("question_generation");
-        assertThat(rendered.getUserPrompt()).contains("知识域：并发编程（concurrency）");
-        assertThat(rendered.getUserPrompt()).doesNotContain("{{nextDomainName}}");
-    }
-
-    @Test
     @DisplayName("loadMetadata should expose prompt code, version and source path")
     void loadMetadata_shouldExposePromptMeta() {
         PromptTemplateService service = new ClasspathPromptTemplateService(new ObjectMapper());
