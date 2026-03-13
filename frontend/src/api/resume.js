@@ -147,6 +147,11 @@ export function getInterviewReport(sessionId) {
   return request('/interviews/' + sessionId + '/report', { method: 'GET' })
 }
 
+/** Get interview question detail */
+export function getInterviewQuestionDetail(sessionId, questionId) {
+  return request('/interviews/' + sessionId + '/questions/' + questionId, { method: 'GET' })
+}
+
 /** Get learning recommendations for interview report */
 export function getLearningRecommendations(sessionId) {
   return request('/interviews/' + sessionId + '/report/learning-recommendations', { method: 'GET' })

@@ -11,7 +11,8 @@ public enum PromptCode {
     QUESTION_GENERATION_STREAM("question_generation_stream"),
     EVALUATION_DECISION("evaluation_decision"),
     REPORT_GENERATION("report_generation"),
-    INTRO_REWRITE("intro_rewrite");
+    INTRO_REWRITE("intro_rewrite"),
+    QUESTION_DETAIL_EVALUATION("question_detail_evaluation");
 
     private final String code;
 

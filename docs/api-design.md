@@ -588,6 +588,65 @@ data: {"isFinished": false, "message": "下一题出题完毕"}
 
 `GET /api/v1/interviews/{sessionId}/questions/{questionId}`
 
+返回体示例：
+
+```json
+{
+  "code": 0,
+  "message": "OK",
+  "data": {
+    "questionId": 5001,
+    "questionNo": 1,
+    "questionStem": "请介绍一个你做过的性能优化场景。",
+    "domainName": "性能优化",
+    "questionType": "SCENARIO",
+    "targetDepth": "L3",
+    "userAnswer": "主要提升了系统性能……",
+    "answerStatus": "answered",
+    "evaluationStatus": "ready",
+    "score": 82.0,
+    "commentary": "回答方向正确，建议补充量化指标。",
+    "strengthPoints": [
+      "回答结构清晰"
+    ],
+    "weakPoints": [
+      "缺少量化指标"
+    ],
+    "evaluatedDomains": [
+      {
+        "domainCode": "performance",
+        "domainName": "性能优化",
+        "score": 82.0,
+        "commentary": "基础较好，细节可加强"
+      }
+    ],
+    "highlightedSegments": [
+      {
+        "segment": "主要提升了系统性能",
+        "label": "strength",
+        "comment": "建议补充具体指标"
+      }
+    ],
+    "idealAnswerOutline": [
+      "先定义目标指标",
+      "说明优化方案与权衡",
+      "给出结果与复盘"
+    ],
+    "rewrittenAnswer": "我会先定义优化目标，再说明方案和结果。",
+    "backfillFromLocalAllowed": false
+  }
+}
+```
+
+字段语义：
+
+- `answerStatus`: `answered | skipped | pending`
+- `evaluationStatus`: `pending | generating | ready | failed`
+- `evaluationStatus=ready` 时返回完整详细评估字段。
+- `evaluationStatus=pending/generating/failed` 时仅保证题目基础信息与用户回答可用，详细评估字段可为 `null`。
+- `highlightedSegments` 固定最小结构为 `{segment,label,comment}`，前端负责样式映射（例如 `strength` 绿色、`weakness` 红色）。
+- `failed` 一期仅用于状态展示，不自动重试。
+
 ### 8.3 单题向 AI 追问 `[MVP]`
 
 `POST /api/v1/interviews/{sessionId}/questions/{questionId}/ai-consult`

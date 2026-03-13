@@ -51,5 +51,18 @@ public class InterviewAttempt {
     @TableField(typeHandler = JacksonTypeHandler.class)
     private Map<String, Object> evaluationJson;
 
+    /**
+     * 单题详细评估状态：
+     * pending / generating / ready / failed。
+     */
+    private String detailEvaluationStatus;
+
+    /**
+     * 单题详细评估结构化结果。
+     * 仅存储 QuestionDetailEvaluationOutput 对应业务字段，不混入调试元信息。
+     */
+    @TableField(typeHandler = JacksonTypeHandler.class)
+    private Map<String, Object> detailEvaluationJson;
+
     private LocalDateTime createdAt;
 }

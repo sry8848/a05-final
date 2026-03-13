@@ -6,6 +6,8 @@ import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.ai.dto.IntroRewriteInput;
 import com.a05.aiinterview.ai.dto.PlannerInput;
 import com.a05.aiinterview.ai.dto.PlannerOutput;
+import com.a05.aiinterview.ai.dto.QuestionDetailEvaluationInput;
+import com.a05.aiinterview.ai.dto.QuestionDetailEvaluationOutput;
 import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
 import com.a05.aiinterview.ai.dto.ReportGenerationInput;
 import com.a05.aiinterview.ai.dto.ReportGenerationOutput;
@@ -63,4 +65,12 @@ public interface AiClient {
      * @return 包含结构化报告输出和 Token 消耗的结果包装
      */
     AiCallResult<ReportGenerationOutput> callReportGeneration(ReportGenerationInput input);
+
+    /**
+     * 调用单题详细评估服务，生成题后复盘结构化结果。
+     *
+     * @param input 单题详细评估入参
+     * @return 结构化详细评估结果
+     */
+    AiCallResult<QuestionDetailEvaluationOutput> callQuestionDetailEvaluation(QuestionDetailEvaluationInput input);
 }

@@ -308,6 +308,56 @@ public class OpenAiClient implements AiClient {
         }
     }
 
+    @Override
+    public AiCallResult<QuestionDetailEvaluationOutput> callQuestionDetailEvaluation(QuestionDetailEvaluationInput input) {
+        log.info("调用 OpenAI 单题详细评估, questionId={}, domainCode={}",
+                input.getQuestionId(), input.getDomainCode());
+
+        BeanOutputConverter<QuestionDetailEvaluationOutput> converter =
+                new BeanOutputConverter<>(QuestionDetailEvaluationOutput.class);
+        RenderedPrompt rendered = null;
+        long startMs = System.currentTimeMillis();
+        try {
+            rendered = renderPrompt(PROMPT_CODE_QUESTION_DETAIL_EVALUATION,
+                    buildQuestionDetailEvaluationVariables(input, converter.getFormat()));
+
+            ChatResponse response = callChat(rendered.getSystemPrompt(), rendered.getUserPrompt());
+            QuestionDetailEvaluationOutput output =
+                    requireConvert(converter, response, "question_detail_evaluation");
+            long latencyMs = System.currentTimeMillis() - startMs;
+            auditLite(
+                    rendered.getPromptCode(),
+                    rendered.getPromptVersion(),
+                    input.getInterviewId(),
+                    input.getQuestionId(),
+                    input.getVariantId(),
+                    latencyMs,
+                    "success",
+                    null,
+                    response.getResult().getOutput().getText(),
+                    null,
+                    null
+            );
+            return buildResult(output, response, latencyMs, rendered);
+        } catch (Exception e) {
+            long latencyMs = System.currentTimeMillis() - startMs;
+            auditLite(
+                    resolvePromptCode(rendered, PROMPT_CODE_QUESTION_DETAIL_EVALUATION),
+                    resolvePromptVersion(rendered, PROMPT_CODE_QUESTION_DETAIL_EVALUATION),
+                    input.getInterviewId(),
+                    input.getQuestionId(),
+                    input.getVariantId(),
+                    latencyMs,
+                    "error",
+                    null,
+                    null,
+                    null,
+                    e
+            );
+            throw e;
+        }
+    }
+
     // ──────────────────────────── 公共工具 ──────────────────────────────────
 
     /**
@@ -459,6 +509,7 @@ public class OpenAiClient implements AiClient {
     private static final String PROMPT_CODE_REPORT_GENERATION = "report_generation";
     private static final String PROMPT_CODE_QUESTION_GENERATION_STREAM = "question_generation_stream";
     private static final String PROMPT_CODE_INTRO_REWRITE = "intro_rewrite";
+    private static final String PROMPT_CODE_QUESTION_DETAIL_EVALUATION = "question_detail_evaluation";
 
     private Map<String, Object> buildPlannerVariables(PlannerInput input) {
         Map<String, Object> variables = new LinkedHashMap<>();
@@ -514,6 +565,24 @@ public class OpenAiClient implements AiClient {
         return variables;
     }
 
+    private Map<String, Object> buildQuestionDetailEvaluationVariables(
+            QuestionDetailEvaluationInput input, String outputSchema) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("positionCode", safeString(input.getPositionCode()));
+        variables.put("experienceLevel", safeString(input.getExperienceLevel()));
+        variables.put("mode", safeString(input.getMode()));
+        variables.put("questionStem", safeString(input.getQuestionStem()));
+        variables.put("questionType", safeString(input.getQuestionType()));
+        variables.put("domainCode", safeString(input.getDomainCode()));
+        variables.put("domainName", safeString(input.getDomainName()));
+        variables.put("targetDepth", safeString(input.getTargetDepth()));
+        variables.put("answerText", safeString(input.getAnswerText()));
+        variables.put("expectedPoints", formatBulletLines(input.getExpectedPoints()));
+        variables.put("recentContext", formatQuestionDetailRecentContext(input.getRecentContext()));
+        variables.put("outputSchema", safeString(outputSchema));
+        return variables;
+    }
+
     private RenderedPrompt renderPrompt(String promptCode, Map<String, Object> variables) {
         String promptVersion = promptProperties.resolveVersion(promptCode);
         RenderedPrompt rendered = promptTemplateService.render(promptCode, promptVersion, variables);
@@ -564,6 +633,30 @@ public class OpenAiClient implements AiClient {
         }
         StringBuilder sb = new StringBuilder();
         for (EvaluationDecisionInput.QaContext ctx : recentContext) {
+            if (ctx == null) {
+                continue;
+            }
+            if (!sb.isEmpty()) {
+                sb.append("\n");
+            }
+            sb.append("- [")
+                    .append(safeString(ctx.getQuestionType()))
+                    .append("/")
+                    .append(safeString(ctx.getDomainCode()))
+                    .append("] Q: ")
+                    .append(safeString(ctx.getStem()))
+                    .append(" | A: ")
+                    .append(safeString(ctx.getAnswer()));
+        }
+        return sb.isEmpty() ? "- 无" : sb.toString();
+    }
+
+    private String formatQuestionDetailRecentContext(List<QuestionDetailEvaluationInput.QaContext> recentContext) {
+        if (recentContext == null || recentContext.isEmpty()) {
+            return "- 无";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (QuestionDetailEvaluationInput.QaContext ctx : recentContext) {
             if (ctx == null) {
                 continue;
             }

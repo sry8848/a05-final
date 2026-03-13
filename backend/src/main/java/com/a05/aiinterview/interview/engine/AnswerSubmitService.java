@@ -16,7 +16,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -45,7 +44,7 @@ public class AnswerSubmitService {
     private final InterviewSessionMapper interviewSessionMapper;
     private final InterviewQuestionMapper interviewQuestionMapper;
     private final InterviewAttemptMapper interviewAttemptMapper;
-    private final StateLedgerPatchService stateLedgerPatchService;
+    private final AnswerSubmitPersistenceService answerSubmitPersistenceService;
     private final ReportGenerationService reportGenerationService;
 
     /**
@@ -130,21 +129,13 @@ public class AnswerSubmitService {
             }
         }
 
-        InterviewAttempt attempt = saveAttempt(sessionId, currentQuestion.getId(), request, evalOutput);
-
-        // ── Step 5b：应用账本 Patch（行锁串行） ─────────────────────
-        if (evalOutput.getPatch() != null) {
-            evalOutput.getPatch().setEvidenceQuestionId(currentQuestion.getId());
-        }
-        stateLedgerPatchService.applyPatch(sessionId, evalOutput.getPatch(), request.getAttemptId(), attempt.getId());
-
-        // 更新当前题目状态为 answered
-        markQuestionAnswered(currentQuestion);
+        // ── Step 5b：持久化（事务）+ final attempt 提交后事件发布 ────────
+        AnswerSubmitPersistenceService.PersistedAttemptResult persisted =
+                answerSubmitPersistenceService.persist(sessionId, currentQuestion, request, evalOutput);
 
         // ── Step 6：signal=END 则结束面试；否则仅返回流式标识符，下一题由 SSE 实时生成 ──
         if ("END".equals(evalOutput.getSignal())) {
             log.info("评估决策信号=END，触发结束面试并异步生成报告, sessionId={}", sessionId);
-            markSessionFinishing(sessionId);
             reportGenerationService.generateAsync(sessionId);
             return SubmitAttemptResponse.builder()
                     .attemptId(request.getAttemptId())
@@ -155,8 +146,8 @@ public class AnswerSubmitService {
         }
 
         // ── Step 7：返回流式出题标识符（下一题通过 SSE QuestionStreamService 实时生成） ──
-        log.info("提交回答主链路完成, sessionId={}, signal={}, 下一题将通过 SSE 流式生成, attemptId={}",
-                sessionId, evalOutput.getSignal(), request.getAttemptId());
+        log.info("提交回答主链路完成, sessionId={}, signal={}, 下一题将通过 SSE 流式生成, attemptId={}, attemptDbId={}",
+                sessionId, evalOutput.getSignal(), request.getAttemptId(), persisted.getAttemptDbId());
 
         return SubmitAttemptResponse.builder()
                 .attemptId(request.getAttemptId())
@@ -284,48 +275,6 @@ public class AnswerSubmitService {
     }
 
     /**
-     * 保存 attempt 记录（含评估结果快照）。
-     */
-    private InterviewAttempt saveAttempt(Long sessionId, Long questionId,
-                                         SubmitAttemptRequest request,
-                                         EvaluationDecisionOutput evalOutput) {
-        // 将评估结果序列化为 Map 快照
-        Map<String, Object> evalSnapshot = new LinkedHashMap<>();
-        evalSnapshot.put("signal", evalOutput.getSignal());
-        evalSnapshot.put("depthReached", evalOutput.getDepthReached());
-        evalSnapshot.put("saturated", evalOutput.isSaturated());
-        evalSnapshot.put("reasoning", evalOutput.getReasoning());
-        // 保存完整策略：QuestionStreamService 需要这些字段重建出题入参
-        if (evalOutput.getNextStrategy() != null) {
-            EvaluationDecisionOutput.NextQuestionStrategy strat = evalOutput.getNextStrategy();
-            Map<String, Object> ns = new LinkedHashMap<>();
-            ns.put("nextDomainId", strat.getNextDomainId());
-            ns.put("nextDomainCode", strat.getNextDomainCode());
-            ns.put("nextDomainName", strat.getNextDomainName());
-            ns.put("questionType", strat.getQuestionType());
-            ns.put("targetDepth", strat.getTargetDepth());
-            ns.put("difficulty", strat.getDifficulty());
-            ns.put("targetSkill", strat.getTargetSkill());
-            ns.put("expectedPoints", strat.getExpectedPoints());
-            ns.put("focusPoint", strat.getFocusPoint());
-            evalSnapshot.put("nextStrategy", ns);
-        }
-
-        InterviewAttempt attempt = new InterviewAttempt();
-        attempt.setSessionId(sessionId);
-        attempt.setQuestionId(questionId);
-        attempt.setAttemptId(request.getAttemptId());
-        attempt.setAnswerText(request.getAnswerText());
-        attempt.setIsFinal(Boolean.TRUE.equals(request.getIsFinal()));
-        attempt.setEvaluationJson(evalSnapshot);
-        attempt.setCreatedAt(LocalDateTime.now());
-        interviewAttemptMapper.insert(attempt);
-
-        log.info("attempt 落库完成, attemptId={}, attemptPK={}", request.getAttemptId(), attempt.getId());
-        return attempt;
-    }
-
-    /**
      * 将已存在的 attempt 转化为幂等返回（从 evaluationJson 快照中还原响应）。
      * M2 升级后：不再查找 nextQuestion，而是返回 streamAttemptId；
      * 前端使用该 ID 重新打开 SSE，QuestionStreamService 会从 Redis 缓存中重放已生成内容。
@@ -344,23 +293,6 @@ public class AnswerSubmitService {
                 .streamAttemptId(isEnd ? null : existing.getAttemptId())
                 .sessionStatus(isEnd ? "report_generating" : "in_progress")
                 .build();
-    }
-
-    private void markQuestionAnswered(InterviewQuestion question) {
-        InterviewQuestion update = new InterviewQuestion();
-        update.setId(question.getId());
-        update.setStatus("answered");
-        update.setUpdatedAt(LocalDateTime.now());
-        interviewQuestionMapper.updateById(update);
-    }
-
-    private void markSessionFinishing(Long sessionId) {
-        InterviewSession update = new InterviewSession();
-        update.setId(sessionId);
-        update.setStatus("report_generating");
-        update.setFinishedAt(LocalDateTime.now());
-        update.setUpdatedAt(LocalDateTime.now());
-        interviewSessionMapper.updateById(update);
     }
 
     /**

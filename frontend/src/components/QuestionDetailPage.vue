@@ -77,9 +77,9 @@
             本题当时被跳过，建议先按黄金骨架补全一版答案，再继续向 AI 追问。
           </div>
           <p v-else class="annotated-answer">
-            <template v-if="detail.highlightedSegments && detail.highlightedSegments.length">
+            <template v-if="renderSegments.length">
               <span
-                v-for="(segment, index) in detail.highlightedSegments"
+                v-for="(segment, index) in renderSegments"
                 :key="`${segment.text}-${index}`"
                 class="answer-segment"
                 :class="segment.type"
@@ -105,20 +105,36 @@
 
         <section class="glass-card content-card">
           <div class="score-overview">
-            <div class="score-badge" :class="scoreClass">
-              <span class="score-value">{{ detail.score }}</span>
-              <span class="score-label">单题得分</span>
-            </div>
-            <div class="score-copy">
-              <h3 class="section-title">
-                <i class="fas fa-chart-line"></i>
-                评分与点评
-              </h3>
-              <p class="commentary-text">{{ detail.commentary }}</p>
+            <template v-if="evaluationStatus === 'ready'">
+              <div class="score-badge" :class="scoreClass">
+                <span class="score-value">{{ detail.score }}</span>
+                <span class="score-label">单题得分</span>
+              </div>
+              <div class="score-copy">
+                <h3 class="section-title">
+                  <i class="fas fa-chart-line"></i>
+                  评分与点评
+                </h3>
+                <p class="commentary-text">{{ detail.commentary }}</p>
+              </div>
+            </template>
+            <div v-else class="evaluation-status" :class="evaluationStatus">
+              <template v-if="evaluationStatus === 'generating'">
+                <i class="fas fa-spinner fa-spin"></i>
+                <span>单题评估生成中，请稍后刷新查看。</span>
+              </template>
+              <template v-else-if="evaluationStatus === 'failed'">
+                <i class="fas fa-circle-exclamation"></i>
+                <span>评估暂时失败，当前仅展示基础题目信息。本期不会自动重试。</span>
+              </template>
+              <template v-else>
+                <i class="fas fa-hourglass-half"></i>
+                <span>单题评估尚未就绪。</span>
+              </template>
             </div>
           </div>
 
-          <div class="domain-score-list">
+          <div v-if="evaluationStatus === 'ready'" class="domain-score-list">
             <div v-for="item in detail.evaluatedDomains" :key="item.domainName" class="domain-score-item">
               <div class="domain-score-header">
                 <span>{{ item.domainName }}</span>
@@ -128,7 +144,7 @@
             </div>
           </div>
 
-          <div class="point-grid">
+          <div v-if="evaluationStatus === 'ready'" class="point-grid">
             <div class="point-card success">
               <h4>亮点</h4>
               <ul>
@@ -172,7 +188,7 @@
               <i class="fas fa-robot"></i>
               AI 追问
             </h3>
-            <span class="section-tip">支持围绕本题连续追问</span>
+            <span class="section-tip">本区为本地模拟追问，不代表后端真实评估</span>
           </div>
 
           <div class="quick-question-list">
@@ -234,11 +250,11 @@
           <div class="summary-grid">
             <div class="summary-item">
               <span class="summary-label">当前得分</span>
-              <strong>{{ detail.score }} 分</strong>
+              <strong>{{ evaluationStatus === 'ready' ? `${detail.score} 分` : '--' }}</strong>
             </div>
             <div class="summary-item">
               <span class="summary-label">薄弱点</span>
-              <strong>{{ detail.weakPoints.length }} 项</strong>
+              <strong>{{ (detail.weakPoints || []).length }} 项</strong>
             </div>
             <div class="summary-item">
               <span class="summary-label">收藏状态</span>
@@ -294,6 +310,16 @@ export default {
 
     const hasDetail = computed(() => Boolean(props.detail))
 
+    const evaluationStatus = computed(() => {
+      const raw = props.detail?.evaluationStatus
+      if (!raw) return 'ready'
+      const normalized = String(raw).toLowerCase()
+      if (['pending', 'generating', 'ready', 'failed'].includes(normalized)) {
+        return normalized
+      }
+      return 'pending'
+    })
+
     const scoreClass = computed(() => {
       const score = props.detail?.score ?? 0
       if (score >= 80) return 'high'
@@ -301,9 +327,36 @@ export default {
       return 'low'
     })
 
+    const renderSegments = computed(() => {
+      if (!props.detail?.highlightedSegments || !props.detail.highlightedSegments.length) return []
+      return props.detail.highlightedSegments
+        .map((item) => {
+          if (!item || typeof item !== 'object') return null
+          if ('segment' in item || 'label' in item || 'comment' in item) {
+            const text = String(item.segment || '').trim()
+            if (!text) return null
+            const label = String(item.label || '').toLowerCase()
+            const type = label === 'weakness' ? 'weakness' : 'strength'
+            return {
+              text,
+              type,
+              note: item.comment || ''
+            }
+          }
+
+          const text = String(item.text || '').trim()
+          if (!text) return null
+          return {
+            text,
+            type: item.type === 'weakness' ? 'weakness' : 'strength',
+            note: item.note || ''
+          }
+        })
+        .filter(Boolean)
+    })
+
     const annotationNotes = computed(() => {
-      if (!props.detail?.highlightedSegments) return []
-      return props.detail.highlightedSegments.filter((item) => item.note)
+      return renderSegments.value.filter((item) => item.note)
     })
 
     const quickQuestions = computed(() => [
@@ -414,7 +467,9 @@ export default {
       consultError,
       isConsultSending,
       hasDetail,
+      evaluationStatus,
       scoreClass,
+      renderSegments,
       annotationNotes,
       quickQuestions,
       backLabel,
@@ -700,6 +755,32 @@ export default {
   flex: 1;
 }
 
+.evaluation-status {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  color: var(--text-primary);
+}
+
+.evaluation-status.generating {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.28);
+}
+
+.evaluation-status.failed {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.28);
+}
+
+.evaluation-status.pending {
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
 .domain-score-list {
   display: flex;
   flex-direction: column;
@@ -949,4 +1030,3 @@ export default {
   }
 }
 </style>
-

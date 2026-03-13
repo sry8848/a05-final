@@ -174,6 +174,58 @@ public class MockAiClient implements AiClient {
         return mockResult(output, startMs, "report_generation");
     }
 
+    @Override
+    public AiCallResult<QuestionDetailEvaluationOutput> callQuestionDetailEvaluation(QuestionDetailEvaluationInput input) {
+        log.info("[MockAI] callQuestionDetailEvaluation, questionId={}, domainCode={}",
+                input.getQuestionId(), input.getDomainCode());
+        long startMs = System.currentTimeMillis();
+
+        String domainCode = input.getDomainCode() != null ? input.getDomainCode() : "unknown";
+        String domainName = input.getDomainName() != null ? input.getDomainName() : domainCode;
+
+        QuestionDetailEvaluationOutput output = QuestionDetailEvaluationOutput.builder()
+                .score(BigDecimal.valueOf(82.0))
+                .commentary("回答覆盖了题目核心方向，结构基本完整。建议补充更明确的指标与边界条件，让论证更有说服力。")
+                .strengthPoints(List.of(
+                        "能够先给出核心结论，再补充关键实现思路。",
+                        "回答中体现了与实际工程场景的关联。"
+                ))
+                .weakPoints(List.of(
+                        "缺少量化结果或指标对比，影响说服力。",
+                        "边界条件与失败处理描述不够具体。"
+                ))
+                .evaluatedDomains(List.of(
+                        QuestionDetailEvaluationOutput.EvaluatedDomain.builder()
+                                .domainCode(domainCode)
+                                .domainName(domainName)
+                                .score(BigDecimal.valueOf(82.0))
+                                .commentary("基础概念与应用思路较清晰，需补强工程细节。")
+                                .build()
+                ))
+                .highlightedSegments(List.of(
+                        QuestionDetailEvaluationOutput.HighlightedSegment.builder()
+                                .segment("主要提升了系统性能")
+                                .label("strength")
+                                .comment("有明确优化方向，建议补充前后指标对比。")
+                                .build(),
+                        QuestionDetailEvaluationOutput.HighlightedSegment.builder()
+                                .segment("大概能扛住高并发")
+                                .label("weakness")
+                                .comment("建议给出容量评估方法和量化上限。")
+                                .build()
+                ))
+                .idealAnswerOutline(List.of(
+                        "先定义问题与目标，明确评价指标。",
+                        "分步骤说明方案设计与关键权衡。",
+                        "结合真实场景给出结果与复盘。",
+                        "补充边界条件、失败处理和优化方向。"
+                ))
+                .rewrittenAnswer("这题我会先明确目标指标，再说明核心方案、关键权衡和落地步骤。随后用一个真实场景给出结果数据，最后补充边界条件与后续优化方向。")
+                .build();
+
+        return mockResult(output, startMs, "question_detail_evaluation");
+    }
+
     // ──────────────────────────── 私有工具 ──────────────────────────────────
 
     /**

@@ -4,11 +4,13 @@ import com.a05.aiinterview.common.ApiResponse;
 import com.a05.aiinterview.interview.dto.CreateInterviewRequest;
 import com.a05.aiinterview.interview.dto.CreateInterviewResponse;
 import com.a05.aiinterview.interview.dto.InterviewDetailDto;
+import com.a05.aiinterview.interview.dto.InterviewQuestionReviewDto;
 import com.a05.aiinterview.interview.dto.InterviewReportDto;
 import com.a05.aiinterview.interview.dto.LearningRecommendationDto;
 import com.a05.aiinterview.interview.dto.SubmitAttemptRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptResponse;
 import com.a05.aiinterview.interview.engine.AnswerSubmitService;
+import com.a05.aiinterview.interview.service.InterviewQuestionReviewService;
 import com.a05.aiinterview.interview.service.InterviewReportService;
 import com.a05.aiinterview.interview.service.InterviewService;
 import com.a05.aiinterview.interview.service.LearningRecommendationService;
@@ -42,6 +44,7 @@ public class InterviewController {
 
     private final InterviewService interviewService;
     private final AnswerSubmitService answerSubmitService;
+    private final InterviewQuestionReviewService interviewQuestionReviewService;
     private final InterviewReportService interviewReportService;
     private final LearningRecommendationService learningRecommendationService;
     private final QuestionStreamService questionStreamService;
@@ -114,6 +117,15 @@ public class InterviewController {
             @AuthenticationPrincipal Long userId,
             @PathVariable Long sessionId) {
         return ApiResponse.ok(interviewReportService.getReport(sessionId, userId));
+    }
+
+    @Operation(summary = "Get interview question review detail")
+    @GetMapping("/{sessionId}/questions/{questionId}")
+    public ApiResponse<InterviewQuestionReviewDto> getQuestionReview(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId,
+            @PathVariable Long questionId) {
+        return ApiResponse.ok(interviewQuestionReviewService.getQuestionReview(sessionId, questionId, userId));
     }
 
     @Operation(summary = "Get learning recommendations for report page")

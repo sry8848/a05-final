@@ -14,6 +14,10 @@
         <result column="evaluation_json"
                 property="evaluationJson"
                 typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="detail_evaluation_status" property="detailEvaluationStatus"/>
+        <result column="detail_evaluation_json"
+                property="detailEvaluationJson"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
         <result column="created_at" property="createdAt"/>
     </resultMap>
 
@@ -21,6 +25,23 @@
         SELECT *
         FROM interview_attempts
         WHERE attempt_id = #{attemptId}
+        LIMIT 1
+    </select>
+
+    <select id="selectBySessionId" resultMap="InterviewAttemptResultMap">
+        SELECT *
+        FROM interview_attempts
+        WHERE session_id = #{sessionId}
+        ORDER BY question_id ASC, created_at DESC, id DESC
+    </select>
+
+    <select id="selectLatestFinalAttempt" resultMap="InterviewAttemptResultMap">
+        SELECT *
+        FROM interview_attempts
+        WHERE session_id = #{sessionId}
+          AND question_id = #{questionId}
+          AND is_final = 1
+        ORDER BY created_at DESC, id DESC
         LIMIT 1
     </select>
 </mapper>

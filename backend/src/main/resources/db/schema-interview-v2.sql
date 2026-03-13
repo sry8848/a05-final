@@ -111,6 +111,8 @@ CREATE TABLE IF NOT EXISTS interview_attempts (
     answer_text         LONGTEXT     NULL             COMMENT '候选人回答文本（文字模式）或语音转写结果',
     is_final            TINYINT      NOT NULL DEFAULT 1 COMMENT '是否为最终版回答（1=是，0=否；文字模式默认 1）',
     evaluation_json     JSON         NULL             COMMENT '评估决策结果快照（signal/depthReached/nextStrategy 等）',
+    detail_evaluation_status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT '单题详细评估状态：pending/generating/ready/failed',
+    detail_evaluation_json JSON      NULL             COMMENT '单题详细评估结构化结果',
     created_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_ia_attempt_id (attempt_id),
     INDEX idx_ia_session_id (session_id),

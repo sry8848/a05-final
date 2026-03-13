@@ -5,7 +5,6 @@ import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionInput;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.interview.dto.SubmitAttemptRequest;
-import com.a05.aiinterview.interview.entity.InterviewAttempt;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
@@ -20,7 +19,6 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -33,7 +31,7 @@ class AnswerSubmitServiceExpectedPointsTest {
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
-        StateLedgerPatchService patchService = mock(StateLedgerPatchService.class);
+        AnswerSubmitPersistenceService persistenceService = mock(AnswerSubmitPersistenceService.class);
         ReportGenerationService reportService = mock(ReportGenerationService.class);
 
         AnswerSubmitService service = new AnswerSubmitService(
@@ -41,7 +39,7 @@ class AnswerSubmitServiceExpectedPointsTest {
                 sessionMapper,
                 questionMapper,
                 attemptMapper,
-                patchService,
+                persistenceService,
                 reportService
         );
 
@@ -86,8 +84,15 @@ class AnswerSubmitServiceExpectedPointsTest {
                 AiCallResult.<EvaluationDecisionOutput>builder().output(evalOutput).build()
         );
 
-        doNothing().when(patchService).applyPatch(any(), any(), any(), any());
-        when(attemptMapper.insert(any(InterviewAttempt.class))).thenReturn(1);
+        when(persistenceService.persist(any(), any(), any(), any())).thenReturn(
+                AnswerSubmitPersistenceService.PersistedAttemptResult.builder()
+                        .attemptDbId(100L)
+                        .attemptId("attempt-1")
+                        .isFinal(true)
+                        .shouldEnd(false)
+                        .evaluationSignal("NEXT_DOMAIN")
+                        .build()
+        );
 
         SubmitAttemptRequest request = new SubmitAttemptRequest();
         request.setQuestionId(questionId);

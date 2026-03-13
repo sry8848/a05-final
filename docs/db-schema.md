@@ -317,6 +317,28 @@ erDiagram
 - 专业模式额外使用 `comprehensive_dimension_scores`，例如沟通、逻辑、表达等。
 - 不再单独存储 `confidence` 类字段，当前方案统一依赖状态账本和题目评估结果表达过程状态。
 
+### 4.9A `interview_attempts`（当前后端实现）
+
+> 当前代码实现已落在 `interview_attempts` 表（非 `interview_answers`）。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | bigint pk | 回答尝试主键 |
+| `session_id` | bigint | 会话 ID |
+| `question_id` | bigint | 题目 ID |
+| `attempt_id` | varchar(64) unique | 幂等键 |
+| `answer_text` | longtext null | 回答文本 |
+| `is_final` | tinyint | 是否最终回答 |
+| `evaluation_json` | json null | 评估决策快照（主链路） |
+| `detail_evaluation_status` | varchar(32) | 单题详细评估状态：`pending/generating/ready/failed` |
+| `detail_evaluation_json` | json null | 单题详细评估结构化结果（仅详情页消费字段） |
+| `created_at` | datetime | 创建时间 |
+
+说明：
+
+- 非 `is_final=true` 的记录固定保持 `detail_evaluation_status=pending`，不触发详细评估。
+- 历史数据若 `detail_evaluation_status/detail_evaluation_json` 为空，读取时按 `pending` 解释。
+
 ### 4.10 `interview_reports`
 
 | 字段 | 类型 | 说明 |
@@ -431,7 +453,7 @@ erDiagram
 6. `interview_sessions`
 7. `session_skill_states`
 8. `interview_questions`
-9. `interview_answers`
+9. `interview_attempts`（或历史方案中的 `interview_answers`）
 10. `interview_reports`
 11. `question_consult_messages`
 12. `user_skill_profiles`

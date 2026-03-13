@@ -95,6 +95,7 @@ ai:
       evaluation-decision: ${AI_PROMPT_EVALUATION_DECISION_VERSION:v1}
       report-generation: ${AI_PROMPT_REPORT_GENERATION_VERSION:v1}
       intro-rewrite: ${AI_PROMPT_INTRO_REWRITE_VERSION:v1}
+      question-detail-evaluation: ${AI_PROMPT_QUESTION_DETAIL_EVALUATION_VERSION:v1}
 
 # RAG 配置
 # rag.enabled=true 时会初始化 Qdrant 向量库连接和检索服务

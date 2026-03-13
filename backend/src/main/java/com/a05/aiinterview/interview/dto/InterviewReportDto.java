@@ -47,6 +47,9 @@ public class InterviewReportDto {
     @Schema(description = "逐知识域评分明细")
     private List<SkillDomainScoreDto> skillDomainScores;
 
+    @Schema(description = "题目轻量摘要列表")
+    private List<QuestionSummaryDto> questions;
+
     @Schema(description = "报告生成时间")
     private LocalDateTime createdAt;
 
@@ -73,6 +76,31 @@ public class InterviewReportDto {
 
         @Schema(description = "AI 定性点评")
         private String commentary;
+    }
+
+    // ────────────────────────────────────────────
+
+    /**
+     * 报告页题目轻量摘要 DTO。
+     */
+    @Data
+    @Schema(description = "题目轻量摘要")
+    public static class QuestionSummaryDto {
+
+        @Schema(description = "题目 ID", example = "9001")
+        private Long questionId;
+
+        @Schema(description = "题号", example = "1")
+        private Integer questionNo;
+
+        @Schema(description = "题干")
+        private String questionStem;
+
+        @Schema(description = "作答状态：answered / skipped / pending", example = "answered")
+        private String status;
+
+        @Schema(description = "单题分数（可为空）", example = "82.5")
+        private BigDecimal score;
     }
 
     // ────────────────────────────────────────────

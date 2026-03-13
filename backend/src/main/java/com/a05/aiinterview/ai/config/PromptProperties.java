@@ -21,6 +21,7 @@ public class PromptProperties {
     private String evaluationDecision = "v1";
     private String reportGeneration = "v1";
     private String introRewrite = "v1";
+    private String questionDetailEvaluation = "v1";
 
     public String resolveVersion(String promptCode) {
         return resolveVersion(PromptCode.fromCode(promptCode));
@@ -33,6 +34,7 @@ public class PromptProperties {
             case EVALUATION_DECISION -> evaluationDecision;
             case REPORT_GENERATION -> reportGeneration;
             case INTRO_REWRITE -> introRewrite;
+            case QUESTION_DETAIL_EVALUATION -> questionDetailEvaluation;
         };
     }
 

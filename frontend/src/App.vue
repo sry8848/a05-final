@@ -36,6 +36,7 @@
       <QuestionDetailPage
         v-if="showQuestionDetail"
         :detail="selectedQuestionDetail"
+        :loading="questionDetailLoading"
         @back="handleCloseQuestionDetail"
         @collect="handleCollectQuestion"
         @navigateQuestion="handleNavigateQuestionDetail"
@@ -130,6 +131,7 @@ import QuestionDetailPage from './components/QuestionDetailPage.vue'
 import AdminLoginPage from './components/AdminLoginPage.vue'
 import AdminLayout from './components/AdminLayout.vue'
 import ResumesPage from './components/ResumesPage.vue'
+import { getInterviewQuestionDetail } from './api/resume'
 
 export default {
   name: 'App',
@@ -167,9 +169,11 @@ export default {
     const showScoreTrendPage = ref(false)
     const showInterviewDetail = ref(false)
     const showQuestionDetail = ref(false)
+    const questionDetailLoading = ref(false)
     const selectedRecordId = ref(null)
     const selectedQuestionDetail = ref(null)
     const questionDetailContext = ref(null)
+    const questionDetailRequestSeq = ref(0)
     
     const user = reactive({
       name: '面试者',
@@ -353,6 +357,92 @@ export default {
       return normalized ? normalized : null
     }
 
+    const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key)
+
+    const normalizeEvaluationStatus = (value) => {
+      if (value == null) return 'pending'
+      const normalized = String(value).trim().toLowerCase()
+      if (['pending', 'generating', 'ready', 'failed'].includes(normalized)) {
+        return normalized
+      }
+      return 'pending'
+    }
+
+    const mapBackendHighlightedSegments = (segments = []) => {
+      if (!Array.isArray(segments)) return []
+      return segments
+        .map((item) => {
+          if (!item || typeof item !== 'object') return null
+          const segment = String(item.segment ?? '').trim()
+          if (!segment) return null
+          const labelRaw = String(item.label ?? '').trim().toLowerCase()
+          const label = labelRaw === 'weakness' ? 'weakness' : 'strength'
+          const comment = String(item.comment ?? '').trim()
+          return { segment, label, comment }
+        })
+        .filter(Boolean)
+    }
+
+    const mergeQuestionDetailFromBackend = (fallbackDetail, backendDetail) => {
+      const merged = { ...(fallbackDetail || {}) }
+      const source = backendDetail || {}
+
+      const useBackend = (field) => (hasOwn(source, field) ? source[field] : merged[field])
+
+      merged.questionId = normalizeQuestionId(useBackend('questionId')) || merged.questionId
+      merged.questionNumber = Number(useBackend('questionNo')) || merged.questionNumber
+      merged.questionStem = useBackend('questionStem') ?? merged.questionStem
+      merged.domainName = useBackend('domainName') ?? merged.domainName
+      merged.questionType = useBackend('questionType') ?? merged.questionType
+      merged.targetDepth = useBackend('targetDepth') ?? merged.targetDepth
+      merged.userAnswer = useBackend('userAnswer') ?? merged.userAnswer
+      merged.answerStatus = useBackend('answerStatus') ?? merged.answerStatus
+      merged.evaluationStatus = normalizeEvaluationStatus(useBackend('evaluationStatus'))
+
+      if (hasOwn(source, 'score')) merged.score = source.score
+      if (hasOwn(source, 'commentary')) merged.commentary = source.commentary
+      if (hasOwn(source, 'strengthPoints')) merged.strengthPoints = source.strengthPoints
+      if (hasOwn(source, 'weakPoints')) merged.weakPoints = source.weakPoints
+      if (hasOwn(source, 'evaluatedDomains')) merged.evaluatedDomains = source.evaluatedDomains
+      if (hasOwn(source, 'idealAnswerOutline')) merged.idealAnswerOutline = source.idealAnswerOutline
+      if (hasOwn(source, 'rewrittenAnswer')) merged.rewrittenAnswer = source.rewrittenAnswer
+      if (hasOwn(source, 'highlightedSegments')) {
+        merged.highlightedSegments = mapBackendHighlightedSegments(source.highlightedSegments)
+      }
+      if (hasOwn(source, 'backfillFromLocalAllowed')) {
+        merged.backfillFromLocalAllowed = source.backfillFromLocalAllowed
+      }
+
+      return merged
+    }
+
+    const hydrateQuestionDetailFromBackend = async (baseDetail) => {
+      if (!baseDetail) return
+      if (!baseDetail.sessionId || !baseDetail.questionId) return
+
+      const requestSeq = ++questionDetailRequestSeq.value
+      questionDetailLoading.value = true
+      try {
+        const backendDetail = await getInterviewQuestionDetail(baseDetail.sessionId, baseDetail.questionId)
+        if (requestSeq !== questionDetailRequestSeq.value) return
+        selectedQuestionDetail.value = mergeQuestionDetailFromBackend(baseDetail, backendDetail)
+      } catch (error) {
+        if (requestSeq !== questionDetailRequestSeq.value) return
+        console.warn('加载后端单题详情失败，回退本地详情：', error)
+      } finally {
+        if (requestSeq === questionDetailRequestSeq.value) {
+          questionDetailLoading.value = false
+        }
+      }
+    }
+
+    const openQuestionDetail = async (detail, context) => {
+      selectedQuestionDetail.value = detail
+      questionDetailContext.value = context
+      showQuestionDetail.value = true
+      await hydrateQuestionDetailFromBackend(detail)
+    }
+
     const isQuestionCollected = (recordId, questionId) => {
       try {
         const bank = JSON.parse(localStorage.getItem('questionBank') || '[]')
@@ -399,6 +489,7 @@ export default {
         questionType: inferQuestionType(answer.question, questionIndex),
         targetDepth: inferTargetDepth(answer.score, questionIndex),
         answerStatus,
+        evaluationStatus: isLocalFallback ? 'ready' : 'pending',
         userAnswer: answer.answer,
         highlightedSegments: buildHighlightedSegments(answer.answer, answer.keywords || [], answer.score),
         score: answer.score || 0,
@@ -420,7 +511,8 @@ export default {
         modeLabel,
         interviewDate: record?.date || new Date().toLocaleString('zh-CN'),
         hasPrev: questionIndex > 0,
-        hasNext: questionIndex < questionList.length - 1
+        hasNext: questionIndex < questionList.length - 1,
+        backfillFromLocalAllowed: true
       }
     }
 
@@ -561,6 +653,7 @@ export default {
         questionType: item.questionType || inferQuestionType(item.questionStem || item.question, index),
         targetDepth: item.targetDepth || 'L2',
         answerStatus: !(item.userAnswer || item.answer) ? 'skipped' : 'answered',
+        evaluationStatus: isLocalFallback ? 'ready' : 'pending',
         userAnswer: item.userAnswer || item.answer || '',
         highlightedSegments: buildHighlightedSegments(item.userAnswer || item.answer || '', item.keywords || [], item.score || 0),
         score: item.score || 0,
@@ -583,7 +676,8 @@ export default {
         interviewDate: item.createdAt || item.date || new Date().toLocaleString('zh-CN'),
         hasPrev: index > 0,
         hasNext: index < list.length - 1,
-        backLabel: '返回问答库'
+        backLabel: '返回问答库',
+        backfillFromLocalAllowed: true
       }
 
       return detail
@@ -592,13 +686,13 @@ export default {
     const handleShowQuestionDetailFromBank = (bankItem) => {
       const bank = readQuestionBank()
       const index = bank.findIndex((item) => item.id === bankItem.id)
-      selectedQuestionDetail.value = buildQuestionDetailFromBankItem(bankItem, index >= 0 ? index : 0, bank)
-      questionDetailContext.value = {
+      const context = {
         source: 'questionBank',
         itemId: bankItem.id,
         questionIndex: index >= 0 ? index : 0
       }
-      showQuestionDetail.value = true
+      const detail = buildQuestionDetailFromBankItem(bankItem, index >= 0 ? index : 0, bank)
+      openQuestionDetail(detail, context)
     }
 
     const handleRedoQuestionFromBank = (bankItem) => {
@@ -662,18 +756,18 @@ export default {
     }
 
     const handleShowQuestionDetailFromResult = ({ index = 0, questionId = null, sessionId = null } = {}) => {
-      selectedQuestionDetail.value = buildQuestionDetailViewModel({
+      const detail = buildQuestionDetailViewModel({
         source: 'result',
         result: interviewResult.value,
         questionIndex: index,
         questionId,
         sessionId
       })
-      questionDetailContext.value = {
+      const context = {
         source: 'result',
         questionIndex: index
       }
-      showQuestionDetail.value = true
+      openQuestionDetail(detail, context)
     }
 
     const handleShowInterviewDetail = (recordId) => {
@@ -685,21 +779,23 @@ export default {
       const records = JSON.parse(localStorage.getItem('interviewRecords') || '[]')
       const record = records.find((item) => item.id === recordId)
 
-      selectedQuestionDetail.value = buildQuestionDetailViewModel({
+      const detail = buildQuestionDetailViewModel({
         source: 'record',
         record,
         questionIndex
       })
-      questionDetailContext.value = {
+      const context = {
         source: 'record',
         recordId,
         questionIndex
       }
-      showQuestionDetail.value = true
+      openQuestionDetail(detail, context)
     }
 
     const handleCloseQuestionDetail = () => {
       showQuestionDetail.value = false
+      questionDetailLoading.value = false
+      questionDetailRequestSeq.value += 1
     }
 
     const handleNavigateQuestionDetail = (delta) => {
@@ -710,15 +806,16 @@ export default {
 
       if (questionDetailContext.value.source === 'result') {
         if (!interviewResult.value?.answers?.[nextIndex]) return
-        questionDetailContext.value = {
+        const context = {
           ...questionDetailContext.value,
           questionIndex: nextIndex
         }
-        selectedQuestionDetail.value = buildQuestionDetailViewModel({
+        const detail = buildQuestionDetailViewModel({
           source: 'result',
           result: interviewResult.value,
           questionIndex: nextIndex
         })
+        openQuestionDetail(detail, context)
         return
       }
 
@@ -727,12 +824,13 @@ export default {
         const nextItem = bank[nextIndex]
         if (!nextItem) return
 
-        questionDetailContext.value = {
+        const context = {
           ...questionDetailContext.value,
           itemId: nextItem.id,
           questionIndex: nextIndex
         }
-        selectedQuestionDetail.value = buildQuestionDetailFromBankItem(nextItem, nextIndex, bank)
+        const detail = buildQuestionDetailFromBankItem(nextItem, nextIndex, bank)
+        openQuestionDetail(detail, context)
         return
       }
 
@@ -740,15 +838,16 @@ export default {
       const record = records.find((item) => item.id === questionDetailContext.value.recordId)
       if (!record?.answers?.[nextIndex]) return
 
-      questionDetailContext.value = {
+      const context = {
         ...questionDetailContext.value,
         questionIndex: nextIndex
       }
-      selectedQuestionDetail.value = buildQuestionDetailViewModel({
+      const detail = buildQuestionDetailViewModel({
         source: 'record',
         record,
         questionIndex: nextIndex
       })
+      openQuestionDetail(detail, context)
     }
 
     const handleCollectQuestion = (detail) => {
@@ -871,6 +970,7 @@ export default {
       showScoreTrendPage,
       showInterviewDetail,
       showQuestionDetail,
+      questionDetailLoading,
       selectedRecordId,
       selectedQuestionDetail,
       handleLoginSuccess,

@@ -18,9 +18,17 @@ class InterviewJsonMappersXmlMappingTest {
         assertThat(xml).contains("resultMap id=\"InterviewAttemptResultMap\"");
         assertThat(xml).contains("column=\"evaluation_json\"");
         assertThat(xml).contains("property=\"evaluationJson\"");
+        assertThat(xml).contains("column=\"detail_evaluation_status\"");
+        assertThat(xml).contains("property=\"detailEvaluationStatus\"");
+        assertThat(xml).contains("column=\"detail_evaluation_json\"");
+        assertThat(xml).contains("property=\"detailEvaluationJson\"");
         assertThat(xml).contains("typeHandler=\"com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler\"");
         assertThat(xml).contains("select id=\"selectByAttemptId\"");
         assertThat(xml).contains("resultMap=\"InterviewAttemptResultMap\"");
+        assertThat(xml).contains("select id=\"selectBySessionId\"");
+        assertThat(xml).contains("ORDER BY question_id ASC, created_at DESC, id DESC");
+        assertThat(xml).contains("select id=\"selectLatestFinalAttempt\"");
+        assertThat(xml).contains("AND is_final = 1");
     }
 
     @Test

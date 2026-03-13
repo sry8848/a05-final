@@ -22,6 +22,7 @@ class PromptPropertiesTest {
         assertThat(properties.getEvaluationDecision()).isEqualTo("v1");
         assertThat(properties.getReportGeneration()).isEqualTo("v1");
         assertThat(properties.getIntroRewrite()).isEqualTo("v1");
+        assertThat(properties.getQuestionDetailEvaluation()).isEqualTo("v1");
     }
 
     @Test
@@ -33,19 +34,22 @@ class PromptPropertiesTest {
         properties.setEvaluationDecision("v13");
         properties.setReportGeneration("v14");
         properties.setIntroRewrite("v15");
+        properties.setQuestionDetailEvaluation("v16");
 
         assertThat(properties.asVersionMap()).isEqualTo(Map.of(
                 PromptCode.PLANNER, "v11",
                 PromptCode.QUESTION_GENERATION_STREAM, "v12",
                 PromptCode.EVALUATION_DECISION, "v13",
                 PromptCode.REPORT_GENERATION, "v14",
-                PromptCode.INTRO_REWRITE, "v15"
+                PromptCode.INTRO_REWRITE, "v15",
+                PromptCode.QUESTION_DETAIL_EVALUATION, "v16"
         ));
         assertThat(properties.resolveVersion(PromptCode.PLANNER)).isEqualTo("v11");
         assertThat(properties.resolveVersion(PromptCode.QUESTION_GENERATION_STREAM)).isEqualTo("v12");
         assertThat(properties.resolveVersion(PromptCode.EVALUATION_DECISION)).isEqualTo("v13");
         assertThat(properties.resolveVersion(PromptCode.REPORT_GENERATION)).isEqualTo("v14");
         assertThat(properties.resolveVersion(PromptCode.INTRO_REWRITE)).isEqualTo("v15");
+        assertThat(properties.resolveVersion(PromptCode.QUESTION_DETAIL_EVALUATION)).isEqualTo("v16");
     }
 
     @Test
