@@ -101,9 +101,10 @@
                 @click="goToQuestionDetail(index)"
               >
                 <div class="question-item-header">
-                  <span class="question-num">Q{{ index + 1 }}</span>
-                  <span class="question-text">{{ item.question }}</span>
-                  <span class="item-score" :class="getScoreClass(item.score)">{{ item.score }} 分</span>
+                  <span class="question-num">Q{{ getQuestionNumber(item, index) }}</span>
+                  <span class="question-text">{{ getQuestionText(item) }}</span>
+                  <span v-if="hasScore(item)" class="item-score" :class="getScoreClass(item.score)">{{ Number(item.score) }} 分</span>
+                  <span v-else class="item-status" :class="getStatusClass(item.status)">{{ getStatusText(item.status) }}</span>
                 </div>
                 <p class="question-comment">{{ getAnswerComment(item) }}</p>
               </div>
@@ -374,18 +375,66 @@ export default {
       return FALLBACK_RECOMMENDATIONS
     })
 
+    const normalizeAnswerStatus = (status) => {
+      const normalized = String(status || '').trim().toLowerCase()
+      if (['answered', 'skipped', 'pending'].includes(normalized)) {
+        return normalized
+      }
+      return 'pending'
+    }
+
+    const hasScore = (item) => {
+      if (!item || item.score == null) return false
+      return Number.isFinite(Number(item.score))
+    }
+
+    const getQuestionText = (item) => {
+      return item?.questionStem || item?.question || '未命名题目'
+    }
+
+    const getQuestionNumber = (item, index) => {
+      const numeric = Number(item?.questionNo)
+      if (Number.isInteger(numeric) && numeric > 0) return numeric
+      return index + 1
+    }
+
+    const getStatusClass = (status) => {
+      return normalizeAnswerStatus(status)
+    }
+
+    const getStatusText = (status) => {
+      const normalized = normalizeAnswerStatus(status)
+      if (normalized === 'answered') return '待评估'
+      if (normalized === 'skipped') return '已跳过'
+      return '待同步'
+    }
+
     const getScoreClass = (s) => {
-      if (s >= 80) return 'high'
-      if (s >= 60) return 'medium'
+      const score = Number(s)
+      if (!Number.isFinite(score)) return 'medium'
+      if (score >= 80) return 'high'
+      if (score >= 60) return 'medium'
       return 'low'
     }
 
     const getAnswerComment = (item) => {
-      if (item.score >= 90) return '回答非常全面，覆盖了关键点，表达结构清晰。'
-      if (item.score >= 75) return '回答较好，主要内容完整，细节还可以再展开。'
-      if (item.score >= 60) return '回答基本正确，但深度和结构还可加强。'
-      if (item.score > 0) return '回答有部分正确内容，建议围绕核心概念重新复盘。'
-      return '该题未作答，建议优先补强该知识点。'
+      const commentary = String(item?.commentary || '').trim()
+      if (commentary) return commentary
+
+      const status = normalizeAnswerStatus(item?.status)
+      const score = Number(item?.score)
+      const hasNumericScore = Number.isFinite(score)
+      if (!hasNumericScore) {
+        if (status === 'answered') return '本题已回答，评分待生成或待评估。'
+        if (status === 'skipped') return '本题已跳过，建议优先补强该知识点。'
+        return '本题尚未作答或结果待同步。'
+      }
+
+      if (score >= 90) return '回答非常全面，覆盖了关键点，表达结构清晰。'
+      if (score >= 75) return '回答较好，主要内容完整，细节还可以再展开。'
+      if (score >= 60) return '回答基本正确，但深度和结构还可加强。'
+      if (score > 0) return '回答有部分正确内容，建议围绕核心概念重新复盘。'
+      return status === 'skipped' ? '本题已跳过，建议优先补强该知识点。' : '本题尚未作答或结果待同步。'
     }
 
     const goToQuestionDetail = (index) => {
@@ -415,6 +464,11 @@ export default {
       domainWeakSpots,
       recommendResources,
       recommendationStatus,
+      hasScore,
+      getQuestionText,
+      getQuestionNumber,
+      getStatusClass,
+      getStatusText,
       getPointStyle,
       getRadarColor,
       getScoreClass,
@@ -713,6 +767,18 @@ export default {
 .item-score.medium { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
 .item-score.low { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
 
+.item-status {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.item-status.answered { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+.item-status.skipped { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.item-status.pending { background: rgba(148, 163, 184, 0.18); color: #64748b; }
+
 .question-comment {
   font-size: 13px;
   color: var(--text-secondary);
@@ -820,4 +886,3 @@ export default {
   text-decoration: underline;
 }
 </style>
-

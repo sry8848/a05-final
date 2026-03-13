@@ -106,7 +106,7 @@
         <section class="glass-card content-card">
           <div class="score-overview">
             <template v-if="evaluationStatus === 'ready'">
-              <div class="score-badge" :class="scoreClass">
+              <div v-if="hasNumericScore" class="score-badge" :class="scoreClass">
                 <span class="score-value">{{ detail.score }}</span>
                 <span class="score-label">单题得分</span>
               </div>
@@ -115,7 +115,7 @@
                   <i class="fas fa-chart-line"></i>
                   评分与点评
                 </h3>
-                <p class="commentary-text">{{ detail.commentary }}</p>
+                <p class="commentary-text">{{ displayCommentary }}</p>
               </div>
             </template>
             <div v-else class="evaluation-status" :class="evaluationStatus">
@@ -138,7 +138,7 @@
             <div v-for="item in detail.evaluatedDomains" :key="item.domainName" class="domain-score-item">
               <div class="domain-score-header">
                 <span>{{ item.domainName }}</span>
-                <strong>{{ item.score }} 分</strong>
+                <strong>{{ hasDomainScore(item) ? `${Number(item.score)} 分` : '待评估' }}</strong>
               </div>
               <p>{{ item.note }}</p>
             </div>
@@ -250,7 +250,7 @@
           <div class="summary-grid">
             <div class="summary-item">
               <span class="summary-label">当前得分</span>
-              <strong>{{ evaluationStatus === 'ready' ? `${detail.score} 分` : '--' }}</strong>
+              <strong>{{ summaryScoreText }}</strong>
             </div>
             <div class="summary-item">
               <span class="summary-label">薄弱点</span>
@@ -320,12 +320,34 @@ export default {
       return 'pending'
     })
 
+    const hasNumericScore = computed(() => {
+      const score = props.detail?.score
+      if (score == null) return false
+      return Number.isFinite(Number(score))
+    })
+
     const scoreClass = computed(() => {
-      const score = props.detail?.score ?? 0
+      const score = Number(props.detail?.score)
+      if (!Number.isFinite(score)) return 'medium'
       if (score >= 80) return 'high'
       if (score >= 60) return 'medium'
       return 'low'
     })
+
+    const displayCommentary = computed(() => {
+      const commentary = String(props.detail?.commentary || '').trim()
+      return commentary || '评语待生成'
+    })
+
+    const summaryScoreText = computed(() => {
+      if (evaluationStatus.value !== 'ready' || !hasNumericScore.value) return '--'
+      return `${Number(props.detail.score)} 分`
+    })
+
+    const hasDomainScore = (item) => {
+      if (!item || item.score == null) return false
+      return Number.isFinite(Number(item.score))
+    }
 
     const renderSegments = computed(() => {
       if (!props.detail?.highlightedSegments || !props.detail.highlightedSegments.length) return []
@@ -468,7 +490,11 @@ export default {
       isConsultSending,
       hasDetail,
       evaluationStatus,
+      hasNumericScore,
       scoreClass,
+      displayCommentary,
+      summaryScoreText,
+      hasDomainScore,
       renderSegments,
       annotationNotes,
       quickQuestions,
