@@ -135,11 +135,11 @@ speech:
     # 不同题型的停顿检测阈值（毫秒），超时未说话则自动提交答案
     token-ttl-seconds: ${ASR_TOKEN_TTL:900}
     pause-threshold-config:
-      INTRO: 2000
-      PRINCIPLE: 2500
-      SCENARIO: 3000
-      PROJECT_DEEP_DIVE: 2000
-      BEHAVIORAL: 2500
+      INTRO: 20000
+      PRINCIPLE: 20000
+      SCENARIO: 20000
+      PROJECT_DEEP_DIVE: 20000
+      BEHAVIORAL: 20000
   tts:
     enabled: ${TTS_ENABLED:false}
     provider: alibaba

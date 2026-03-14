@@ -2282,7 +2282,17 @@ export default {
     const submitAnswer = async () => {
       const text = inputMode.value === 'voice' ? recognizedText.value : answerInput.value
       const answer = text.trim()
-      if (!answer || isSubmittingAnswer.value || isWaitingNextQuestion.value || isFinishing.value) return
+      if (!answer || isSubmittingAnswer.value || isWaitingNextQuestion.value || isFinishing.value) {
+        console.info('[InterviewPage] submit blocked', {
+          hasAnswer: Boolean(answer),
+          isSubmittingAnswer: isSubmittingAnswer.value,
+          isWaitingNextQuestion: isWaitingNextQuestion.value,
+          isFinishing: isFinishing.value,
+          streamConnectionState: streamConnectionState.value,
+          currentQuestionIndex: currentQuestion.value
+        })
+        return
+      }
 
       // 用户主动提交时，立即打断当前题目播报，避免“旧题语音残留到下一题”。
       ttsPlayerService.skip()

@@ -331,6 +331,7 @@ export async function streamInterviewQuestion(sessionId, attemptId, handlers = {
   let eventId = ''
   let dataLines = []
   let terminalEvent = null
+  let shouldStopReading = false
   let latestEventId = options.lastEventId ? String(options.lastEventId) : ''
 
   const dispatch = async () => {
@@ -357,6 +358,9 @@ export async function streamInterviewQuestion(sessionId, attemptId, handlers = {
 
   try {
     while (true) {
+      if (shouldStopReading) {
+        break
+      }
       const { value, done } = await reader.read()
       if (done) {
         await dispatch()
@@ -371,6 +375,11 @@ export async function streamInterviewQuestion(sessionId, attemptId, handlers = {
 
         if (!line) {
           await dispatch()
+          if (terminalEvent) {
+            // 终止事件已到达时无需等待服务端主动断开连接，避免前端长期卡在 waiting 状态。
+            shouldStopReading = true
+            break
+          }
           eventName = 'message'
           eventId = ''
           dataLines = []

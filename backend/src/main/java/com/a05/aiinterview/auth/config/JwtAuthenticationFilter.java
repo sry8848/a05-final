@@ -39,4 +39,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
         filterChain.doFilter(request, response);
     }
+
+    /**
+     * SSE/异步请求会触发 Async Dispatch。
+     * 若此处返回 true（默认行为），异步分发阶段不会重新建立认证上下文，
+     * 可能被后续授权过滤器判定为匿名请求并抛 AccessDenied。
+     */
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
+    }
+
+    /**
+     * 错误分发阶段同样保留鉴权上下文，避免 "response already committed" 场景下再次出现匿名访问判定。
+     */
+    @Override
+    protected boolean shouldNotFilterErrorDispatch() {
+        return false;
+    }
 }
