@@ -93,6 +93,38 @@ export class TtsPlayerService {
     await this._drainQueue()
   }
 
+  async unlockByUserGesture() {
+    try {
+      await this._ensureAudioGraph()
+      if (!this.audioContext) return false
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume()
+      }
+      return this.audioContext.state === 'running'
+    } catch (err) {
+      console.warn('[TtsPlayerService] unlockByUserGesture failed', err)
+      return false
+    }
+  }
+
+  async playLocalTestAudio(url) {
+    if (!url) return
+    const unlocked = await this.unlockByUserGesture()
+    if (!unlocked) {
+      throw new Error('audio context is not unlocked')
+    }
+    const resp = await fetch(url, { cache: 'no-store' })
+    if (!resp.ok) {
+      throw new Error('failed to fetch local test audio')
+    }
+    const blob = await resp.blob()
+    if (!blob || blob.size <= 0) {
+      throw new Error('empty local test audio')
+    }
+    const blobUrl = URL.createObjectURL(blob)
+    await this._playUrl(blobUrl, { revokeOnFinish: true })
+  }
+
   skip() {
     if (this.audio) {
       this.audio.pause()
@@ -145,7 +177,7 @@ export class TtsPlayerService {
       while (this.queue.length > 0 && this.mode !== 'mute') {
         if (this.mode === 'manual' && !this.manualDrainRequested) break
         const next = this.queue.shift()
-        await this._playBlobUrl(next.blobUrl)
+        await this._playUrl(next.blobUrl, { revokeOnFinish: true })
       }
     } finally {
       this.isDraining = false
@@ -155,11 +187,12 @@ export class TtsPlayerService {
     }
   }
 
-  async _playBlobUrl(blobUrl) {
+  async _playUrl(url, { revokeOnFinish = false } = {}) {
     try {
-      await this._ensureAudioGraph(blobUrl)
-    } catch (_) {
-      this._revokeBlobUrl(blobUrl)
+      await this._ensureAudioGraph(url)
+    } catch (err) {
+      if (revokeOnFinish) this._revokeBlobUrl(url)
+      console.warn('[TtsPlayerService] ensure audio graph failed', err)
       return
     }
 
@@ -172,7 +205,7 @@ export class TtsPlayerService {
         this.currentPlaybackFinish = null
         this.audio.removeEventListener('ended', finish)
         this.audio.removeEventListener('error', finish)
-        this._revokeBlobUrl(blobUrl)
+        if (revokeOnFinish) this._revokeBlobUrl(url)
         this._stopPlaybackState()
         resolve()
       }
@@ -199,12 +232,12 @@ export class TtsPlayerService {
     return URL.createObjectURL(blob)
   }
 
-  async _ensureAudioGraph(url) {
+  async _ensureAudioGraph(url = '') {
     if (!this.audio) {
       this.audio = new Audio()
       this.audio.preload = 'auto'
     }
-    if (this.audio.src !== url) {
+    if (url && this.audio.src !== url) {
       this.audio.src = url
     }
 

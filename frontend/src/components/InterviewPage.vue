@@ -238,6 +238,10 @@
     <div v-if="isDeviceTesting" class="device-testing-page">
       <div class="testing-container">
         <div class="testing-header">
+          <button class="btn btn-secondary testing-back-btn" @click="backToConfig">
+            <i class="fas fa-arrow-left"></i>
+            返回配置
+          </button>
           <h2 class="testing-title">
             <i class="fas fa-cog"></i>
             设备检测
@@ -254,20 +258,20 @@
               <div class="test-info">
                 <h3>摄像头检测</h3>
                 <span class="test-status" :class="{ ready: deviceTest.cameraReady }">
-                  <i :class="deviceTest.cameraReady ? 'fas fa-check-circle' : 'fas fa-circle'"></i>
-                  {{ deviceTest.cameraReady ? '正常' : '检测中' }}
+                  <i :class="cameraStatusIcon"></i>
+                  {{ cameraStatusText }}
                 </span>
               </div>
             </div>
             <div class="camera-preview">
               <video ref="testVideoElement" autoplay playsinline muted></video>
-              <div v-if="!deviceTest.cameraReady" class="preview-overlay">
+              <div v-if="deviceTest.cameraStatus === 'testing'" class="preview-overlay">
                 <i class="fas fa-spinner fa-spin"></i>
                 <span>正在启动摄像头...</span>
               </div>
             </div>
             <div class="test-actions">
-              <button class="test-btn" @click="testCamera" :disabled="deviceTest.cameraReady">
+              <button class="test-btn" @click="testCamera" :disabled="deviceTest.cameraStatus === 'testing'">
                 <i class="fas fa-redo"></i>
                 重新检测
               </button>
@@ -282,8 +286,8 @@
               <div class="test-info">
                 <h3>麦克风检测</h3>
                 <span class="test-status" :class="{ ready: deviceTest.microphoneReady }">
-                  <i :class="deviceTest.microphoneReady ? 'fas fa-check-circle' : 'fas fa-circle'"></i>
-                  {{ deviceTest.microphoneReady ? '正常' : '检测中' }}
+                  <i :class="microphoneStatusIcon"></i>
+                  {{ microphoneStatusText }}
                 </span>
               </div>
             </div>
@@ -307,7 +311,7 @@
               <p class="test-hint">请对着麦克风说话，观察波形变化</p>
             </div>
             <div class="test-actions">
-              <button class="test-btn" @click="testMicrophone" :disabled="deviceTest.microphoneReady">
+              <button class="test-btn" @click="retryMicrophoneTest" :disabled="isMicTesting">
                 <i class="fas fa-redo"></i>
                 重新检测
               </button>
@@ -684,6 +688,7 @@ import TtsPlayerControl from './TtsPlayerControl.vue'
 import { asrService } from '../services/AsrService'
 import { ttsPlayerService } from '../services/TtsPlayerService'
 import { QuestionStreamClient } from '../services/QuestionStreamClient'
+import deviceTestToneUrl from '../assets/audio/device-test-tone.wav'
 
 export default {
   name: 'InterviewPage',
@@ -731,12 +736,30 @@ export default {
 
     const deviceTest = reactive({
       cameraReady: false,
+      cameraStatus: 'idle', // idle | testing | passed | failed
       microphoneReady: false,
+      microphoneStatus: 'idle', // idle | testing | passed | failed
       speakerReady: false,
       microphoneLevel: 0,
       isPlayingAudio: false
     })
-    const PING_TIMEOUT_MS = 1000
+    // ==================== 网络检测配置 ====================
+    const PING_TIMEOUT_MS = 1000                    // 单次 Ping 请求超时时间（毫秒）
+    const NETWORK_POLL_INTERVAL_MS = 5000           // 网络状态轮询间隔（毫秒）
+    const NETWORK_STABLE_WINDOW_SIZE = 3            // 网络状态稳定窗口大小，需连续 N 次采样结果一致才判定为稳定
+    const NETWORK_PASS_MAX_MS = 200                 // 网络状态"通过"的最大延迟阈值（毫秒），低于此值判定为优秀
+    const NETWORK_WARNING_MAX_MS = 500              // 网络状态"警告"的最大延迟阈值（毫秒），200-500ms 为警告，超过 500ms 为失败
+
+    // ==================== 麦克风检测配置 ====================
+    const MIC_FRAME_INTERVAL_MS = 50                // 麦克风音频帧采样间隔（毫秒）
+    const MIC_REQUIRED_CONSECUTIVE_ACTIVE_FRAMES = 4 // 麦克风激活所需连续有效帧数，连续 N 帧超过阈值才判定为检测通过
+    const MIC_BASELINE_FRAMES = 20                  // 麦克风基线采样帧数，用于计算环境噪音基准值
+    const MIC_DYNAMIC_THRESHOLD_FACTOR = 1.8        // 麦克风动态阈值因子，阈值 = 基线噪音 × 此因子
+    const MIC_MIN_RMS_THRESHOLD = 0.006             // 麦克风最小 RMS 阈值，防止基线噪音过低导致阈值过小
+    const MIC_DETECTION_TIMEOUT_MS = 8000           // 麦克风检测超时时间（毫秒），超时后自动结束检测
+    const DEBUG_MIC_TEST = true                     // 麦克风检测调试模式开关，开启后控制台输出详细日志
+    const micFailReason = ref('')
+    const isMicTesting = ref(false)
     const NETWORK_UNSTABLE_HINT = '网络检测失败或结果不稳定，可继续但建议检查网络'
     const networkTest = reactive({
       status: 'testing', // testing | pass | warning | fail
@@ -744,10 +767,18 @@ export default {
       hint: '正在检测网络连通性...'
     })
     let networkTestRunId = 0
+    let networkPollTimerId = null
+    let networkPingInFlight = false
+    const networkStableSamples = []
     const testVideoElement = ref(null)
+    const cameraTestStream = ref(null)
     const audioContext = ref(null)
     const analyser = ref(null)
     const microphoneStream = ref(null)
+    let microphoneSourceNode = null
+    let micDetectTimerId = null
+    let micDetectTimeoutId = null
+    let micTestRunId = 0
     let animationFrameId = null
     const currentQuestion = ref(0)
     const totalQuestions = ref(10)
@@ -1272,9 +1303,61 @@ export default {
       emit('interviewStart')
     }
 
-    const allDevicesReady = computed(() => {
-      return deviceTest.cameraReady && deviceTest.microphoneReady && deviceTest.speakerReady
+    const allDevicesReady = computed(() => deviceTest.microphoneReady)
+
+    const cameraStatusText = computed(() => {
+      if (deviceTest.cameraStatus === 'failed') return '未通过'
+      if (deviceTest.cameraReady) return '正常'
+      if (deviceTest.cameraStatus === 'idle') return '待检测'
+      return '检测中'
     })
+
+    const cameraStatusIcon = computed(() => {
+      if (deviceTest.cameraStatus === 'failed') return 'fas fa-times-circle'
+      if (deviceTest.cameraReady) return 'fas fa-check-circle'
+      if (deviceTest.cameraStatus === 'idle') return 'fas fa-circle'
+      return 'fas fa-spinner fa-spin'
+    })
+
+    const microphoneStatusText = computed(() => {
+      if (deviceTest.microphoneStatus === 'failed') {
+        const textMap = {
+          permission_denied: '请允许浏览器使用麦克风',
+          no_input: '未检测到输入：请对麦克风说话后重试',
+          device_unavailable: '设备不可用/被占用：请检查系统输入设备',
+          timeout: '超时：未检测到明显语音输入，请重试',
+          resume_failed: '麦克风启动失败，请重试',
+          unknown: '麦克风启动失败，请重试'
+        }
+        return textMap[micFailReason.value] || textMap.unknown
+      }
+      if (deviceTest.microphoneReady) return '正常'
+      if (deviceTest.microphoneStatus === 'idle') return '待检测'
+      return '检测中'
+    })
+
+    const microphoneStatusIcon = computed(() => {
+      if (deviceTest.microphoneStatus === 'failed') return 'fas fa-times-circle'
+      if (deviceTest.microphoneReady) return 'fas fa-check-circle'
+      if (deviceTest.microphoneStatus === 'idle') return 'fas fa-circle'
+      return 'fas fa-spinner fa-spin'
+    })
+
+    const logMicDebug = (event, payload = {}) => {
+      if (!DEBUG_MIC_TEST) return
+      console.log('[MicTest]', event, payload)
+    }
+
+    const classifyMicError = (err) => {
+      const name = String(err?.name || '')
+      if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') {
+        return 'permission_denied'
+      }
+      if (name === 'NotFoundError' || name === 'NotReadableError' || name === 'OverconstrainedError' || name === 'AbortError' || name === 'TrackStartError') {
+        return 'device_unavailable'
+      }
+      return 'unknown'
+    }
 
     const networkStatusClass = computed(() => {
       const map = {
@@ -1306,20 +1389,104 @@ export default {
 
     const networkStatusHint = computed(() => networkTest.hint || '')
 
+    const cleanupCameraResources = () => {
+      if (cameraTestStream.value) {
+        cameraTestStream.value.getTracks().forEach(track => track.stop())
+        cameraTestStream.value = null
+      }
+      if (testVideoElement.value) {
+        testVideoElement.value.srcObject = null
+      }
+    }
+
+    const cleanupMicrophoneResources = () => {
+      if (micDetectTimerId) {
+        clearInterval(micDetectTimerId)
+        micDetectTimerId = null
+      }
+      if (micDetectTimeoutId) {
+        clearTimeout(micDetectTimeoutId)
+        micDetectTimeoutId = null
+      }
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId)
+        animationFrameId = null
+      }
+      if (microphoneSourceNode) {
+        try {
+          microphoneSourceNode.disconnect()
+        } catch (_) {}
+        microphoneSourceNode = null
+      }
+      if (analyser.value) {
+        try {
+          analyser.value.disconnect()
+        } catch (_) {}
+        analyser.value = null
+      }
+      if (microphoneStream.value) {
+        microphoneStream.value.getTracks().forEach(track => track.stop())
+        microphoneStream.value = null
+      }
+      if (audioContext.value) {
+        audioContext.value.close().catch(() => {})
+        audioContext.value = null
+      }
+      isMicTesting.value = false
+      deviceTest.microphoneLevel = 0
+    }
+
+    const stopNetworkPolling = () => {
+      if (networkPollTimerId) {
+        clearInterval(networkPollTimerId)
+        networkPollTimerId = null
+      }
+      networkPingInFlight = false
+      networkTestRunId += 1
+    }
+
+    const cleanupDeviceTestResources = () => {
+      stopNetworkPolling()
+      micTestRunId += 1
+      cleanupMicrophoneResources()
+      cleanupCameraResources()
+      ttsPlayerService.skip()
+      deviceTest.isPlayingAudio = false
+    }
+
+    const startNetworkPolling = () => {
+      stopNetworkPolling()
+      void testNetworkLatency()
+      networkPollTimerId = setInterval(() => {
+        void testNetworkLatency()
+      }, NETWORK_POLL_INTERVAL_MS)
+    }
+
     const startDeviceTest = async () => {
+      cleanupDeviceTestResources()
+      deviceTest.cameraReady = false
+      deviceTest.cameraStatus = 'testing'
+      deviceTest.microphoneReady = false
+      deviceTest.microphoneStatus = 'testing'
+      micFailReason.value = ''
+      isMicTesting.value = true
+      deviceTest.speakerReady = false
+      deviceTest.isPlayingAudio = false
+      deviceTest.microphoneLevel = 0
       networkTest.status = 'testing'
       networkTest.latencyMs = null
       networkTest.hint = '正在检测网络连通性...'
+      networkStableSamples.length = 0
+      startNetworkPolling()
       await Promise.allSettled([
         testCamera(),
-        testMicrophone(),
-        testNetworkLatency()
+        testMicrophone({ userInitiated: false })
       ])
     }
 
     const classifyNetworkStatus = (latencyMs) => {
-      if (latencyMs < 120) return 'pass'
-      if (latencyMs <= 300) return 'warning'
+      if (latencyMs < NETWORK_PASS_MAX_MS) return 'pass'
+      if (latencyMs <= NETWORK_WARNING_MAX_MS) return 'warning'
       return 'fail'
     }
 
@@ -1348,10 +1515,15 @@ export default {
     }
 
     const testNetworkLatency = async () => {
+      if (networkPingInFlight) return
+      networkPingInFlight = true
       const runId = ++networkTestRunId
-      networkTest.status = 'testing'
-      networkTest.latencyMs = null
-      networkTest.hint = '正在检测网络连通性...'
+      const hasStableLatency = Number.isFinite(networkTest.latencyMs) && networkTest.latencyMs >= 0
+      const shouldDeferUiUpdates = isMicTesting.value && hasStableLatency
+      if (!hasStableLatency) {
+        networkTest.status = 'testing'
+        networkTest.hint = '正在检测网络连通性...'
+      }
 
       try {
         // Warm-up request: amortize first-connection overhead, excluded from stats.
@@ -1370,83 +1542,279 @@ export default {
           .filter((value) => Number.isFinite(value) && value >= 0)
 
         if (successSamples.length >= 2) {
-          const latencyMs = computeMedian(successSamples)
-          const status = classifyNetworkStatus(latencyMs)
-          networkTest.latencyMs = latencyMs
+          const currentLatencyMs = computeMedian(successSamples)
+          networkStableSamples.push(currentLatencyMs)
+          if (networkStableSamples.length > NETWORK_STABLE_WINDOW_SIZE) {
+            networkStableSamples.shift()
+          }
+          const stableLatencyMs = computeMedian(networkStableSamples)
+          if (shouldDeferUiUpdates) {
+            return
+          }
+          const status = classifyNetworkStatus(stableLatencyMs)
+          networkTest.latencyMs = stableLatencyMs
           networkTest.status = status
           networkTest.hint = status === 'pass'
-            ? `网络延迟 ${latencyMs}ms，连接稳定`
+            ? `网络延迟 ${stableLatencyMs}ms，连接稳定`
             : NETWORK_UNSTABLE_HINT
           return
         }
 
         if (successSamples.length === 1) {
-          networkTest.latencyMs = successSamples[0]
+          networkStableSamples.push(successSamples[0])
+          if (networkStableSamples.length > NETWORK_STABLE_WINDOW_SIZE) {
+            networkStableSamples.shift()
+          }
+          if (shouldDeferUiUpdates) {
+            return
+          }
+          const stableLatencyMs = computeMedian(networkStableSamples)
+          networkTest.latencyMs = stableLatencyMs
           networkTest.status = 'warning'
           networkTest.hint = NETWORK_UNSTABLE_HINT
           return
         }
 
+        if (Number.isFinite(networkTest.latencyMs) && networkTest.latencyMs >= 0) {
+          networkTest.status = 'warning'
+          networkTest.hint = `网络刷新失败，当前展示最近稳定延迟 ${networkTest.latencyMs}ms`
+          return
+        }
         networkTest.latencyMs = null
         networkTest.status = 'warning'
         networkTest.hint = NETWORK_UNSTABLE_HINT
       } catch (err) {
         if (runId !== networkTestRunId) return
         console.warn('[InterviewPage] 网络检测失败，降级为 warning', err)
+        if (Number.isFinite(networkTest.latencyMs) && networkTest.latencyMs >= 0) {
+          networkTest.status = 'warning'
+          networkTest.hint = `网络刷新失败，当前展示最近稳定延迟 ${networkTest.latencyMs}ms`
+          return
+        }
         networkTest.latencyMs = null
         networkTest.status = 'warning'
         networkTest.hint = NETWORK_UNSTABLE_HINT
+      } finally {
+        networkPingInFlight = false
       }
     }
 
     const testCamera = async () => {
+      cleanupCameraResources()
       deviceTest.cameraReady = false
+      deviceTest.cameraStatus = 'testing'
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true })
+        cameraTestStream.value = stream
+        const hasLiveTrack = stream.getVideoTracks().some(track => track.readyState === 'live')
+        if (!hasLiveTrack) {
+          throw new Error('摄像头轨道未处于 live 状态')
+        }
+
         if (testVideoElement.value) {
           testVideoElement.value.srcObject = stream
+          await new Promise((resolve, reject) => {
+            const videoEl = testVideoElement.value
+            if (!videoEl) {
+              resolve()
+              return
+            }
+            if (videoEl.readyState >= 1) {
+              resolve()
+              return
+            }
+            const timeoutId = setTimeout(() => {
+              reject(new Error('摄像头元数据加载超时'))
+            }, 2000)
+            const onLoaded = () => {
+              clearTimeout(timeoutId)
+              resolve()
+            }
+            videoEl.addEventListener('loadedmetadata', onLoaded, { once: true })
+          })
         }
-        setTimeout(() => {
-          deviceTest.cameraReady = true
-        }, 1000)
+
+        deviceTest.cameraReady = true
+        deviceTest.cameraStatus = 'passed'
       } catch (err) {
         console.error('摄像头检测失败:', err)
         deviceTest.cameraReady = false
+        deviceTest.cameraStatus = 'failed'
       }
     }
 
-    const testMicrophone = async () => {
+    const failMicrophoneTest = (runId, reason, details = {}) => {
+      if (runId !== micTestRunId) return
       deviceTest.microphoneReady = false
-      try {
-        microphoneStream.value = await navigator.mediaDevices.getUserMedia({ audio: true })
+      deviceTest.microphoneStatus = 'failed'
+      micFailReason.value = reason || 'unknown'
+      logMicDebug('result', { runId, result: 'failed', failReason: micFailReason.value, ...details })
+      cleanupMicrophoneResources()
+    }
+
+    const passMicrophoneTest = (runId, details = {}) => {
+      if (runId !== micTestRunId) return
+      deviceTest.microphoneReady = true
+      deviceTest.microphoneStatus = 'passed'
+      micFailReason.value = ''
+      logMicDebug('result', { runId, result: 'passed', ...details })
+      cleanupMicrophoneResources()
+    }
+
+    const ensureMicAudioContextRunning = async (runId) => {
+      if (!audioContext.value) {
         audioContext.value = new (window.AudioContext || window.webkitAudioContext)()
-        analyser.value = audioContext.value.createAnalyser()
-        const source = audioContext.value.createMediaStreamSource(microphoneStream.value)
-        source.connect(analyser.value)
-        analyser.value.fftSize = 256
-        updateMicrophoneLevel()
-        setTimeout(() => {
-          deviceTest.microphoneReady = true
-        }, 1500)
-      } catch (err) {
-        console.error('麦克风检测失败:', err)
-        deviceTest.microphoneReady = false
       }
+      try {
+        await audioContext.value.resume()
+      } catch (err) {
+        logMicDebug('resume-error', { runId, name: err?.name || '', message: err?.message || '' })
+      }
+      return audioContext.value?.state === 'running'
+    }
+
+    const testMicrophone = async ({ userInitiated = false } = {}) => {
+      const runId = ++micTestRunId
+      cleanupMicrophoneResources()
+      deviceTest.microphoneReady = false
+      deviceTest.microphoneStatus = 'testing'
+      deviceTest.microphoneLevel = 0
+      micFailReason.value = ''
+      isMicTesting.value = true
+      logMicDebug('start', { runId, userInitiated })
+
+      try {
+        if (userInitiated) {
+          const resumedEarly = await ensureMicAudioContextRunning(runId)
+          if (!resumedEarly) {
+            failMicrophoneTest(runId, 'resume_failed')
+            return
+          }
+        }
+
+        microphoneStream.value = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        })
+        if (runId !== micTestRunId) {
+          microphoneStream.value.getTracks().forEach(track => track.stop())
+          microphoneStream.value = null
+          return
+        }
+
+        const resumed = await ensureMicAudioContextRunning(runId)
+        if (!resumed) {
+          failMicrophoneTest(runId, 'resume_failed')
+          return
+        }
+
+        analyser.value = audioContext.value.createAnalyser()
+        analyser.value.fftSize = 1024
+        analyser.value.smoothingTimeConstant = 0.2
+        microphoneSourceNode = audioContext.value.createMediaStreamSource(microphoneStream.value)
+        microphoneSourceNode.connect(analyser.value)
+        updateMicrophoneLevel()
+
+        const timeData = new Uint8Array(analyser.value.fftSize)
+        let baselineAccumulator = 0
+        let baselineCount = 0
+        let consecutiveActiveFrames = 0
+        let windowMaxRms = 0
+        let sawActiveInput = false
+
+        micDetectTimerId = setInterval(() => {
+          if (runId !== micTestRunId || deviceTest.microphoneStatus !== 'testing' || !analyser.value) return
+
+          analyser.value.getByteTimeDomainData(timeData)
+          let sumSquares = 0
+          for (let i = 0; i < timeData.length; i++) {
+            const normalized = (timeData[i] - 128) / 128
+            sumSquares += normalized * normalized
+          }
+          const rms = Math.sqrt(sumSquares / timeData.length)
+          windowMaxRms = Math.max(windowMaxRms, rms)
+
+          if (baselineCount < MIC_BASELINE_FRAMES) {
+            baselineAccumulator += rms
+            baselineCount += 1
+            logMicDebug('sample', {
+              runId,
+              rms: Number(rms.toFixed(5)),
+              windowMaxRms: Number(windowMaxRms.toFixed(5)),
+              activeStreak: consecutiveActiveFrames
+            })
+            return
+          }
+
+          const baseline = baselineCount > 0 ? baselineAccumulator / baselineCount : 0
+          const dynamicThreshold = Math.max(
+            MIC_MIN_RMS_THRESHOLD,
+            Math.min(0.03, baseline * MIC_DYNAMIC_THRESHOLD_FACTOR)
+          )
+
+          if (rms >= dynamicThreshold) {
+            sawActiveInput = true
+            consecutiveActiveFrames += 1
+          } else {
+            consecutiveActiveFrames = 0
+          }
+
+          logMicDebug('sample', {
+            runId,
+            rms: Number(rms.toFixed(5)),
+            windowMaxRms: Number(windowMaxRms.toFixed(5)),
+            activeStreak: consecutiveActiveFrames
+          })
+
+          if (consecutiveActiveFrames >= MIC_REQUIRED_CONSECUTIVE_ACTIVE_FRAMES) {
+            passMicrophoneTest(runId, {
+              windowMaxRms: Number(windowMaxRms.toFixed(5)),
+              activeStreak: consecutiveActiveFrames
+            })
+          }
+        }, MIC_FRAME_INTERVAL_MS)
+
+        micDetectTimeoutId = setTimeout(() => {
+          if (runId !== micTestRunId || deviceTest.microphoneStatus !== 'testing') return
+          failMicrophoneTest(runId, sawActiveInput ? 'timeout' : 'no_input', {
+            windowMaxRms: Number(windowMaxRms.toFixed(5)),
+            activeStreak: consecutiveActiveFrames
+          })
+        }, MIC_DETECTION_TIMEOUT_MS)
+      } catch (err) {
+        logMicDebug('error', {
+          runId,
+          name: err?.name || '',
+          message: err?.message || ''
+        })
+        failMicrophoneTest(runId, classifyMicError(err), {
+          errName: err?.name || '',
+          errMessage: err?.message || ''
+        })
+      }
+    }
+
+    const retryMicrophoneTest = () => {
+      void testMicrophone({ userInitiated: true })
     }
 
     const updateMicrophoneLevel = () => {
       if (!analyser.value) return
-      
-      const dataArray = new Uint8Array(analyser.value.frequencyBinCount)
-      analyser.value.getByteFrequencyData(dataArray)
-      
-      let sum = 0
-      for (let i = 0; i < dataArray.length; i++) {
-        sum += dataArray[i]
+
+      const timeData = new Uint8Array(analyser.value.fftSize)
+      analyser.value.getByteTimeDomainData(timeData)
+
+      let sumSquares = 0
+      for (let i = 0; i < timeData.length; i++) {
+        const normalized = (timeData[i] - 128) / 128
+        sumSquares += normalized * normalized
       }
-      const average = sum / dataArray.length
-      deviceTest.microphoneLevel = Math.min(100, Math.round(average * 0.8))
-      
+      const rms = Math.sqrt(sumSquares / timeData.length)
+      deviceTest.microphoneLevel = Math.max(0, Math.min(100, Math.round((rms / 0.08) * 100)))
+
       animationFrameId = requestAnimationFrame(updateMicrophoneLevel)
     }
 
@@ -1462,55 +1830,49 @@ export default {
       return baseHeight + maxVariation * centerWeight * randomFactor * levelFactor
     }
 
-    const playTestAudio = () => {
+    const playTestAudio = async () => {
+      await ttsPlayerService.unlockByUserGesture()
       deviceTest.isPlayingAudio = true
-      const audioContext2 = new (window.AudioContext || window.webkitAudioContext)()
-      const oscillator = audioContext2.createOscillator()
-      const gainNode = audioContext2.createGain()
-      
-      oscillator.connect(gainNode)
-      gainNode.connect(audioContext2.destination)
-      
-      oscillator.frequency.value = 440
-      oscillator.type = 'sine'
-      gainNode.gain.value = 0.3
-      
-      oscillator.start()
-      
-      setTimeout(() => {
-        oscillator.stop()
-        audioContext2.close()
+      try {
+        await ttsPlayerService.playLocalTestAudio(deviceTestToneUrl)
+      } catch (err) {
+        console.warn('[InterviewPage] 播放测试音频失败', err)
+      } finally {
         deviceTest.isPlayingAudio = false
-      }, 2000)
+      }
     }
 
     const confirmSpeaker = () => {
       deviceTest.speakerReady = true
     }
 
-    const skipDeviceTest = () => {
+    const skipDeviceTest = async () => {
+      await ttsPlayerService.unlockByUserGesture()
+      if (!deviceTest.microphoneReady) {
+        alert('麦克风检测未通过，无法跳过')
+        return
+      }
       stopDeviceTest()
       isDeviceTesting.value = false
       startLoadingPhase()
     }
 
-    const startInterviewAfterTest = () => {
+    const backToConfig = () => {
+      stopDeviceTest()
+      isDeviceTesting.value = false
+      deviceTest.cameraStatus = 'idle'
+      deviceTest.microphoneStatus = 'idle'
+    }
+
+    const startInterviewAfterTest = async () => {
+      await ttsPlayerService.unlockByUserGesture()
       stopDeviceTest()
       isDeviceTesting.value = false
       startLoadingPhase()
     }
 
     const stopDeviceTest = () => {
-      networkTestRunId += 1
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId)
-      }
-      if (microphoneStream.value) {
-        microphoneStream.value.getTracks().forEach(track => track.stop())
-      }
-      if (audioContext.value) {
-        audioContext.value.close()
-      }
+      cleanupDeviceTestResources()
     }
 
     const ROLE_MAP = {
@@ -2325,6 +2687,11 @@ export default {
       loadingSubtitle,
       currentTip,
       deviceTest,
+      cameraStatusText,
+      cameraStatusIcon,
+      microphoneStatusText,
+      microphoneStatusIcon,
+      isMicTesting,
       networkStatusClass,
       networkStatusIcon,
       networkLatencyText,
@@ -2389,9 +2756,11 @@ export default {
       reviewAnswers,
       testCamera,
       testMicrophone,
+      retryMicrophoneTest,
       playTestAudio,
       confirmSpeaker,
       skipDeviceTest,
+      backToConfig,
       startInterviewAfterTest,
       getWaveformHeight,
       asrAvailable,
@@ -4567,6 +4936,19 @@ export default {
 
 .testing-header {
   text-align: center;
+  width: 100%;
+  position: relative;
+}
+
+.testing-back-btn {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
 }
 
 .testing-title {
