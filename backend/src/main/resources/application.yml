@@ -134,7 +134,7 @@ speech:
     enabled: ${ASR_ENABLED:false}
     provider: alibaba
     api-key: ${ASR_API_KEY:${OPENAI_API_KEY:sk-mock}}
-    endpoint: ${ASR_ENDPOINT:wss://dashscope.aliyuncs.com/api-ws/v1/realtime}
+    endpoint: ${ASR_ENDPOINT:wss://dashscope.aliyuncs.com/api-ws/v1/inference}
     model: ${ASR_MODEL:paraformer-realtime-v2}
     # 不同题型的停顿检测阈值（毫秒），超时未说话则自动提交答案
     token-ttl-seconds: ${ASR_TOKEN_TTL:900}
@@ -148,10 +148,10 @@ speech:
     enabled: ${TTS_ENABLED:false}
     provider: alibaba
     api-key: ${TTS_API_KEY:${OPENAI_API_KEY:sk-mock}}
-    endpoint: ${TTS_ENDPOINT:https://dashscope.aliyuncs.com/api/v1/services/aigc/text2speech/speech-synthesis}
+    endpoint: ${TTS_ENDPOINT:wss://dashscope.aliyuncs.com/api-ws/v1/inference}
     model: ${TTS_MODEL:cosyvoice-v1}
     voice: ${TTS_VOICE:longxiaochun}
     #TODO 语音缓存过期时间（秒），默认 3600s = 1 小时
-    cache-ttl-seconds: ${TTS_CACHE_TTL:36000000}
+    cache-ttl-seconds: ${TTS_CACHE_TTL:3600}
     #TODO 语音合成超时（毫秒），默认 10s
-    timeout-ms: ${TTS_TIMEOUT_MS:10000000}
+    timeout-ms: ${TTS_TIMEOUT_MS:10000}

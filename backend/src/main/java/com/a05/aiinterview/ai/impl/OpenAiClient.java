@@ -278,7 +278,9 @@ public class OpenAiClient implements AiClient {
                     buildReportGenerationVariables(input, converter.getFormat()));
 
             ChatResponse response = callChat(rendered.getSystemPrompt(), rendered.getUserPrompt());
-            ReportGenerationOutput output = requireConvert(converter, response, "report_generation");
+            ReportGenerationOutput output = aiOutputContractValidator.validateReport(
+                    requireConvert(converter, response, "report_generation")
+            );
             long latencyMs = System.currentTimeMillis() - startMs;
             auditLite(
                     rendered.getPromptCode(),
@@ -604,6 +606,7 @@ public class OpenAiClient implements AiClient {
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("positionCode", safeString(input.getPositionCode()));
         variables.put("experienceLevel", safeString(input.getExperienceLevel()));
+        variables.put("mode", safeString(input.getMode()));
         variables.put("sessionTitle", safeString(input.getSessionTitle()));
         variables.put("qaPairs", formatReportQaPairs(input.getQuestionAnswerPairs()));
         variables.put("stateLedgerJson", stringifyAsJson(input.getStateLedgerJson()));

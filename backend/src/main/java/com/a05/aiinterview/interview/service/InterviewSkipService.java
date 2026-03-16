@@ -109,26 +109,27 @@ public class InterviewSkipService {
         String nextDomainName = null;
         Long nextDomainId = null;
         String inProgressFallback = null;
-
-        if (session.getStateLedgerJson() != null) {
-            Object domainStatesObj = session.getStateLedgerJson().get("domain_states");
-            if (domainStatesObj instanceof List<?> states) {
-                for (Object stateObj : states) {
-                    if (!(stateObj instanceof Map<?, ?> state)) {
-                        continue;
-                    }
-                    Object status = state.get("status");
-                    Object code = state.get("domain_id");
-                    if (!(code instanceof String c) || c.equals(currentDomainCode) || "COVERED".equalsIgnoreCase(String.valueOf(status))) {
-                        continue;
-                    }
-                    if (status == null || "UNASKED".equalsIgnoreCase(String.valueOf(status))) {
-                        nextDomainCode = c;
-                        break;
-                    }
-                    if ("IN_PROGRESS".equalsIgnoreCase(String.valueOf(status)) && inProgressFallback == null) {
-                        inProgressFallback = c;
-                    }
+        Map<String, String> statusByCode = extractDomainStatusMap(session);
+        Object domainsObj = session.getSyllabusJson() != null ? session.getSyllabusJson().get("domains") : null;
+        if (domainsObj instanceof List<?> domains) {
+            for (Object domainObj : domains) {
+                if (!(domainObj instanceof Map<?, ?> domain)) {
+                    continue;
+                }
+                Object codeObj = domain.get("domainCode");
+                if (!(codeObj instanceof String c) || c.equals(currentDomainCode)) {
+                    continue;
+                }
+                String status = statusByCode.getOrDefault(c, "");
+                if ("COVERED".equalsIgnoreCase(status)) {
+                    continue;
+                }
+                if (status.isBlank() || "UNASKED".equalsIgnoreCase(status)) {
+                    nextDomainCode = c;
+                    break;
+                }
+                if ("IN_PROGRESS".equalsIgnoreCase(status) && inProgressFallback == null) {
+                    inProgressFallback = c;
                 }
             }
         }
@@ -141,7 +142,7 @@ public class InterviewSkipService {
         nextDomainName = nextDomainCode;
 
         if (session.getSyllabusJson() != null) {
-            Object domainsObj = session.getSyllabusJson().get("domains");
+            domainsObj = session.getSyllabusJson().get("domains");
             if (domainsObj instanceof List<?> domains) {
                 for (Object domainObj : domains) {
                     if (!(domainObj instanceof Map<?, ?> domain)) {
@@ -163,7 +164,7 @@ public class InterviewSkipService {
             }
         }
 
-        String targetDepth = "L2";
+        String targetDepth = resolveStartingDepth(session.getExperienceLevel());
         String targetSkill = nextDomainName;
 
         return EvaluationDecisionOutput.NextQuestionStrategy.builder()
@@ -177,6 +178,37 @@ public class InterviewSkipService {
                 .expectedPoints(question.getExpectedPoints())
                 .focusPoint(targetSkill)
                 .build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, String> extractDomainStatusMap(InterviewSession session) {
+        java.util.LinkedHashMap<String, String> result = new java.util.LinkedHashMap<>();
+        if (session.getStateLedgerJson() == null) {
+            return result;
+        }
+        Object domainStatesObj = session.getStateLedgerJson().get("domain_states");
+        if (!(domainStatesObj instanceof List<?> states)) {
+            return result;
+        }
+        for (Object stateObj : states) {
+            if (!(stateObj instanceof Map<?, ?> state)) {
+                continue;
+            }
+            Object codeObj = state.get("domain_id");
+            if (!(codeObj instanceof String code) || !StringUtils.hasText(code)) {
+                continue;
+            }
+            result.put(code, String.valueOf(state.get("status")));
+        }
+        return result;
+    }
+
+    private String resolveStartingDepth(String experienceLevel) {
+        if ("FRESH_GRAD".equalsIgnoreCase(experienceLevel)
+                || "INTERN".equalsIgnoreCase(experienceLevel)) {
+            return "L1";
+        }
+        return "L2";
     }
 
     private boolean shouldForceEndByMaxQuestions(InterviewSession session) {

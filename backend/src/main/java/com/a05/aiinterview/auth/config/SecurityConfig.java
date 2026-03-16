@@ -54,6 +54,8 @@ public class SecurityConfig {
                         .requestMatchers("/config/asr-pause-thresholds").permitAll()
                         // ASR 凭证接口：需要登录（避免 API Key 被匿名获取）
                         .requestMatchers("/asr/token").authenticated()
+                        // ASR 代理 WebSocket：通过 ticket 校验，不走 JWT
+                        .requestMatchers("/asr/stream").permitAll()
                         // 面试会话接口：需要登录
                         .requestMatchers("/interviews/**").authenticated()
                         // 面试偏好接口：需要登录

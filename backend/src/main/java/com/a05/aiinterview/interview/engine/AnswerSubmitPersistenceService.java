@@ -102,6 +102,12 @@ public class AnswerSubmitPersistenceService {
                 evalSnapshot.put("domainClosureReason", reductionAudit.getDomainClosureReason());
             }
         }
+        if (request.getRawAsrText() != null && !request.getRawAsrText().isBlank()) {
+            evalSnapshot.put("rawAsrText", request.getRawAsrText());
+        }
+        if (request.getAsrCorrectionChanges() != null && !request.getAsrCorrectionChanges().isEmpty()) {
+            evalSnapshot.put("asrCorrectionChanges", request.getAsrCorrectionChanges());
+        }
         if (evalOutput.getNextStrategy() != null) {
             EvaluationDecisionOutput.NextQuestionStrategy strat = evalOutput.getNextStrategy();
             Map<String, Object> nextStrategySnapshot = new LinkedHashMap<>();

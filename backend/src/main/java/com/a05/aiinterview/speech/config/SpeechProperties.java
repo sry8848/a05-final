@@ -36,8 +36,8 @@ public class SpeechProperties {
         /** 阿里云百炼 API Key（生产环境通过环境变量 ASR_API_KEY 注入） */
         private String apiKey = "sk-mock";
 
-        /** DashScope Realtime ASR WebSocket 端点 */
-        private String endpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime";
+        /** DashScope Paraformer WebSocket inference 端点 */
+        private String endpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
 
         /** 使用的 ASR 模型，推荐 paraformer-realtime-v2 */
         private String model = "paraformer-realtime-v2";
@@ -83,8 +83,8 @@ public class SpeechProperties {
         /** 发音人，建议使用中文主播音色 */
         private String voice = "longxiaochun";
 
-        /** TTS REST 接口地址（一期先做整段合成） */
-        private String endpoint = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2speech/speech-synthesis";
+        /** DashScope CosyVoice WebSocket inference 地址 */
+        private String endpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
 
         /** 题目音频缓存 TTL（秒） */
         private int cacheTtlSeconds = 3600;

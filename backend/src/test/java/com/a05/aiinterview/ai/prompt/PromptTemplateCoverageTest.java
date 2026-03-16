@@ -49,6 +49,7 @@ class PromptTemplateCoverageTest {
                 Map.entry("currentTargetDepth", "L3"),
                 Map.entry("currentQuestionType", "PRINCIPLE"),
                 Map.entry("answerText", "回答内容"),
+                Map.entry("resumeText", "候选人做过订单系统与缓存优化"),
                 Map.entry("expectedPoints", "- 参数含义\n- 调优思路"),
                 Map.entry("recentContext", "- [PRINCIPLE/concurrency] Q: 讲讲锁升级 | A: ..."),
                 Map.entry("pauseStats", "无"),
@@ -67,6 +68,7 @@ class PromptTemplateCoverageTest {
         RenderedPrompt rendered = service.render("report_generation", "v1", Map.of(
                 "positionCode", "JAVA_BACKEND",
                 "experienceLevel", "SENIOR",
+                "mode", "professional",
                 "sessionTitle", "Java 后端模拟面试",
                 "qaPairs", "题型: PRINCIPLE\n题目: 请解释线程池参数。",
                 "stateLedgerJson", "{\"asked_total\":3}",

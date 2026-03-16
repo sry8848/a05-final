@@ -1,206 +1,123 @@
 /**
- * AsrService — 阿里云百炼 DashScope 实时 ASR 封装
+ * AsrService — 后端代理 ASR 封装
  *
- * 功能：
- * 1. 通过后端 /api/v1/asr/token 获取 WebSocket 连接凭证
- * 2. 使用 MediaRecorder + Web Audio API 采集麦克风 PCM 数据
- * 3. 通过 WebSocket 实时推送音频帧到 DashScope，接收中间/最终识别结果
- * 4. 检测超过阈值的停顿，在最终文本中插入 [停顿 Xs] 标签
- * 5. 计算并上报 pauseStats（wpm / longPauseCount / longestPauseMs）
- *
- * 使用方式：
- *   const asr = new AsrService()
- *   await asr.init()
- *   asr.onInterim = (text) => { ... }     // 中间帧回调（实时字幕）
- *   asr.onFinal   = (text, pauseStats, segments) => { ... }  // 最终帧回调
- *   asr.onError   = (err)  => { ... }
- *   await asr.start(questionType)
- *   // ... 用户说话 ...
- *   await asr.stop()
+ * 流程：
+ * 1. 通过后端 /api/v1/asr/token 获取代理 WebSocket 地址和采样配置
+ * 2. 浏览器连接后端 /api/v1/asr/stream
+ * 3. 后端再代理连接阿里云 Paraformer WebSocket
+ * 4. 前端只接收 ready/interim/segment_final/final/error 五类事件
  */
 
 const ASR_TOKEN_URL = '/api/v1/asr/token'
-const PAUSE_THRESHOLDS_URL = '/api/v1/config/asr-pause-thresholds'
-
-/** 各题型默认停顿阈值（毫秒），从后端 /config/asr-pause-thresholds 拉取后覆盖 */
-const DEFAULT_PAUSE_THRESHOLDS = {
-  INTRO: 2000,
-  PRINCIPLE: 2500,
-  SCENARIO: 3000,
-  PROJECT_DEEP_DIVE: 2000,
-  BEHAVIORAL: 2500,
-}
-
-/** 未知题型的兜底阈值 */
-const FALLBACK_THRESHOLD = 2500
-
-/** DashScope ASR 响应事件类型 */
-const DASHSCOPE_EVENT = {
-  SESSION_CREATED: 'session.created',
-  SPEECH_STARTED: 'input_audio_buffer.speech_started',
-  SPEECH_STOPPED: 'input_audio_buffer.speech_stopped',
-  TRANSCRIPTION_TEXT: 'conversation.item.input_audio_transcription.text',
-  TRANSCRIPTION_COMPLETED: 'conversation.item.input_audio_transcription.completed',
-  SESSION_FINISHED: 'session.finished',
-  ERROR: 'error',
+const DEFAULT_AUDIO_CONFIG = {
+  format: 'pcm',
+  sampleRate: 16000,
+  channels: 1,
+  encoding: 'pcm16le',
 }
 
 export class AsrService {
   constructor() {
-    // WebSocket 实例
     this._ws = null
-    // MediaRecorder 实例（采集 PCM）
-    this._mediaRecorder = null
-    // 麦克风 MediaStream
     this._stream = null
-    // AudioContext（用于 ScriptProcessor 采集 PCM）
     this._audioContext = null
     this._scriptProcessor = null
-
-    // 凭证缓存
     this._token = null
+    this._state = 'idle'
+    this._stopTimeout = null
+    this._readyResolve = null
+    this._readyReject = null
+    this._committedText = ''
 
-    // 停顿阈值配置（后端拉取后填充）
-    this._pauseThresholds = { ...DEFAULT_PAUSE_THRESHOLDS }
-
-    // 当前题型（start 时传入）
-    this._currentQuestionType = 'PRINCIPLE'
-
-    // 识别片段时间线（用于停顿计算）
-    // 每条：{ text, beginTime, endTime }
-    this._segments = []
-
-    // 中间帧累计文本
-    this._interimBuffer = ''
-
-    // 最终确认文本（含停顿标签）
-    this._finalText = ''
-
-    // 状态
-    this._state = 'idle' // idle | connecting | running | stopping | stopped
-
-    // ── 回调（外部赋值） ────────────────────────────────────────
-    /** 中间帧回调：(interimText: string) => void */
     this.onInterim = null
-    /** 最终帧回调：(finalText: string, pauseStats: object, segments: array) => void */
     this.onFinal = null
-    /** 错误回调：(error: Error) => void */
     this.onError = null
-    /** 状态变化回调：(state: string) => void */
     this.onStateChange = null
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // 公开 API
-  // ─────────────────────────────────────────────────────────────
-
-  /**
-   * 初始化：拉取停顿阈值配置（页面加载时调用一次即可）。
-   * 不需要登录状态，阈值接口为公开接口。
-   */
   async init() {
-    try {
-      const resp = await fetch(PAUSE_THRESHOLDS_URL)
-      if (resp.ok) {
-        const data = await resp.json()
-        if (data?.data?.thresholds) {
-          this._pauseThresholds = { ...DEFAULT_PAUSE_THRESHOLDS, ...data.data.thresholds }
-        }
-      }
-    } catch (e) {
-      // 降级：使用内置默认值，不影响主流程
-      console.warn('[AsrService] 拉取停顿阈值失败，使用默认值', e)
-    }
+    return
   }
 
-  /**
-   * 检查 ASR 是否可用（后端已启用且凭证有效）。
-   * @returns {Promise<boolean>}
-   */
   async isAvailable() {
     const token = await this._fetchToken()
     return token?.enabled === true
   }
 
-  /**
-   * 开始语音识别。
-   * @param {string} questionType - 当前题型（INTRO/PRINCIPLE/SCENARIO/...）
-   */
-  async start(questionType = 'PRINCIPLE') {
+  async start(questionType = 'PRINCIPLE', context = {}) {
     if (this._state !== 'idle' && this._state !== 'stopped') {
       console.warn('[AsrService] start() 忽略，当前状态:', this._state)
       return
     }
 
-    this._currentQuestionType = questionType
-    this._segments = []
-    this._interimBuffer = ''
-    this._finalText = ''
+    this._committedText = ''
     this._setState('connecting')
 
     try {
-      // 1. 获取凭证
       const token = await this._fetchToken()
       if (!token?.enabled) {
         throw new Error('ASR 未启用，前端应降级为文字输入')
       }
 
-      // 2. 申请麦克风权限
-      this._stream = await navigator.mediaDevices.getUserMedia({
-        audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      const audioConfig = this._resolveAudioConfig(token)
+      console.info('[AsrService] 启动代理 ASR', {
+        wsUrl: token.wsUrl,
+        protocolVersion: token.protocolVersion || 'v1',
+        audioConfig,
+        questionType,
+        context,
       })
 
-      // 3. 建立 WebSocket 连接
+      this._stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: audioConfig.sampleRate,
+          channelCount: audioConfig.channels,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      })
+
       await this._connectWebSocket(token.wsUrl)
-
-      // 4. 配置会话（VAD 模式）
-      this._sendSessionConfig()
-
-      // 5. 启动音频采集
-      this._startAudioCapture()
+      await this._sendStartAndWaitReady(questionType, token.protocolVersion || 'v1', audioConfig, context)
+      this._startAudioCapture(audioConfig)
 
       this._setState('running')
     } catch (err) {
       this._setState('stopped')
+      this._cleanupReadyPromise()
       this._handleError(err)
+      this._stopAudioCapture()
+      this._closeWebSocket()
     }
   }
 
-  /**
-   * 停止语音识别，等待最终识别结果后触发 onFinal 回调。
-   */
   async stop() {
     if (this._state !== 'running') {
       console.warn('[AsrService] stop() 忽略，当前状态:', this._state)
       return
     }
+
     this._setState('stopping')
     this._stopAudioCapture()
 
-    // 发送 session.finish 通知 DashScope 我们已完成输入
     if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-      this._ws.send(JSON.stringify({ type: 'session.finish' }))
+      this._ws.send(JSON.stringify({ type: 'stop' }))
     }
 
-    // 若 3 秒内没有收到 completed 事件，强制关闭并触发 onFinal
     this._stopTimeout = setTimeout(() => {
-      console.warn('[AsrService] 等待最终帧超时，强制关闭')
-      this._finalize()
+      this._handleError(new Error('等待 ASR 最终结果超时'))
+      this._closeWebSocket()
+      this._setState('stopped')
     }, 3000)
   }
 
-  /**
-   * 强制释放所有资源（页面离开时调用）。
-   */
   destroy() {
+    clearTimeout(this._stopTimeout)
     this._stopAudioCapture()
     this._closeWebSocket()
+    this._committedText = ''
     this._setState('stopped')
   }
-
-  // ─────────────────────────────────────────────────────────────
-  // 私有方法
-  // ─────────────────────────────────────────────────────────────
 
   _setState(state) {
     this._state = state
@@ -212,12 +129,7 @@ export class AsrService {
     this.onError?.(err)
   }
 
-  /** 拉取或使用缓存的 ASR 凭证 */
   async _fetchToken() {
-    const now = Math.floor(Date.now() / 1000)
-    if (this._token && this._token.expiresAt > now + 60) {
-      return this._token
-    }
     try {
       const resp = await fetch(ASR_TOKEN_URL, {
         headers: { Authorization: `Bearer ${this._getJwtFromStorage()}` },
@@ -225,6 +137,11 @@ export class AsrService {
       if (!resp.ok) throw new Error(`获取 ASR token 失败: ${resp.status}`)
       const data = await resp.json()
       this._token = data.data
+      console.info('[AsrService] 获取新的代理 ticket', {
+        wsUrl: this._token?.wsUrl,
+        ticket: this._token?.ticket,
+        expiresAt: this._token?.expiresAt,
+      })
       return this._token
     } catch (e) {
       console.error('[AsrService] 获取 token 失败', e)
@@ -232,15 +149,21 @@ export class AsrService {
     }
   }
 
-  /** 从 localStorage 读取 JWT（与 auth.js 保持一致） */
   _getJwtFromStorage() {
     return localStorage.getItem('aiInterviewToken') || localStorage.getItem('token') || ''
   }
 
-  /** 建立 WebSocket 并等待连接成功 */
+  _resolveAudioConfig(token) {
+    return {
+      ...DEFAULT_AUDIO_CONFIG,
+      ...(token?.audio || {}),
+    }
+  }
+
   _connectWebSocket(wsUrl) {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(wsUrl)
+      ws.binaryType = 'arraybuffer'
       this._ws = ws
 
       const timeout = setTimeout(() => {
@@ -250,11 +173,13 @@ export class AsrService {
 
       ws.onopen = () => {
         clearTimeout(timeout)
+        console.info('[AsrService] 代理 WebSocket 已连接')
         resolve()
       }
 
-      ws.onerror = (e) => {
+      ws.onerror = (event) => {
         clearTimeout(timeout)
+        console.error('[AsrService] WebSocket onerror', event)
         reject(new Error('WebSocket 连接失败'))
       }
 
@@ -263,7 +188,8 @@ export class AsrService {
       }
 
       ws.onclose = () => {
-        if (this._state === 'running') {
+        console.info('[AsrService] 代理 WebSocket 已关闭, state=', this._state)
+        if (this._state === 'running' || this._state === 'stopping' || this._state === 'connecting') {
           this._handleError(new Error('WebSocket 意外断开'))
           this._setState('stopped')
         }
@@ -271,36 +197,50 @@ export class AsrService {
     })
   }
 
-  /** 发送 VAD 模式会话配置 */
-  _sendSessionConfig() {
-    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return
-    this._ws.send(
-      JSON.stringify({
-        type: 'session.update',
-        session: {
-          input_audio_format: 'pcm',
-          input_audio_transcription: {
-            model: this._token?.model || 'paraformer-realtime-v2',
-            language: 'zh',
-          },
-          turn_detection: {
-            type: 'server_vad',
-            threshold: 0.3,
-            silence_duration_ms: 600,
-          },
-        },
-      })
-    )
+  _sendStartAndWaitReady(questionType, protocolVersion, audioConfig, context = {}) {
+    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('WebSocket 尚未连接'))
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this._cleanupReadyPromise()
+        reject(new Error('等待代理 ASR ready 超时'))
+      }, 5000)
+
+      this._readyResolve = () => {
+        clearTimeout(timeout)
+        this._cleanupReadyPromise()
+        resolve()
+      }
+      this._readyReject = (err) => {
+        clearTimeout(timeout)
+        this._cleanupReadyPromise()
+        reject(err)
+      }
+
+      this._ws.send(
+        JSON.stringify({
+          type: 'start',
+          questionType,
+          protocolVersion,
+          audio: audioConfig,
+          context,
+        })
+      )
+    })
   }
 
-  /** 启动麦克风采集，将 PCM 数据发往 WebSocket */
-  _startAudioCapture() {
-    const sampleRate = 16000
+  _cleanupReadyPromise() {
+    this._readyResolve = null
+    this._readyReject = null
+  }
+
+  _startAudioCapture(audioConfig) {
+    const sampleRate = audioConfig.sampleRate || 16000
     this._audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate })
 
     const source = this._audioContext.createMediaStreamSource(this._stream)
-
-    // ScriptProcessor：每 4096 帧触发一次（约 256ms @16kHz），采集 PCM16LE
     this._scriptProcessor = this._audioContext.createScriptProcessor(4096, 1, 1)
     this._scriptProcessor.onaudioprocess = (e) => {
       if (this._state !== 'running' && this._state !== 'stopping') return
@@ -308,21 +248,13 @@ export class AsrService {
 
       const float32 = e.inputBuffer.getChannelData(0)
       const pcm16 = this._float32ToPcm16(float32)
-      const base64 = this._arrayBufferToBase64(pcm16.buffer)
-
-      this._ws.send(
-        JSON.stringify({
-          type: 'input_audio_buffer.append',
-          audio: base64,
-        })
-      )
+      this._ws.send(pcm16.buffer.slice(0))
     }
 
     source.connect(this._scriptProcessor)
     this._scriptProcessor.connect(this._audioContext.destination)
   }
 
-  /** 停止音频采集，释放相关资源 */
   _stopAudioCapture() {
     try {
       if (this._scriptProcessor) {
@@ -342,16 +274,16 @@ export class AsrService {
     }
   }
 
-  /** 关闭 WebSocket */
   _closeWebSocket() {
     if (this._ws) {
       this._ws.onclose = null
+      this._ws.onerror = null
+      this._ws.onmessage = null
       this._ws.close()
       this._ws = null
     }
   }
 
-  /** 处理 DashScope WebSocket 消息 */
   _handleWsMessage(event) {
     let msg
     try {
@@ -361,111 +293,57 @@ export class AsrService {
     }
 
     switch (msg.type) {
-      case DASHSCOPE_EVENT.TRANSCRIPTION_TEXT: {
-        // 中间帧：实时字幕刷新
-        const text = msg.text || msg.delta?.text || ''
-        if (text) {
-          this._interimBuffer = text
-          this.onInterim?.(text)
-        }
+      case 'ready':
+        console.info('[AsrService] 收到 ready 事件', msg)
+        this._readyResolve?.()
         break
-      }
 
-      case DASHSCOPE_EVENT.TRANSCRIPTION_COMPLETED: {
-        // 最终帧：收集片段，计算停顿
-        const finalText = msg.text || msg.transcript || ''
-        const beginTime = msg.begin_time ?? 0
-        const endTime = msg.end_time ?? 0
-
-        if (finalText) {
-          this._segments.push({ text: finalText, beginTime, endTime })
-        }
+      case 'interim':
+        console.debug('[AsrService] 收到 interim 事件', msg)
+        this.onInterim?.(this._mergeRecognizedText(msg.text || ''))
         break
-      }
 
-      case DASHSCOPE_EVENT.SESSION_FINISHED: {
+      case 'segment_final':
+        console.info('[AsrService] 收到 segment_final 事件', msg)
+        this._appendCommittedText(msg.text || '')
+        this.onInterim?.(this._committedText)
+        break
+
+      case 'final':
+        console.info('[AsrService] 收到 final 事件', msg)
         clearTimeout(this._stopTimeout)
-        this._finalize()
+        this._closeWebSocket()
+        this._setState('stopped')
+        this._committedText = ''
+        this.onFinal?.(
+          msg.text || '',
+          msg.pauseStats || null,
+          msg.asrSegments || [],
+          {
+            rawText: msg.rawText || '',
+            changeList: msg.changeList || [],
+            correctionApplied: msg.correctionApplied === true,
+          }
+        )
+        break
+
+      case 'error': {
+        console.error('[AsrService] 收到 error 事件', msg)
+        const error = new Error(msg.message || '未知 ASR 错误')
+        this._readyReject?.(error)
+        clearTimeout(this._stopTimeout)
+        this._closeWebSocket()
+        this._setState('stopped')
+        this._committedText = ''
+        this._handleError(error)
         break
       }
 
-      case DASHSCOPE_EVENT.ERROR: {
-        const errMsg = msg.error?.message || msg.message || '未知 ASR 错误'
-        this._handleError(new Error(`DashScope ASR 错误: ${errMsg}`))
-        this._finalize()
-        break
-      }
+      default:
+        console.warn('[AsrService] 收到未知事件', msg)
     }
   }
 
-  /**
-   * 组装最终结果：停顿打标 + pauseStats 计算 + 触发 onFinal 回调。
-   */
-  _finalize() {
-    clearTimeout(this._stopTimeout)
-    this._closeWebSocket()
-    this._setState('stopped')
-
-    const threshold = this._pauseThresholds[this._currentQuestionType] ?? FALLBACK_THRESHOLD
-
-    // 基于片段时间线检测停顿并插入标签
-    const { taggedText, longPauseCount, longestPauseMs, pauseList } =
-      this._buildTaggedText(this._segments, threshold)
-
-    // 计算语速 wpm（以每分钟字数估算，中文按字符计）
-    const totalChars = this._segments.reduce((sum, s) => sum + s.text.length, 0)
-    const lastEndTime = this._segments.length > 0 ? this._segments[this._segments.length - 1].endTime : 0
-    const durationMinutes = lastEndTime > 0 ? lastEndTime / 1000 / 60 : 1
-    const wpm = durationMinutes > 0 ? Math.round(totalChars / durationMinutes) : 0
-
-    const pauseStats = { wpm, longPauseCount, longestPauseMs }
-
-    this._finalText = taggedText
-    this.onFinal?.(taggedText, pauseStats, [...this._segments])
-  }
-
-  /**
-   * 根据片段时间线构建停顿打标文本。
-   *
-   * @param {Array} segments - ASR 片段数组，每条 { text, beginTime, endTime }（毫秒）
-   * @param {number} threshold - 停顿阈值（毫秒）
-   * @returns {{ taggedText, longPauseCount, longestPauseMs, pauseList }}
-   */
-  _buildTaggedText(segments, threshold) {
-    if (!segments || segments.length === 0) {
-      return { taggedText: this._interimBuffer, longPauseCount: 0, longestPauseMs: 0, pauseList: [] }
-    }
-
-    let taggedText = ''
-    let longPauseCount = 0
-    let longestPauseMs = 0
-    const pauseList = []
-
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i]
-      taggedText += seg.text
-
-      if (i < segments.length - 1) {
-        const nextSeg = segments[i + 1]
-        const gap = nextSeg.beginTime - seg.endTime
-        if (gap >= threshold) {
-          const seconds = (gap / 1000).toFixed(1)
-          taggedText += ` [停顿 ${seconds}s] `
-          longPauseCount++
-          if (gap > longestPauseMs) longestPauseMs = gap
-          pauseList.push({ position: taggedText.length, durationMs: gap })
-        }
-      }
-    }
-
-    return { taggedText, longPauseCount, longestPauseMs, pauseList }
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // 音频格式工具
-  // ─────────────────────────────────────────────────────────────
-
-  /** Float32 [-1,1] → Int16 PCM16LE */
   _float32ToPcm16(float32Array) {
     const int16 = new Int16Array(float32Array.length)
     for (let i = 0; i < float32Array.length; i++) {
@@ -475,16 +353,25 @@ export class AsrService {
     return int16
   }
 
-  /** ArrayBuffer → Base64 字符串 */
-  _arrayBufferToBase64(buffer) {
-    const bytes = new Uint8Array(buffer)
-    let binary = ''
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i])
+  _appendCommittedText(text) {
+    const normalized = String(text || '').trim()
+    if (!normalized) {
+      return
     }
-    return btoa(binary)
+    this._committedText = this._committedText
+      ? `${this._committedText}${normalized}`
+      : normalized
+  }
+
+  _mergeRecognizedText(interimText) {
+    const normalizedInterim = String(interimText || '').trim()
+    if (!normalizedInterim) {
+      return this._committedText
+    }
+    return this._committedText
+      ? `${this._committedText}${normalizedInterim}`
+      : normalizedInterim
   }
 }
 
-/** 单例导出，供全局复用 */
 export const asrService = new AsrService()

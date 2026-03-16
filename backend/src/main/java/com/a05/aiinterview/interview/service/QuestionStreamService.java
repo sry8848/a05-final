@@ -161,6 +161,7 @@ public class QuestionStreamService {
         RagContext ragContext = safeRetrieveRag(session, strategy);
 
         QuestionGenerationInput genInput = buildGenInput(session, strategy, historyQuestions, ragContext);
+        logQuestionGenerationDebugInput(sessionId, attemptId, strategy, genInput);
 
         String statusKey = String.format(KEY_STATUS, attemptId);
         Boolean locked = redisTemplate.opsForValue().setIfAbsent(
@@ -270,6 +271,7 @@ public class QuestionStreamService {
             String ttsReadyKey,
             List<CompletableFuture<Boolean>> segmentTtsTasks) {
         log.info("AI 题目流式生成完成, attemptId={}, stemLen={}", attemptId, finalStem.length());
+        logQuestionGenerationDebugOutput(session.getId(), attemptId, strategy, finalStem);
 
         String trailing = flushTrailingSentence(sentenceBuffer);
         if (!trailing.isBlank()) {
@@ -629,6 +631,36 @@ public class QuestionStreamService {
         log.info("题目流式生成保存成功, sessionId={}, questionNo={}, questionId={}",
                 session.getId(), nextQuestionNo, question.getId());
         return question;
+    }
+
+    private void logQuestionGenerationDebugInput(Long sessionId,
+                                                 String attemptId,
+                                                 EvaluationDecisionOutput.NextQuestionStrategy strategy,
+                                                 QuestionGenerationInput genInput) {
+        log.info("出题调试输入, sessionId={}, attemptId={}, nextStrategy={}, genInput={}",
+                sessionId,
+                attemptId,
+                toDebugJson(strategy),
+                toDebugJson(genInput));
+    }
+
+    private void logQuestionGenerationDebugOutput(Long sessionId,
+                                                  String attemptId,
+                                                  EvaluationDecisionOutput.NextQuestionStrategy strategy,
+                                                  String finalStem) {
+        log.info("出题调试输出, sessionId={}, attemptId={}, nextStrategy={}, finalStem={}",
+                sessionId,
+                attemptId,
+                toDebugJson(strategy),
+                finalStem == null ? "" : finalStem);
+    }
+
+    private String toDebugJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            return String.valueOf(value);
+        }
     }
 
     // ==================== SSE 事件构建 ====================

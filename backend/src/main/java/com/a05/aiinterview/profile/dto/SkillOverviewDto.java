@@ -14,4 +14,10 @@ public class SkillOverviewDto {
 
     @Schema(description = "知识域条目")
     private List<SkillDomainItemDto> domains;
+
+    @Schema(description = "红榜 Top3")
+    private List<SkillDomainItemDto> topStrengths;
+
+    @Schema(description = "黑榜 Top3")
+    private List<SkillDomainItemDto> topWeaknesses;
 }

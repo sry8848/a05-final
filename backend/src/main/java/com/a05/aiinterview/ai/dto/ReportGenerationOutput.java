@@ -1,5 +1,4 @@
 package com.a05.aiinterview.ai.dto;
-
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -40,12 +39,13 @@ public class ReportGenerationOutput {
     /** 提升建议列表（3~5 条） */
     private List<String> improvementSuggestions;
 
+    /** 专业模式综合能力雷达，练习模式可为 null。 */
+    private List<ComprehensiveRadarScore> comprehensiveRadarScores;
+
     /**
      * 逐知识域评分明细，前端用于渲染雷达图和各域折叠卡片。
      */
     private List<SkillDomainScore> skillDomainScores;
-
-    // ────────────────────────────────────────────
 
     /**
      * 单知识域评分明细。
@@ -73,5 +73,15 @@ public class ReportGenerationOutput {
 
         /** AI 对该知识域表现的定性点评（1~2 句话） */
         private String commentary;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ComprehensiveRadarScore {
+        private String dimensionKey;
+        private String dimensionName;
+        private BigDecimal score;
     }
 }

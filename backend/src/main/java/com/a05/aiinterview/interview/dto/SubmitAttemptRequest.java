@@ -38,6 +38,14 @@ public class SubmitAttemptRequest {
             requiredMode = Schema.RequiredMode.REQUIRED)
     private String answerText;
 
+    @Schema(description = "原始 ASR 最终文本（语音模式专属）",
+            example = "挺简单。您简单介绍一下你自己。")
+    private String rawAsrText;
+
+    @Schema(description = "ASR 纠错改动清单（语音模式专属）",
+            example = "[{\"from\":\"ja法\",\"to\":\"Java\",\"reason\":\"technical_term\"}]")
+    private List<Map<String, Object>> asrCorrectionChanges;
+
     /**
      * 是否为最终版回答。
      * 文字模式默认 true；语音模式应等收到 Final 帧后再提交 true。

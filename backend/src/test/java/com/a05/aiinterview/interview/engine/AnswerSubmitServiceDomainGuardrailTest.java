@@ -26,7 +26,7 @@ import static org.mockito.Mockito.when;
 class AnswerSubmitServiceDomainGuardrailTest {
 
     @Test
-    void submitAnswer_shouldRewriteHardFailNextDomainAwayFromCurrentAndCoveredDomains() {
+    void submitAnswer_shouldRewriteHardFailNextDomainUsingSyllabusOrderFallback() {
         AiClient aiClient = mock(AiClient.class);
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
@@ -163,6 +163,7 @@ class AnswerSubmitServiceDomainGuardrailTest {
         assertThat(persisted.getNextStrategy().getNextDomainCode()).isEqualTo("redis");
         assertThat(persisted.getNextStrategy().getTargetDepth()).isEqualTo("L2");
         assertThat(persisted.getNextStrategy().getDifficulty()).isEqualTo("L2");
+        assertThat(persisted.getNextStrategy().getQuestionType()).isEqualTo("PRINCIPLE");
     }
 
     private InterviewSession baseSession() {

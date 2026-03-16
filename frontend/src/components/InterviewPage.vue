@@ -537,16 +537,20 @@
                 class="voice-btn" 
                 :class="{ active: isListening, connecting: asrState === 'connecting' }"
                 @click="toggleVoiceInput"
-                :disabled="asrState === 'connecting' || asrState === 'stopping' || isSubmittingAnswer || isWaitingNextQuestion || isFinishing"
+                :disabled="isAiSpeaking || asrState === 'connecting' || asrState === 'stopping' || isSubmittingAnswer || isWaitingNextQuestion || isFinishing"
               >
                 <i :class="asrState === 'connecting' ? 'fas fa-spinner fa-spin' : 'fas fa-microphone'"></i>
                 <span>
-                  {{ asrState === 'connecting' ? '连接中...' : asrState === 'stopping' ? '处理中...' : isListening ? '说完了' : '点击说话' }}
+                  {{ isAiSpeaking ? '面试官播报中...' : asrState === 'connecting' ? '连接中...' : asrState === 'stopping' ? '处理中...' : isListening ? '说完了' : '点击说话' }}
                 </span>
               </button>
               <div v-if="!asrAvailable && inputMode === 'voice'" class="asr-fallback-hint">
                 <i class="fas fa-info-circle"></i>
                 <span>使用浏览器内置识别（无停顿分析）</span>
+              </div>
+              <div v-else-if="inputMode === 'voice' && (isListening || recognizedText)" class="asr-fallback-hint">
+                <i class="fas fa-wave-square"></i>
+                <span>系统将于回答结束后自动优化转写结果</span>
               </div>
               <div v-if="lastPauseStats && !isListening" class="pause-stats-hint">
                 <i class="fas fa-wave-square"></i>
@@ -794,6 +798,8 @@ export default {
     const inputMode = ref('text')
     const isListening = ref(false)
     const recognizedText = ref('')
+    const lastRawAsrText = ref('')
+    const lastAsrCorrectionChanges = ref([])
     const showInterviewer = ref(true)
     const cameraEnabled = ref(false)
     const isRecording = ref(false)
@@ -1078,8 +1084,10 @@ export default {
       asrService.onInterim = (text) => {
         recognizedText.value = text
       }
-      asrService.onFinal = (text, pauseStats, segments) => {
+      asrService.onFinal = (text, pauseStats, segments, metadata = {}) => {
         recognizedText.value = text
+        lastRawAsrText.value = metadata.rawText || text
+        lastAsrCorrectionChanges.value = metadata.changeList || []
         lastPauseStats.value = pauseStats
         lastAsrSegments.value = segments
         isListening.value = false
@@ -2164,18 +2172,29 @@ export default {
     }
 
     const toggleVoiceInput = async () => {
+      if (isAiSpeaking.value) {
+        console.info('[InterviewPage] 已阻止语音输入：当前仍在播报题目')
+        return
+      }
+
       if (!isListening.value) {
         // ── 开始录音 ──
         recognizedText.value = ''
         lastPauseStats.value = null
         lastAsrSegments.value = []
+        lastRawAsrText.value = ''
+        lastAsrCorrectionChanges.value = []
 
         if (asrAvailable.value) {
           // 真实 ASR：获取当前题目类型用于停顿阈值
           const currentQ = questions.value[currentQuestion.value]
           const questionType = currentQ?.questionType || 'PRINCIPLE'
           isListening.value = true
-          await asrService.start(questionType)
+          await asrService.start(questionType, {
+            roleHint: config.jobType || '',
+            questionText: currentQ?.question || currentQ?.stem || '',
+            jobDescription: config.jobDescription || '',
+          })
         } else {
           // 降级：Web Speech API（不支持停顿打标，仅保底兜底）
           isListening.value = true
@@ -2305,6 +2324,8 @@ export default {
 
       const currentPauseStats = inputMode.value === 'voice' ? lastPauseStats.value : null
       const currentAsrSegments = inputMode.value === 'voice' ? lastAsrSegments.value : []
+      const currentRawAsrText = inputMode.value === 'voice' ? lastRawAsrText.value : null
+      const currentAsrCorrectionChanges = inputMode.value === 'voice' ? lastAsrCorrectionChanges.value : []
 
       messages.value.push({
         type: 'user',
@@ -2314,6 +2335,8 @@ export default {
       recognizedText.value = ''
       lastPauseStats.value = null
       lastAsrSegments.value = []
+      lastRawAsrText.value = ''
+      lastAsrCorrectionChanges.value = []
       hintUsed.value = false
 
       isSubmittingAnswer.value = true
@@ -2339,6 +2362,8 @@ export default {
           questionId,
           attemptId,
           answerText: answer,
+          rawAsrText: currentRawAsrText,
+          asrCorrectionChanges: currentAsrCorrectionChanges,
           isFinal: true,
           pauseStats: currentPauseStats,
           asrSegments: currentAsrSegments,

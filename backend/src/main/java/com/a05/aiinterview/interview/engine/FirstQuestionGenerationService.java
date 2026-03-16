@@ -97,6 +97,10 @@ public class FirstQuestionGenerationService {
                         ? "blank_output"
                         : "too_long_output";
                 rewriteErrorMessage = "intro_rewrite invalid output: " + fallbackReason;
+                log.info("========== 兜底题提示 ==========");
+                log.info("【首题改写失败】AI 改写输出无效，回退到底稿题目");
+                log.info("原因: {}", fallbackReason);
+                log.info("=================================");
                 log.warn("INTRO 改写无效，回退到底稿, sessionId={}, reason={}", session.getId(), fallbackReason);
             } else {
                 rewritten = true;
@@ -107,6 +111,10 @@ public class FirstQuestionGenerationService {
             aiResultStatus = "fallback";
             fallbackReason = "exception";
             rewriteErrorMessage = e.getMessage();
+            log.info("========== 兜底题提示 ==========");
+            log.info("【首题改写异常】AI 改写过程发生异常，回退到底稿题目");
+            log.info("异常信息: {}", e.getMessage());
+            log.info("=================================");
             log.warn("INTRO 改写失败，回退到底稿, sessionId={}", session.getId(), e);
         } finally {
             recordIntroRewriteLiteAudit(session, selection.getVariantId(), rewriteSuccess,

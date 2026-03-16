@@ -112,6 +112,8 @@ public class MockAiClient implements AiClient {
         long startMs = System.currentTimeMillis();
 
         List<ReportGenerationOutput.SkillDomainScore> domainScores = buildMockDomainScores(input);
+        List<ReportGenerationOutput.ComprehensiveRadarScore> radarScores =
+                buildMockRadarScores(input.getMode());
         BigDecimal overallScore = domainScores.isEmpty()
                 ? BigDecimal.valueOf(72.0)
                 : domainScores.stream()
@@ -135,6 +137,7 @@ public class MockAiClient implements AiClient {
                         "建议通过实际项目或开源贡献积累高并发处理经验",
                         "重点学习分布式事务（Seata/TCC）和缓存一致性方案",
                         "阅读 JUC 源码（AQS、ConcurrentHashMap 等）加深底层理解"))
+                .comprehensiveRadarScores(radarScores)
                 .skillDomainScores(domainScores)
                 .build();
 
@@ -455,6 +458,19 @@ public class MockAiClient implements AiClient {
                                 .commentary("候选人对该知识域有基本掌握，核心概念理解正确，建议进一步加深实践深度。")
                                 .build()));
         return scores;
+    }
+
+    private List<ReportGenerationOutput.ComprehensiveRadarScore> buildMockRadarScores(String mode) {
+        if (!"professional".equalsIgnoreCase(mode)) {
+            return null;
+        }
+        return List.of(
+                new ReportGenerationOutput.ComprehensiveRadarScore("fundamentals", "基础原理掌握", BigDecimal.valueOf(84)),
+                new ReportGenerationOutput.ComprehensiveRadarScore("engineering_practice", "工程实践与项目落地", BigDecimal.valueOf(78)),
+                new ReportGenerationOutput.ComprehensiveRadarScore("scenario_tradeoff", "场景分析与方案取舍", BigDecimal.valueOf(72)),
+                new ReportGenerationOutput.ComprehensiveRadarScore("debugging", "问题定位与排查思路", BigDecimal.valueOf(76)),
+                new ReportGenerationOutput.ComprehensiveRadarScore("communication", "沟通表达与结构化呈现", BigDecimal.valueOf(81))
+        );
     }
 
     private enum AnswerAssessment {

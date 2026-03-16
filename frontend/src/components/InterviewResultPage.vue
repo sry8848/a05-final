@@ -27,7 +27,7 @@
               <span class="score-in-title">{{ animatedScore }} 分</span>
             </h3>
 
-            <div class="radar-container">
+            <div v-if="isProfessionalMode && hasRadarData" class="radar-container">
               <div class="radar-chart">
                 <div class="radar-polygon" :style="radarStyle"></div>
                 <div class="radar-labels">
@@ -57,6 +57,12 @@
                   <span class="legend-value">{{ radarValues[index] }}%</span>
                 </div>
               </div>
+            </div>
+
+            <div v-else class="radar-empty-state">
+              <i class="fas fa-chart-radar"></i>
+              <p>{{ radarEmptyTitle }}</p>
+              <span>{{ radarEmptyDescription }}</span>
             </div>
           </div>
 
@@ -159,8 +165,13 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { getLearningRecommendations } from '../api/resume'
 
-const RADAR_LABELS = ['专业底层功底', '工程实战经验', '沟通与表达能力', '逻辑分析与解决问题', '场景与架构思维']
-const DEFAULT_RADAR_VALUES = [75, 68, 82, 70, 65]
+const RADAR_DIMENSIONS = [
+  { key: 'fundamentals', label: '基础原理掌握' },
+  { key: 'engineering_practice', label: '工程实践与项目落地' },
+  { key: 'scenario_tradeoff', label: '场景分析与方案取舍' },
+  { key: 'debugging', label: '问题定位与排查思路' },
+  { key: 'communication', label: '沟通表达与结构化呈现' }
+]
 
 const FALLBACK_RECOMMENDATIONS = [
   { id: 'fallback-1', title: 'MDN Web 文档', desc: '前端权威参考，建议常查。', icon: 'fas fa-book', link: 'https://developer.mozilla.org/zh-CN/' },
@@ -176,21 +187,19 @@ const RESOURCE_ICON_MAP = {
 }
 
 function buildInitialRadarValues(report) {
-  if (!report || !Array.isArray(report.skillDomainScores) || report.skillDomainScores.length === 0) {
-    return [...DEFAULT_RADAR_VALUES]
-  }
-  const values = report.skillDomainScores
-    .slice(0, RADAR_LABELS.length)
-    .map((item) => {
-      const n = Number(item?.score)
-      if (!Number.isFinite(n)) return 70
-      return Math.max(0, Math.min(100, Math.round(n)))
-    })
+  const radarScores = Array.isArray(report?.comprehensiveRadarScores) ? report.comprehensiveRadarScores : []
+  const scoreMap = new Map()
+  radarScores.forEach((item) => {
+    if (item?.dimensionKey) {
+      scoreMap.set(item.dimensionKey, Number(item?.score))
+    }
+  })
 
-  while (values.length < RADAR_LABELS.length) {
-    values.push(70)
-  }
-  return values
+  return RADAR_DIMENSIONS.map((dimension) => {
+    const score = scoreMap.get(dimension.key)
+    if (!Number.isFinite(score)) return 0
+    return Math.max(0, Math.min(100, Math.round(score)))
+  })
 }
 
 function mapRecommendationItem(item, section, index) {
@@ -239,8 +248,21 @@ export default {
     const answers = computed(() => props.resultData.answers || [])
     const sessionId = computed(() => props.resultData.sessionId || props.resultData?.report?.sessionId || null)
 
-    const radarLabels = RADAR_LABELS
+    const radarLabels = RADAR_DIMENSIONS.map((item) => item.label)
     const radarValues = reactive(buildInitialRadarValues(props.resultData?.report))
+    const syncRadarValues = (report) => {
+      const nextValues = buildInitialRadarValues(report)
+      nextValues.forEach((value, index) => {
+        radarValues[index] = value
+      })
+    }
+    const interviewMode = computed(() =>
+      props.resultData?.report?.mode || props.resultData?.interviewMode || props.resultData?.mode || 'practice'
+    )
+    const isProfessionalMode = computed(() => String(interviewMode.value).toLowerCase() === 'professional')
+    const hasRadarData = computed(() =>
+      isProfessionalMode.value && radarValues.some((value) => Number(value) > 0)
+    )
 
     const loadRecommendations = async () => {
       if (!sessionId.value) {
@@ -293,6 +315,10 @@ export default {
       loadRecommendations()
     })
 
+    watch(() => props.resultData?.report, (report) => {
+      syncRadarValues(report)
+    }, { deep: true })
+
     const radarStyle = computed(() => {
       const points = radarValues.map((v, i) => {
         const angle = (i * 72 - 90) * Math.PI / 180
@@ -332,10 +358,19 @@ export default {
       return '本次面试表现还有提升空间。建议先补基础，再做高频题强化。'
     })
 
+    const radarEmptyTitle = computed(() => (
+      isProfessionalMode.value ? '本场专业模式雷达暂未生成' : '练习模式不计算面试能力雷达'
+    ))
+    const radarEmptyDescription = computed(() => (
+      isProfessionalMode.value
+        ? '报告已生成，但当前缺少足够的综合能力评分数据，请稍后刷新或重新生成报告。'
+        : '练习模式只产出题目与知识域层面的复盘，不计算 5 维面试能力评分。'
+    ))
+
     const domainWeakSpots = computed(() => {
       const reportScores = props.resultData?.report?.skillDomainScores
       if (Array.isArray(reportScores) && reportScores.length) {
-        return reportScores.slice(0, RADAR_LABELS.length).map((item) => {
+        return reportScores.slice(0, RADAR_DIMENSIONS.length).map((item) => {
           const scoreNum = Number(item?.score)
           const scoreValue = Number.isFinite(scoreNum) ? scoreNum : 70
           const delta = Math.round(scoreValue - 70)
@@ -357,7 +392,7 @@ export default {
         '多做场景题与项目题，强化问题拆解能力。'
       ]
 
-      return RADAR_LABELS.map((name, i) => {
+      return radarLabels.map((name, i) => {
         const v = radarValues[i]
         const delta = v - 70
         return {
@@ -457,9 +492,13 @@ export default {
       jobName,
       experienceLabel,
       answers,
+      isProfessionalMode,
+      hasRadarData,
       radarLabels,
       radarValues,
       radarStyle,
+      radarEmptyTitle,
+      radarEmptyDescription,
       summaryComment,
       domainWeakSpots,
       recommendResources,
@@ -631,6 +670,35 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.radar-empty-state {
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  color: var(--text-secondary);
+}
+
+.radar-empty-state i {
+  font-size: 28px;
+  color: var(--primary-color);
+}
+
+.radar-empty-state p {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.radar-empty-state span {
+  max-width: 300px;
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .legend-item {

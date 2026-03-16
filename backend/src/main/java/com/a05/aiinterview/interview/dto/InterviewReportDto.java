@@ -1,5 +1,6 @@
 package com.a05.aiinterview.interview.dto;
 
+import com.a05.aiinterview.common.dto.RadarDimensionScoreDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -23,6 +24,12 @@ public class InterviewReportDto {
     @Schema(description = "面试会话 ID", example = "2001")
     private Long sessionId;
 
+    @Schema(description = "岗位编码", example = "JAVA_BACKEND")
+    private String targetRole;
+
+    @Schema(description = "面试模式", example = "professional")
+    private String mode;
+
     @Schema(description = "报告生成状态：generating / ready", example = "ready")
     private String reportStatus;
 
@@ -43,6 +50,9 @@ public class InterviewReportDto {
 
     @Schema(description = "推荐练习知识点列表（可为 null）")
     private List<String> recommendedTopics;
+
+    @Schema(description = "综合能力雷达，仅专业模式返回")
+    private List<RadarDimensionScoreDto> comprehensiveRadarScores;
 
     @Schema(description = "逐知识域评分明细")
     private List<SkillDomainScoreDto> skillDomainScores;
@@ -124,6 +134,26 @@ public class InterviewReportDto {
         dto.setImprovementSuggestions(report.getImprovementSuggestions());
         dto.setRecommendedTopics(report.getRecommendedTopics());
         dto.setCreatedAt(report.getCreatedAt());
+        if (report.getComprehensiveRadarScores() != null) {
+            Object dimensionsObj = report.getComprehensiveRadarScores().get("dimensions");
+            if (dimensionsObj instanceof List<?> dimensions) {
+                List<RadarDimensionScoreDto> radarScores = dimensions.stream()
+                        .filter(Map.class::isInstance)
+                        .map(Map.class::cast)
+                        .map(m -> {
+                            RadarDimensionScoreDto scoreDto = new RadarDimensionScoreDto();
+                            scoreDto.setDimensionKey((String) m.get("dimensionKey"));
+                            scoreDto.setDimensionName((String) m.get("dimensionName"));
+                            Object score = m.get("score");
+                            if (score instanceof Number n) {
+                                scoreDto.setScore(BigDecimal.valueOf(n.doubleValue()));
+                            }
+                            return scoreDto;
+                        })
+                        .toList();
+                dto.setComprehensiveRadarScores(radarScores);
+            }
+        }
 
         // 将 List<Map<String, Object>> 反序列化为 SkillDomainScoreDto 列表
         if (report.getSkillDomainScores() != null) {

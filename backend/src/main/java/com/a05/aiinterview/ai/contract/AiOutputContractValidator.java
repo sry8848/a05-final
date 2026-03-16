@@ -147,6 +147,22 @@ public class AiOutputContractValidator {
             log.warn("[契约] Report.skillDomainScores 为 null，已填入空列表兜底");
             output.setSkillDomainScores(new ArrayList<>());
         }
+        if (output.getComprehensiveRadarScores() != null) {
+            output.setComprehensiveRadarScores(output.getComprehensiveRadarScores().stream()
+                    .filter(item -> item != null
+                            && item.getDimensionKey() != null
+                            && !item.getDimensionKey().isBlank()
+                            && item.getDimensionName() != null
+                            && !item.getDimensionName().isBlank()
+                            && item.getScore() != null)
+                    .peek(item -> {
+                        BigDecimal score = item.getScore();
+                        if (score.compareTo(BigDecimal.ZERO) < 0 || score.compareTo(BigDecimal.valueOf(100)) > 0) {
+                            item.setScore(score.max(BigDecimal.ZERO).min(BigDecimal.valueOf(100)));
+                        }
+                    })
+                    .toList());
+        }
 
         if (output.getSummary() == null || output.getSummary().isBlank()) {
             log.warn("[契约] Report.summary 为空，已填入占位符兜底");
@@ -273,6 +289,10 @@ public class AiOutputContractValidator {
     }
 
     private PlannerOutput buildFallbackPlannerOutput() {
+        log.info("========== 兜底题提示 ==========");
+        log.info("【考纲生成失败】AI 返回数据异常，已启用兜底考纲");
+        log.info("请检查：1. AI 模型是否正常 2. Prompt 配置是否正确");
+        log.info("=================================");
         PlannerOutput fallback = new PlannerOutput();
         fallback.setTitle("（考纲生成失败）");
         fallback.setDomains(new ArrayList<>());
@@ -282,6 +302,10 @@ public class AiOutputContractValidator {
     }
 
     private EvaluationDecisionOutput buildFallbackEvaluationDecisionOutput() {
+        log.info("========== 兜底题提示 ==========");
+        log.info("【评估决策失败】AI 返回数据异常，已强制结束面试");
+        log.info("请检查：1. AI 模型是否正常 2. 评估决策 Prompt 配置");
+        log.info("=================================");
         return EvaluationDecisionOutput.builder()
                 .passCurrentLevel(false)
                 .deepen(false)
@@ -291,12 +315,17 @@ public class AiOutputContractValidator {
     }
 
     private ReportGenerationOutput buildFallbackReportOutput() {
+        log.info("========== 兜底题提示 ==========");
+        log.info("【报告生成失败】AI 返回数据异常，已生成兜底报告");
+        log.info("请检查：1. AI 模型是否正常 2. 报告生成 Prompt 配置");
+        log.info("=================================");
         return ReportGenerationOutput.builder()
                 .overallScore(BigDecimal.ZERO)
                 .summary("（报告生成失败，请联系管理员）")
                 .strengths(new ArrayList<>())
                 .weaknesses(new ArrayList<>())
                 .improvementSuggestions(new ArrayList<>())
+                .comprehensiveRadarScores(null)
                 .skillDomainScores(new ArrayList<>())
                 .build();
     }

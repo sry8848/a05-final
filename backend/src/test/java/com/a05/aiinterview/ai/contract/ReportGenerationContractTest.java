@@ -43,6 +43,18 @@ class ReportGenerationContractTest {
                   "strengths": ["基础知识掌握扎实", "表达逻辑清晰"],
                   "weaknesses": ["高并发实践不足"],
                   "improvementSuggestions": ["深入学习 JUC 源码"],
+                  "comprehensiveRadarScores": [
+                    {
+                      "dimensionKey": "fundamentals",
+                      "dimensionName": "基础原理掌握",
+                      "score": 81.0
+                    },
+                    {
+                      "dimensionKey": "engineering_practice",
+                      "dimensionName": "工程实践与项目落地",
+                      "score": 76.0
+                    }
+                  ],
                   "skillDomainScores": [
                     {
                       "domainCode": "jvm",
@@ -68,6 +80,8 @@ class ReportGenerationContractTest {
         assertThat(output.getOverallScore()).isEqualByComparingTo(new BigDecimal("78.5"));
         assertThat(output.getSummary()).contains("候选人");
         assertThat(output.getStrengths()).hasSize(2);
+        assertThat(output.getComprehensiveRadarScores()).hasSize(2);
+        assertThat(output.getComprehensiveRadarScores().get(0).getDimensionKey()).isEqualTo("fundamentals");
         assertThat(output.getSkillDomainScores()).hasSize(2);
         assertThat(output.getSkillDomainScores().get(0).getDomainCode()).isEqualTo("jvm");
         assertThat(output.getSkillDomainScores().get(0).getScore())
@@ -169,6 +183,22 @@ class ReportGenerationContractTest {
         ReportGenerationOutput output = validator.parseAndValidateReport(json);
 
         assertThat(output.getSkillDomainScores()).isNotNull().isEmpty();
+    }
+
+    @Test
+    @DisplayName("practice 模式允许 comprehensiveRadarScores 为 null")
+    void missingComprehensiveRadarScores_shouldRemainNull() {
+        String json = """
+                {
+                  "overallScore": 75.0,
+                  "summary": "练习模式报告",
+                  "skillDomainScores": []
+                }
+                """;
+
+        ReportGenerationOutput output = validator.parseAndValidateReport(json);
+
+        assertThat(output.getComprehensiveRadarScores()).isNull();
     }
 
     @Test

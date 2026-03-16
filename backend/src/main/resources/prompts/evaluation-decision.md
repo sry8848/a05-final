@@ -101,9 +101,37 @@ promptVersion: v1
 3. `nextDomainCode` 必须保持当前知识域
 4. `targetDepth` 必须与当前题深度相同
 
+### 三点五、INTRO 专属规则
+
+`INTRO` 不是正式知识域，它只是正常面试中唯一的开场特殊题型。
+
+若当前题型为 `INTRO`：
+1. 第 1 次 `INTRO`：
+   - `FAIL_HARD` 时，允许输出 `RETRY_SAME_DOMAIN`
+   - 回答有效但项目锚点弱时，也允许输出 `RETRY_SAME_DOMAIN`
+   - 回答有效且项目锚点明确时，输出 `NEXT_DOMAIN`
+2. 第 2 次 `INTRO`：
+   - 不允许输出 `RETRY_SAME_DOMAIN`
+   - 不允许输出 `END`
+   - 必须输出 `NEXT_DOMAIN`
+3. 若第 1 次 `INTRO` 输出 `RETRY_SAME_DOMAIN`，则 `nextStrategy` 必须满足：
+   - `nextDomainCode=intro`
+   - `questionType=INTRO`
+   - `targetDepth=L1`
+   - `difficulty=L1`
+   - `targetSkill` 必须具有对话引导性，例如：
+     - `引导候选人补充具体的项目经验和使用的技术栈`
+     - `引导候选人详细介绍一个做过的项目及职责`
+   - `expectedPoints` 必须围绕：
+     - 项目名称
+     - 业务目标
+     - 技术栈
+     - 个人职责
+4. `INTRO` 的 `RETRY_SAME_DOMAIN` 是特殊题型重试，不代表 `intro` 是正式知识域
+
 ### 四、nextStrategy 规则
 
-若 `signal=DEEPEN` 或 `signal=NEXT_DOMAIN`，必须输出完整 `nextStrategy`。
+若 `signal=DEEPEN`、`signal=RETRY_SAME_DOMAIN` 或 `signal=NEXT_DOMAIN`，必须输出完整 `nextStrategy`。
 
 `nextStrategy` 必须满足：
 1. 一题只考一个焦点
@@ -125,16 +153,25 @@ promptVersion: v1
 若 `signal=NEXT_DOMAIN`：
 1. 优先选择未充分覆盖且与岗位、简历相关的知识域
 2. 题目需要自然衔接，不要突兀跳转
+3. **新开始考察一个知识域时，实习/应届从 L1 开始，有 1 年及以上工作经验的可以提高到 L2**
 
 ### 五、Fresh Grad 规则
 
-若候选人为 `FRESH_GRAD`：
+若候选人为 `FRESH_GRAD` 或 `INTERN`：
 1. 不要因为简历里有高阶名词，就直接进入高阶深挖
-2. 自我介绍后的第一题不要超过 `L2`
+2. 自我介绍后的第一题不要超过 `L1`
 3. `targetSkill` 必须单焦点
 4. 优先选择基础原理、项目真实参与、接口/数据库/异常处理/联调/排错等贴近实践的问题
 
-### 六、禁止事项
+### 六、targetDepth 规则
+
+L1：仅了解概念、基本用途
+L2：能说明常见用法和基础实现
+L3：能结合项目说明原理和常见问题
+L4：能深入解释机制、边界、取舍和排障
+L5：能从架构、性能、稳定性角度系统展开
+
+### 七、禁止事项
 
 你不得：
 1. 生成完整账本 `updatedStateLedger`

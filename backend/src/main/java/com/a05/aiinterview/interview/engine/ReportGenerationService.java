@@ -12,7 +12,6 @@ import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -115,10 +114,11 @@ public class ReportGenerationService {
             interviewReportMapper.insert(report);
 
             // 更新会话状态为 completed
-            interviewSessionMapper.update(null, new LambdaUpdateWrapper<InterviewSession>()
-                    .eq(InterviewSession::getId, sessionId)
-                    .set(InterviewSession::getStatus, "completed")
-                    .set(InterviewSession::getUpdatedAt, LocalDateTime.now()));
+            InterviewSession update = new InterviewSession();
+            update.setId(sessionId);
+            update.setStatus("completed");
+            update.setUpdatedAt(LocalDateTime.now());
+            interviewSessionMapper.updateById(update);
 
             log.info("报告生成完成, sessionId={}, overallScore={}, status=completed",
                     sessionId, report.getOverallScore());
@@ -126,10 +126,11 @@ public class ReportGenerationService {
         } catch (Exception e) {
             log.error("报告生成异常, sessionId={}", sessionId, e);
             // 调用失败时保持状态为 report_generating，或改为 aborted 并通知用户重试
-            interviewSessionMapper.update(null, new LambdaUpdateWrapper<InterviewSession>()
-                    .eq(InterviewSession::getId, sessionId)
-                    .set(InterviewSession::getStatus, "report_generating")
-                    .set(InterviewSession::getUpdatedAt, LocalDateTime.now()));
+            InterviewSession update = new InterviewSession();
+            update.setId(sessionId);
+            update.setStatus("report_generating");
+            update.setUpdatedAt(LocalDateTime.now());
+            interviewSessionMapper.updateById(update);
         }
     }
 
@@ -214,6 +215,20 @@ public class ReportGenerationService {
                     })
                     .collect(Collectors.toList());
         }
+        Map<String, Object> radarScoreMap = null;
+        if (output.getComprehensiveRadarScores() != null) {
+            List<Map<String, Object>> dimensions = output.getComprehensiveRadarScores().stream()
+                    .map(item -> {
+                        Map<String, Object> dimension = new LinkedHashMap<>();
+                        dimension.put("dimensionKey", item.getDimensionKey());
+                        dimension.put("dimensionName", item.getDimensionName());
+                        dimension.put("score", item.getScore());
+                        return dimension;
+                    })
+                    .collect(Collectors.toList());
+            radarScoreMap = new LinkedHashMap<>();
+            radarScoreMap.put("dimensions", dimensions);
+        }
 
         InterviewReport report = new InterviewReport();
         report.setSessionId(sessionId);
@@ -223,6 +238,7 @@ public class ReportGenerationService {
         report.setWeaknesses(output.getWeaknesses());
         report.setImprovementSuggestions(output.getImprovementSuggestions());
         report.setSkillDomainScores(domainScoreMaps);
+        report.setComprehensiveRadarScores(radarScoreMap);
         report.setCreatedAt(LocalDateTime.now());
         report.setUpdatedAt(LocalDateTime.now());
         return report;
@@ -239,11 +255,11 @@ public class ReportGenerationService {
 
     /** 确保会话状态为 completed（若已存在报告则补充更新状态）。 */
     private void ensureCompleted(Long sessionId) {
-        interviewSessionMapper.update(null, new LambdaUpdateWrapper<InterviewSession>()
-                .eq(InterviewSession::getId, sessionId)
-                .ne(InterviewSession::getStatus, "completed")
-                .set(InterviewSession::getStatus, "completed")
-                .set(InterviewSession::getUpdatedAt, LocalDateTime.now()));
+        InterviewSession update = new InterviewSession();
+        update.setId(sessionId);
+        update.setStatus("completed");
+        update.setUpdatedAt(LocalDateTime.now());
+        interviewSessionMapper.updateById(update);
     }
 
 }

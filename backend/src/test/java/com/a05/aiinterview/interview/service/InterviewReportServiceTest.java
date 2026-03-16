@@ -42,12 +42,20 @@ class InterviewReportServiceTest {
         InterviewSession session = new InterviewSession();
         session.setId(sessionId);
         session.setUserId(userId);
+        session.setMode("professional");
+        session.setTargetRole("JAVA_BACKEND");
         when(sessionMapper.selectById(sessionId)).thenReturn(session);
 
         InterviewReport report = new InterviewReport();
         report.setId(1L);
         report.setSessionId(sessionId);
         report.setOverallScore(BigDecimal.valueOf(78.5));
+        report.setComprehensiveRadarScores(Map.of(
+                "dimensions", List.of(
+                        Map.of("dimensionKey", "fundamentals", "dimensionName", "基础原理掌握", "score", 82),
+                        Map.of("dimensionKey", "communication", "dimensionName", "沟通表达与结构化呈现", "score", 75)
+                )
+        ));
         when(reportMapper.selectBySessionId(sessionId)).thenReturn(report);
 
         InterviewQuestion q1 = buildQuestion(11L, sessionId, 1, "Q1");
@@ -75,6 +83,11 @@ class InterviewReportServiceTest {
         InterviewReportDto dto = service.getReport(sessionId, userId);
 
         assertNotNull(dto);
+        assertEquals("professional", dto.getMode());
+        assertEquals("JAVA_BACKEND", dto.getTargetRole());
+        assertNotNull(dto.getComprehensiveRadarScores());
+        assertEquals(2, dto.getComprehensiveRadarScores().size());
+        assertEquals("fundamentals", dto.getComprehensiveRadarScores().get(0).getDimensionKey());
         assertEquals(3, dto.getQuestions().size());
 
         InterviewReportDto.QuestionSummaryDto s1 = dto.getQuestions().get(0);

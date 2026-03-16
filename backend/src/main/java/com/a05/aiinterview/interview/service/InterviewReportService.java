@@ -108,6 +108,8 @@ public class InterviewReportService {
 
         log.info("报告已就绪, sessionId={}, overallScore={}", sessionId, report.getOverallScore());
         InterviewReportDto dto = InterviewReportDto.fromEntity(report);
+        dto.setMode(session.getMode());
+        dto.setTargetRole(session.getTargetRole());
         dto.setQuestions(buildQuestionSummaries(sessionId));
         return dto;
     }

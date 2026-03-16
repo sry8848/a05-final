@@ -2,10 +2,13 @@ package com.a05.aiinterview.profile.service;
 
 import com.a05.aiinterview.auth.entity.User;
 import com.a05.aiinterview.auth.mapper.UserMapper;
+import com.a05.aiinterview.common.dto.RadarDimensionScoreDto;
 import com.a05.aiinterview.interview.entity.InterviewReport;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.position.entity.PositionSkillDomain;
+import com.a05.aiinterview.position.service.PositionService;
 import com.a05.aiinterview.profile.config.ProfileAvatarStorageConfig;
 import com.a05.aiinterview.profile.dto.ProfileDto;
 import com.a05.aiinterview.profile.dto.ProfileStatisticsDto;
@@ -47,10 +50,19 @@ import java.util.UUID;
 public class ProfileService {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final BigDecimal BASELINE_SCORE = BigDecimal.valueOf(50);
+    private static final List<String> NO_EVIDENCE_MARKERS = List.of(
+            "未被提问", "无作答证据", "未作答", "未回答", "未考察", "未覆盖该知识域");
+    private static final List<String> SECONDARY_NO_EVIDENCE_MARKERS = List.of(
+            "无法评估", "不可评估", "深度不可评估");
+    private static final List<String> NEGATIVE_MARKERS = List.of(
+            "缺", "不足", "问题", "偏", "不清", "不够", "未", "遗漏", "薄弱", "混乱", "跳跃",
+            "模糊", "欠缺", "忽略", "没有", "不稳", "风险", "欠佳");
 
     private final UserMapper userMapper;
     private final InterviewSessionMapper interviewSessionMapper;
     private final InterviewReportMapper interviewReportMapper;
+    private final PositionService positionService;
     private final ProfileAvatarStorageConfig avatarStorageConfig;
 
     public ProfileDto getProfile(Long userId) {
@@ -145,77 +157,25 @@ public class ProfileService {
         List<InterviewReport> reports = loadReportsBySessions(sessions);
         dto.setAverageScore(avgScore(reports));
         dto.setScoreTrend(buildScoreTrend(sessions, reports));
+        RadarAggregate radarAggregate = buildProfessionalRadarAggregate(sessions, reports);
+        dto.setProfessionalRadarScores(radarAggregate.scores());
+        dto.setProfessionalSampleCount(radarAggregate.sampleCount());
         return dto;
     }
 
     public SkillOverviewDto getSkillOverview(Long userId, String positionCode) {
         List<InterviewSession> sessions = loadSessions(userId, positionCode);
         List<InterviewReport> reports = loadReportsBySessions(sessions);
-
-        Map<Long, InterviewSession> sessionMap = new HashMap<>();
-        for (InterviewSession session : sessions) {
-            sessionMap.put(session.getId(), session);
-        }
-
-        class Aggregate {
-            BigDecimal sum = BigDecimal.ZERO;
-            long count = 0;
-            LocalDateTime lastTestedAt;
-            String domainName;
-        }
-
-        Map<String, Aggregate> aggMap = new LinkedHashMap<>();
-
-        for (InterviewReport report : reports) {
-            if (report.getSkillDomainScores() == null) {
-                continue;
-            }
-            InterviewSession session = sessionMap.get(report.getSessionId());
-            LocalDateTime testedAt = session != null ? session.getCreatedAt() : report.getCreatedAt();
-
-            for (Map<String, Object> item : report.getSkillDomainScores()) {
-                String domainCode = toStr(item.get("domainCode"));
-                if (!StringUtils.hasText(domainCode)) {
-                    continue;
-                }
-                BigDecimal score = toDecimal(item.get("score"));
-                if (score == null) {
-                    continue;
-                }
-
-                Aggregate aggregate = aggMap.computeIfAbsent(domainCode, k -> new Aggregate());
-                aggregate.sum = aggregate.sum.add(score);
-                aggregate.count += 1;
-                if (StringUtils.hasText(toStr(item.get("domainName")))) {
-                    aggregate.domainName = toStr(item.get("domainName"));
-                }
-                if (testedAt != null && (aggregate.lastTestedAt == null || testedAt.isAfter(aggregate.lastTestedAt))) {
-                    aggregate.lastTestedAt = testedAt;
-                }
-            }
-        }
-
-        List<SkillDomainItemDto> domains = aggMap.entrySet().stream()
-                .map(e -> {
-                    SkillDomainItemDto item = new SkillDomainItemDto();
-                    item.setDomainCode(e.getKey());
-                    item.setDomainName(StringUtils.hasText(e.getValue().domainName) ? e.getValue().domainName : e.getKey());
-                    if (e.getValue().count > 0) {
-                        item.setAverageScore(e.getValue().sum.divide(BigDecimal.valueOf(e.getValue().count), 1, RoundingMode.HALF_UP));
-                    } else {
-                        item.setAverageScore(null);
-                    }
-                    item.setSampleCount(e.getValue().count);
-                    item.setLastTestedAt(e.getValue().lastTestedAt != null ? e.getValue().lastTestedAt.toString() : null);
-                    return item;
-                })
-                .sorted(Comparator.comparing(SkillDomainItemDto::getAverageScore,
-                        Comparator.nullsLast(Comparator.reverseOrder())))
-                .toList();
+        List<ReportedSession> recentReportedSessions = collectRecentReportedSessions(sessions, reports, 8, false);
+        Map<String, PositionSkillDomain> allowedDomains = loadAllowedDomains(positionCode);
+        Map<String, DomainAggregate> aggregateMap = buildDomainAggregates(recentReportedSessions, allowedDomains);
+        List<SkillDomainItemDto> domains = buildSkillDomainItems(aggregateMap, allowedDomains);
 
         SkillOverviewDto dto = new SkillOverviewDto();
         dto.setPositionCode(normalizeTargetRole(positionCode));
         dto.setDomains(domains);
+        dto.setTopStrengths(buildTopStrengths(domains));
+        dto.setTopWeaknesses(buildTopWeaknesses(domains));
         return dto;
     }
 
@@ -287,6 +247,358 @@ public class ProfileService {
         return trend;
     }
 
+    private RadarAggregate buildProfessionalRadarAggregate(
+            List<InterviewSession> sessions, List<InterviewReport> reports) {
+        List<ReportedSession> professionalSessions = collectRecentReportedSessions(sessions, reports, 8, true);
+        if (professionalSessions.isEmpty()) {
+            return new RadarAggregate(List.of(), 0);
+        }
+
+        class Aggregate {
+            BigDecimal sum = BigDecimal.ZERO;
+            long count = 0;
+            String name;
+        }
+
+        Map<String, Aggregate> aggregates = new LinkedHashMap<>();
+        for (ReportedSession reported : professionalSessions) {
+            List<RadarDimensionScoreDto> dimensions = extractRadarDimensions(reported.report());
+            if (dimensions.isEmpty()) {
+                continue;
+            }
+            for (RadarDimensionScoreDto dimension : dimensions) {
+                if (dimension.getScore() == null || !StringUtils.hasText(dimension.getDimensionKey())) {
+                    continue;
+                }
+                Aggregate aggregate = aggregates.computeIfAbsent(dimension.getDimensionKey(), key -> new Aggregate());
+                aggregate.sum = aggregate.sum.add(dimension.getScore());
+                aggregate.count += 1;
+                aggregate.name = dimension.getDimensionName();
+            }
+        }
+
+        List<RadarDimensionScoreDto> scores = aggregates.entrySet().stream()
+                .map(entry -> RadarDimensionScoreDto.builder()
+                        .dimensionKey(entry.getKey())
+                        .dimensionName(entry.getValue().name)
+                        .score(entry.getValue().sum.divide(
+                                BigDecimal.valueOf(entry.getValue().count), 1, RoundingMode.HALF_UP))
+                        .build())
+                .toList();
+        return new RadarAggregate(scores, professionalSessions.size());
+    }
+
+    private List<ReportedSession> collectRecentReportedSessions(
+            List<InterviewSession> sessions,
+            List<InterviewReport> reports,
+            int limit,
+            boolean professionalOnly) {
+        if (sessions.isEmpty() || reports.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, InterviewReport> reportMap = new HashMap<>();
+        for (InterviewReport report : reports) {
+            reportMap.put(report.getSessionId(), report);
+        }
+
+        return sessions.stream()
+                .sorted(Comparator.comparing(InterviewSession::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+                .map(session -> {
+                    InterviewReport report = reportMap.get(session.getId());
+                    if (report == null) {
+                        return null;
+                    }
+                    if (professionalOnly && !"professional".equalsIgnoreCase(session.getMode())) {
+                        return null;
+                    }
+                    return new ReportedSession(session, report);
+                })
+                .filter(java.util.Objects::nonNull)
+                .limit(limit)
+                .sorted(Comparator.comparing(reported ->
+                        reported.session().getCreatedAt(), Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+    }
+
+    private Map<String, PositionSkillDomain> loadAllowedDomains(String positionCode) {
+        String role = normalizeTargetRole(positionCode);
+        if (!StringUtils.hasText(role)) {
+            return Map.of();
+        }
+        List<PositionSkillDomain> entities = positionService.listSkillDomainEntities(role);
+        if (entities == null || entities.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, PositionSkillDomain> map = new LinkedHashMap<>();
+        for (PositionSkillDomain entity : entities) {
+            if (entity == null || !StringUtils.hasText(entity.getDomainCode())) {
+                continue;
+            }
+            map.put(entity.getDomainCode(), entity);
+        }
+        return map;
+    }
+
+    private Map<String, DomainAggregate> buildDomainAggregates(
+            List<ReportedSession> recentReportedSessions,
+            Map<String, PositionSkillDomain> allowedDomains) {
+        Map<String, DomainAggregate> aggregates = new LinkedHashMap<>();
+        for (PositionSkillDomain allowedDomain : allowedDomains.values()) {
+            DomainAggregate aggregate = new DomainAggregate();
+            aggregate.domainCode = allowedDomain.getDomainCode();
+            aggregate.domainName = allowedDomain.getDomainName();
+            aggregates.put(allowedDomain.getDomainCode(), aggregate);
+        }
+
+        for (ReportedSession reported : recentReportedSessions) {
+            InterviewSession session = reported.session();
+            InterviewReport report = reported.report();
+            if (report.getSkillDomainScores() == null) {
+                continue;
+            }
+
+            for (Map<String, Object> item : report.getSkillDomainScores()) {
+                String domainCode = toStr(item.get("domainCode"));
+                if (!StringUtils.hasText(domainCode) || !allowedDomains.containsKey(domainCode)) {
+                    continue;
+                }
+                BigDecimal rawScore = toDecimal(item.get("score"));
+                if (rawScore == null) {
+                    continue;
+                }
+                String commentary = toStr(item.get("commentary"));
+                if (!hasAssessmentEvidence(rawScore, commentary)) {
+                    continue;
+                }
+                DomainAggregate aggregate = aggregates.computeIfAbsent(domainCode, key -> {
+                    DomainAggregate created = new DomainAggregate();
+                    created.domainCode = key;
+                    created.domainName = key;
+                    return created;
+                });
+                if (StringUtils.hasText(toStr(item.get("domainName")))) {
+                    aggregate.domainName = toStr(item.get("domainName"));
+                }
+
+                aggregate.sum = aggregate.sum.add(rawScore);
+                aggregate.appearanceCount += 1;
+                aggregate.lastTestedAt = session.getCreatedAt();
+                aggregate.recentScores.add(new ScoreTrendPointDto(
+                        session.getCreatedAt() != null ? session.getCreatedAt().toLocalDate().format(DATE_FMT) : "",
+                        rawScore));
+                if (aggregate.previousScore != null) {
+                    aggregate.deltaSum = aggregate.deltaSum.add(rawScore.subtract(aggregate.previousScore));
+                }
+                aggregate.previousScore = rawScore;
+
+                if (StringUtils.hasText(commentary)) {
+                    aggregate.commentaries.add(commentary.trim());
+                }
+            }
+        }
+        return aggregates;
+    }
+
+    private List<SkillDomainItemDto> buildSkillDomainItems(
+            Map<String, DomainAggregate> aggregateMap,
+            Map<String, PositionSkillDomain> allowedDomains) {
+        List<SkillDomainItemDto> items = new ArrayList<>();
+        for (Map.Entry<String, DomainAggregate> entry : aggregateMap.entrySet()) {
+            DomainAggregate aggregate = entry.getValue();
+            SkillDomainItemDto item = new SkillDomainItemDto();
+            item.setDomainCode(entry.getKey());
+            item.setDomainName(StringUtils.hasText(aggregate.domainName)
+                    ? aggregate.domainName
+                    : allowedDomains.getOrDefault(entry.getKey(), new PositionSkillDomain()).getDomainName());
+            item.setAppearanceCount(aggregate.appearanceCount);
+            item.setSampleCount(aggregate.appearanceCount);
+            item.setRecentScores(List.copyOf(aggregate.recentScores));
+            item.setLastTestedAt(aggregate.lastTestedAt != null ? aggregate.lastTestedAt.toString() : null);
+            item.setRankingEligible(aggregate.appearanceCount >= 3 && allowedDomains.containsKey(entry.getKey()));
+            if (aggregate.appearanceCount > 0) {
+                item.setAverageScore(aggregate.sum.divide(BigDecimal.valueOf(aggregate.appearanceCount), 1, RoundingMode.HALF_UP));
+                item.setScoreDelta(aggregate.deltaSum.setScale(1, RoundingMode.HALF_UP));
+                item.setScore(clampToScoreRange(BASELINE_SCORE.add(aggregate.deltaSum)));
+                List<String> weaknessPoints = buildWeaknessPoints(aggregate.commentaries);
+                item.setWeaknessPoints(weaknessPoints);
+                item.setWeaknessSummary(weaknessPoints.isEmpty() ? null : String.join(" · ", weaknessPoints));
+            } else {
+                item.setAverageScore(null);
+                item.setScoreDelta(null);
+                item.setScore(null);
+                item.setWeaknessPoints(List.of());
+                item.setWeaknessSummary(null);
+            }
+            items.add(item);
+        }
+
+        items.sort(Comparator
+                .comparing((SkillDomainItemDto item) -> distanceFromBaseline(item.getScore()), Comparator.reverseOrder())
+                .thenComparing(SkillDomainItemDto::getScore, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(SkillDomainItemDto::getDomainCode));
+        return items;
+    }
+
+    private List<SkillDomainItemDto> buildTopStrengths(List<SkillDomainItemDto> domains) {
+        return domains.stream()
+                .filter(SkillDomainItemDto::isRankingEligible)
+                .filter(item -> item.getScore() != null && item.getScore().compareTo(BASELINE_SCORE) > 0)
+                .sorted(Comparator
+                        .comparing((SkillDomainItemDto item) -> distanceFromBaseline(item.getScore()), Comparator.reverseOrder())
+                        .thenComparing(SkillDomainItemDto::getScore, Comparator.reverseOrder()))
+                .limit(3)
+                .toList();
+    }
+
+    private List<SkillDomainItemDto> buildTopWeaknesses(List<SkillDomainItemDto> domains) {
+        return domains.stream()
+                .filter(SkillDomainItemDto::isRankingEligible)
+                .filter(item -> item.getScore() != null && item.getScore().compareTo(BASELINE_SCORE) < 0)
+                .sorted(Comparator
+                        .comparing((SkillDomainItemDto item) -> distanceFromBaseline(item.getScore()), Comparator.reverseOrder())
+                        .thenComparing(SkillDomainItemDto::getScore))
+                .limit(3)
+                .toList();
+    }
+
+    private List<RadarDimensionScoreDto> extractRadarDimensions(InterviewReport report) {
+        if (report.getComprehensiveRadarScores() == null) {
+            return List.of();
+        }
+        Object dimensionsObj = report.getComprehensiveRadarScores().get("dimensions");
+        if (!(dimensionsObj instanceof List<?> dimensions)) {
+            return List.of();
+        }
+        List<RadarDimensionScoreDto> scores = new ArrayList<>();
+        for (Object item : dimensions) {
+            if (!(item instanceof Map<?, ?> map)) {
+                continue;
+            }
+            BigDecimal score = toDecimal(map.get("score"));
+            if (score == null) {
+                continue;
+            }
+            scores.add(RadarDimensionScoreDto.builder()
+                    .dimensionKey(toStr(map.get("dimensionKey")))
+                    .dimensionName(toStr(map.get("dimensionName")))
+                    .score(score)
+                    .build());
+        }
+        return scores;
+    }
+
+    private boolean hasAssessmentEvidence(BigDecimal rawScore, String commentary) {
+        if (!StringUtils.hasText(commentary)) {
+            return true;
+        }
+        if (containsAny(commentary, NO_EVIDENCE_MARKERS)) {
+            return false;
+        }
+        return !(rawScore != null
+                && rawScore.compareTo(BASELINE_SCORE) == 0
+                && containsAny(commentary, SECONDARY_NO_EVIDENCE_MARKERS));
+    }
+
+    private List<String> buildWeaknessPoints(List<String> commentaries) {
+        if (commentaries.isEmpty()) {
+            return List.of();
+        }
+        Map<String, WeaknessPointAggregate> pointMap = new LinkedHashMap<>();
+        for (int i = 0; i < commentaries.size(); i++) {
+            for (String point : extractWeaknessPoints(commentaries.get(i))) {
+                WeaknessPointAggregate aggregate = pointMap.computeIfAbsent(
+                        point, key -> new WeaknessPointAggregate(point));
+                aggregate.count += 1;
+                aggregate.latestIndex = i;
+            }
+        }
+        return pointMap.values().stream()
+                .sorted(Comparator
+                        .comparingInt((WeaknessPointAggregate item) -> item.count).reversed()
+                        .thenComparing(Comparator.comparingInt((WeaknessPointAggregate item) -> item.latestIndex).reversed())
+                        .thenComparing(item -> item.text))
+                .limit(3)
+                .map(item -> item.text)
+                .toList();
+    }
+
+    private List<String> extractWeaknessPoints(String commentary) {
+        if (!StringUtils.hasText(commentary)) {
+            return List.of();
+        }
+        String normalized = commentary.replace('\n', ' ')
+                .replace('；', '，')
+                .replace('。', '，')
+                .replace('、', '，')
+                .replace(';', ',');
+        String[] rawClauses = normalized.split("[，,]");
+        List<String> points = new ArrayList<>();
+        for (String rawClause : rawClauses) {
+            String point = normalizeWeaknessPoint(rawClause);
+            if (!StringUtils.hasText(point) || points.contains(point)) {
+                continue;
+            }
+            points.add(point);
+            if (points.size() >= 3) {
+                break;
+            }
+        }
+        return points;
+    }
+
+    private String normalizeWeaknessPoint(String rawClause) {
+        if (!StringUtils.hasText(rawClause)) {
+            return null;
+        }
+        String point = rawClause.trim();
+        point = point.replaceAll("^但", "");
+        point = point.replaceAll("^仍需", "");
+        point = point.replaceAll("^还需", "");
+        point = point.replaceAll("^仍然", "仍");
+        point = point.replace("仍缺少", "缺少");
+        point = point.replace("仍缺", "缺");
+        point = point.replaceAll("^整体", "");
+        point = point.replaceAll("^在", "");
+        point = point.replaceAll("\\s+", "");
+        if (!StringUtils.hasText(point)) {
+            return null;
+        }
+        if (containsAny(point, NO_EVIDENCE_MARKERS) || containsAny(point, SECONDARY_NO_EVIDENCE_MARKERS)) {
+            return null;
+        }
+        if (!containsAny(point, NEGATIVE_MARKERS)) {
+            return null;
+        }
+        if (point.length() > 24) {
+            point = point.substring(0, 24);
+        }
+        return point;
+    }
+
+    private boolean containsAny(String text, List<String> markers) {
+        for (String marker : markers) {
+            if (text.contains(marker)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private BigDecimal clampToScoreRange(BigDecimal score) {
+        if (score == null) {
+            return null;
+        }
+        return score.max(BigDecimal.ZERO).min(BigDecimal.valueOf(100)).setScale(1, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal distanceFromBaseline(BigDecimal score) {
+        if (score == null) {
+            return BigDecimal.ZERO;
+        }
+        return score.subtract(BASELINE_SCORE).abs();
+    }
+
     private User requireUser(Long userId) {
         User user = userMapper.selectById(userId);
         if (user == null) {
@@ -352,5 +664,33 @@ public class ProfileService {
             case "GO" -> "GO_BACKEND";
             default -> raw;
         };
+    }
+
+    private record RadarAggregate(List<RadarDimensionScoreDto> scores, long sampleCount) {
+    }
+
+    private record ReportedSession(InterviewSession session, InterviewReport report) {
+    }
+
+    private static class DomainAggregate {
+        private String domainCode;
+        private String domainName;
+        private BigDecimal sum = BigDecimal.ZERO;
+        private BigDecimal deltaSum = BigDecimal.ZERO;
+        private BigDecimal previousScore;
+        private long appearanceCount;
+        private LocalDateTime lastTestedAt;
+        private final List<String> commentaries = new ArrayList<>();
+        private final List<ScoreTrendPointDto> recentScores = new ArrayList<>();
+    }
+
+    private static class WeaknessPointAggregate {
+        private final String text;
+        private int count;
+        private int latestIndex;
+
+        private WeaknessPointAggregate(String text) {
+            this.text = text;
+        }
     }
 }

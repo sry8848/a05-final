@@ -12,6 +12,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -190,5 +191,47 @@ class AnswerSubmitPersistenceServiceTest {
                 .containsKey("ledgerDiff")
                 .containsKey("nextStrategy");
     }
-}
 
+    @Test
+    void persist_shouldStoreRawAsrTextAndCorrectionChangesInEvaluationSnapshot() {
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        StateLedgerPatchService patchService = mock(StateLedgerPatchService.class);
+        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+        AnswerSubmitPersistenceService service = new AnswerSubmitPersistenceService(
+                attemptMapper, questionMapper, sessionMapper, patchService, eventPublisher
+        );
+
+        when(attemptMapper.insert(any())).thenReturn(1);
+
+        SubmitAttemptRequest request = new SubmitAttemptRequest();
+        request.setAttemptId("attempt-5");
+        request.setAnswerText("Java后端项目");
+        request.setRawAsrText("ja法后端项目");
+        request.setAsrCorrectionChanges(List.of(Map.of(
+                "from", "ja法",
+                "to", "Java",
+                "reason", "technical_term"
+        )));
+        request.setIsFinal(true);
+
+        InterviewQuestion question = new InterviewQuestion();
+        question.setId(8L);
+        question.setQuestionType("PRINCIPLE");
+
+        EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
+                .passCurrentLevel(true)
+                .deepen(false)
+                .signal("NEXT_DOMAIN")
+                .build();
+
+        service.persist(1L, question, request, output);
+
+        ArgumentCaptor<InterviewAttempt> attemptCaptor = ArgumentCaptor.forClass(InterviewAttempt.class);
+        verify(attemptMapper).insert(attemptCaptor.capture());
+        assertThat(attemptCaptor.getValue().getEvaluationJson())
+                .containsEntry("rawAsrText", "ja法后端项目")
+                .containsKey("asrCorrectionChanges");
+    }
+}
