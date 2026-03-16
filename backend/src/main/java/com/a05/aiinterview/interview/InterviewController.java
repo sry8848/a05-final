@@ -80,6 +80,12 @@ public class InterviewController {
                 userId, page, pageSize, status, targetRole, dateFrom, dateTo, sortBy, sortOrder));
     }
 
+    /**
+     * 创建面试会话
+     * @param userId
+     * @param request
+     * @return
+     */
     @Operation(summary = "Create interview session")
     @PostMapping
     public ApiResponse<CreateInterviewResponse> createInterview(
@@ -112,6 +118,13 @@ public class InterviewController {
         return ApiResponse.ok(answerSubmitService.submitAnswer(sessionId, userId, request));
     }
 
+    /**
+     * 获取面试提示
+     * @param userId
+     * @param sessionId
+     * @param request
+     * @return
+     */
     @Operation(summary = "Get interview hint")
     @PostMapping("/{sessionId}/hint")
     public ApiResponse<InterviewHintResponse> getHint(
@@ -121,6 +134,14 @@ public class InterviewController {
         return ApiResponse.ok(interviewHintService.getHint(sessionId, request.getQuestionId(), userId));
     }
 
+    /**
+     * 跳过问题并继续到下一个问题
+     * @param userId
+     * @param sessionId
+     * @param questionId
+     * @param request
+     * @return
+     */
     @Operation(summary = "Skip question and continue to next")
     @PostMapping("/{sessionId}/questions/{questionId}/skip-and-next")
     public ApiResponse<SubmitAttemptResponse> skipAndNext(
@@ -152,6 +173,12 @@ public class InterviewController {
         return questionStreamService.streamQuestion(sessionId, userId, attemptId, lastEventId);
     }
 
+    /**
+     * 完成面试并触发报告生成
+     * @param userId
+     * @param sessionId
+     * @return
+     */
     @Operation(summary = "Finish interview and trigger report generation")
     @PostMapping("/{sessionId}/finish")
     public ApiResponse<Void> finishInterview(
@@ -184,5 +211,13 @@ public class InterviewController {
             @AuthenticationPrincipal Long userId,
             @PathVariable Long sessionId) {
         return ApiResponse.ok(learningRecommendationService.getRecommendations(sessionId, userId));
+    }
+
+    @Operation(summary = "Get state ledger for debugging")
+    @GetMapping("/{sessionId}/debug/ledger")
+    public ApiResponse<Object> getStateLedger(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId) {
+        return ApiResponse.ok(interviewService.getStateLedger(sessionId, userId));
     }
 }

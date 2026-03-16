@@ -14,12 +14,15 @@ import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -120,6 +123,50 @@ class FirstQuestionGenerationServicePromptLogTest {
         assertThat(saved.getGenerationContextJson().get("fallbackReason")).isEqualTo("too_long_output");
         assertThat(saved.getGenerationContextJson().get("rewritePromptCode")).isEqualTo("intro_rewrite");
         assertThat(saved.getGenerationContextJson().get("rewritePromptVersion")).isEqualTo("v1");
+    }
+
+    @Test
+    @DisplayName("duplicate key on first question insert should load existing question #1")
+    void generateAndSave_shouldReuseExistingFirstQuestionWhenInsertDuplicate() {
+        AiClient aiClient = mock(AiClient.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        IntroQuestionStrategyService strategyService = mock(IntroQuestionStrategyService.class);
+
+        when(strategyService.selectIntroForUser(2L)).thenReturn(IntroQuestionStrategyService.IntroQuestionSelection.builder()
+                .variantId("INTRO_V4")
+                .basePrompt("base-intro")
+                .recentPrompts(List.of())
+                .avoidPhrases(List.of())
+                .historyAvoidCount(0)
+                .build());
+        when(aiClient.callIntroRewrite(any(IntroRewriteInput.class))).thenReturn(AiCallResult.<String>builder()
+                .output("rewrite ok")
+                .promptCode("intro_rewrite")
+                .promptVersion("v1")
+                .build());
+        doThrow(new DuplicateKeyException("uk_iq_session_no")).when(questionMapper).insert(any(InterviewQuestion.class));
+
+        InterviewQuestion existing = new InterviewQuestion();
+        existing.setId(999L);
+        existing.setSessionId(1L);
+        existing.setQuestionNo(1);
+        existing.setQuestionType("INTRO");
+        existing.setStem("existing-intro");
+        existing.setTargetDepth("L1");
+        existing.setGenerationContextJson(new LinkedHashMap<>());
+        when(questionMapper.selectOne(any())).thenReturn(existing);
+
+        FirstQuestionGenerationService service = new FirstQuestionGenerationService(
+                aiClient,
+                new PromptProperties(),
+                strategyService,
+                questionMapper
+        );
+
+        InterviewQuestion saved = service.generateAndSave(buildSession(), new PlannerOutput());
+        assertThat(saved.getId()).isEqualTo(999L);
+        assertThat(saved.getStem()).isEqualTo("existing-intro");
+        assertThat(saved.getQuestionNo()).isEqualTo(1);
     }
 
     private InterviewSession buildSession() {

@@ -23,7 +23,6 @@ import java.util.Map;
 
 /**
  * 回答提交持久化事务服务。
- * 负责 attempt 落库、账本 patch、题目/会话状态更新和 final attempt 事件发布。
  */
 @Slf4j
 @Service
@@ -44,12 +43,16 @@ public class AnswerSubmitPersistenceService {
             InterviewQuestion currentQuestion,
             SubmitAttemptRequest request,
             EvaluationDecisionOutput evalOutput) {
-        InterviewAttempt attempt = saveAttempt(sessionId, currentQuestion.getId(), request, evalOutput);
+        StateLedgerPatchService.ReductionAudit reductionAudit = stateLedgerPatchService.applyReduction(
+                sessionId,
+                evalOutput,
+                currentQuestion,
+                request.getAttemptId(),
+                currentQuestion.getId(),
+                request.getAnswerText()
+        );
 
-        if (evalOutput.getPatch() != null) {
-            evalOutput.getPatch().setEvidenceQuestionId(currentQuestion.getId());
-        }
-        stateLedgerPatchService.applyPatch(sessionId, evalOutput.getPatch(), request.getAttemptId(), attempt.getId());
+        InterviewAttempt attempt = saveAttempt(sessionId, currentQuestion.getId(), request, evalOutput, reductionAudit);
         markQuestionStatus(currentQuestion.getId(), request.getAnswerText());
 
         boolean shouldEnd = "END".equals(evalOutput.getSignal());
@@ -79,12 +82,26 @@ public class AnswerSubmitPersistenceService {
     private InterviewAttempt saveAttempt(Long sessionId,
                                          Long questionId,
                                          SubmitAttemptRequest request,
-                                         EvaluationDecisionOutput evalOutput) {
+                                         EvaluationDecisionOutput evalOutput,
+                                         StateLedgerPatchService.ReductionAudit reductionAudit) {
         Map<String, Object> evalSnapshot = new LinkedHashMap<>();
         evalSnapshot.put("signal", evalOutput.getSignal());
-        evalSnapshot.put("depthReached", evalOutput.getDepthReached());
-        evalSnapshot.put("saturated", evalOutput.isSaturated());
-        evalSnapshot.put("reasoning", evalOutput.getReasoning());
+        evalSnapshot.put("passCurrentLevel", evalOutput.isPassCurrentLevel());
+        evalSnapshot.put("deepen", evalOutput.isDeepen());
+        if (evalOutput.getReasoning() != null && !evalOutput.getReasoning().isBlank()) {
+            evalSnapshot.put("reasoning", evalOutput.getReasoning());
+        }
+        if (evalOutput.getSummary() != null && !evalOutput.getSummary().isBlank()) {
+            evalSnapshot.put("summary", evalOutput.getSummary());
+        }
+        if (reductionAudit != null) {
+            evalSnapshot.put("ledgerDiff", reductionAudit.getDiff());
+            evalSnapshot.put("reducedLedger", reductionAudit.getNewLedger());
+            if (reductionAudit.getDomainClosureReason() != null
+                    && !reductionAudit.getDomainClosureReason().isBlank()) {
+                evalSnapshot.put("domainClosureReason", reductionAudit.getDomainClosureReason());
+            }
+        }
         if (evalOutput.getNextStrategy() != null) {
             EvaluationDecisionOutput.NextQuestionStrategy strat = evalOutput.getNextStrategy();
             Map<String, Object> nextStrategySnapshot = new LinkedHashMap<>();
@@ -107,7 +124,6 @@ public class AnswerSubmitPersistenceService {
         attempt.setAnswerText(request.getAnswerText());
         attempt.setIsFinal(Boolean.TRUE.equals(request.getIsFinal()));
         attempt.setEvaluationJson(evalSnapshot);
-        // non-final attempt 也固定写 pending，不触发详细评估。
         attempt.setDetailEvaluationStatus(DETAIL_STATUS_PENDING);
         attempt.setCreatedAt(LocalDateTime.now());
         interviewAttemptMapper.insert(attempt);
@@ -117,11 +133,7 @@ public class AnswerSubmitPersistenceService {
     private void markQuestionStatus(Long questionId, String answerText) {
         InterviewQuestion update = new InterviewQuestion();
         update.setId(questionId);
-        if ("[skip]".equals(answerText)) {
-            update.setStatus("skipped");
-        } else {
-            update.setStatus("answered");
-        }
+        update.setStatus("[skip]".equals(answerText) ? "skipped" : "answered");
         update.setUpdatedAt(LocalDateTime.now());
         interviewQuestionMapper.updateById(update);
     }

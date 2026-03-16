@@ -11,8 +11,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -122,7 +124,22 @@ public class FirstQuestionGenerationService {
                 rewritePromptCode,
                 rewritePromptVersion
         );
-        interviewQuestionMapper.insert(question);
+        try {
+            interviewQuestionMapper.insert(question);
+        } catch (DuplicateKeyException ex) {
+            // 并发重入同一 session 初始化时，question_no=1 可能已被其他线程插入，回读已存在首题复用。
+            InterviewQuestion existing = interviewQuestionMapper.selectOne(
+                    new LambdaQueryWrapper<InterviewQuestion>()
+                            .eq(InterviewQuestion::getSessionId, session.getId())
+                            .eq(InterviewQuestion::getQuestionNo, 1)
+                            .last("LIMIT 1")
+            );
+            if (existing == null) {
+                throw ex;
+            }
+            question = existing;
+            log.warn("首题已存在，复用已有记录, sessionId={}, questionId={}", session.getId(), existing.getId());
+        }
 
         log.info("首题生成并保存成功, sessionId={}, questionId={}, rewritten={}",
                 session.getId(), question.getId(), rewritten);

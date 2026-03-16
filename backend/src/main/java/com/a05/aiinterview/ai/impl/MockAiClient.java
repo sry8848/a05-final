@@ -3,7 +3,6 @@ package com.a05.aiinterview.ai.impl;
 import com.a05.aiinterview.ai.AiClient;
 import com.a05.aiinterview.ai.config.PromptProperties;
 import com.a05.aiinterview.ai.dto.*;
-import com.a05.aiinterview.common.enums.DomainStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -13,17 +12,13 @@ import reactor.core.publisher.Flux;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 /**
  * AI 客户端 Mock 实现。
- * 当配置 {@code ai.openai.mock-enabled=true}（默认）时激活，返回硬编码的固定结果。
- * 用途：在没有 API Key 的情况下联调前端，验证接口协议和数据流转。
- *
- * <p>所有方法返回 {@link AiCallResult}，Token 计数均填 0，latencyMs 为实际耗时（无网络）。
- * 切换到真实 AI：将环境变量 {@code AI_MOCK_ENABLED=false} 即可注入 {@link OpenAiClient}。
  */
 @Slf4j
 @Component
@@ -32,8 +27,6 @@ import java.util.Objects;
 public class MockAiClient implements AiClient {
 
     private final PromptProperties promptProperties;
-
-    // ───────────────────────────── Planner ──────────────────────────────────
 
     @Override
     public AiCallResult<PlannerOutput> callPlanner(PlannerInput input) {
@@ -47,8 +40,6 @@ public class MockAiClient implements AiClient {
                 "INTRO", 1, "PROJECT_DEEP_DIVE", 2, "SCENARIO", 2,
                 "PRINCIPLE", 3, "BEHAVIORAL", 1));
         output.setFocusAreas(List.of("系统设计", "并发编程"));
-
-        // 根据传入的 domains 生成对应的考察计划（最多取前 5 个）
         if (input.getDomains() != null && !input.getDomains().isEmpty()) {
             output.setDomains(input.getDomains().stream()
                     .limit(5)
@@ -67,14 +58,9 @@ public class MockAiClient implements AiClient {
             output.setDomains(List.of());
         }
         output.setProjects(List.of());
-
-        log.info("[MockAI] callPlanner 完成，共规划 {} 个知识域", output.getDomains().size());
         return mockResult(output, startMs, "planner");
     }
 
-    /**
-     * 流式出题：将 Mock 题目文本按字符逐个发出，模拟打字机效果（间隔 30ms）。
-     */
     @Override
     public Flux<String> callQuestionGenerationStream(QuestionGenerationInput input) {
         log.info("[MockAI] callQuestionGenerationStream, domainCode={}", input.getNextDomainCode());
@@ -88,12 +74,9 @@ public class MockAiClient implements AiClient {
         log.info("[MockAI] callIntroRewrite, positionCode={}, experienceLevel={}",
                 input.getPositionCode(), input.getExperienceLevel());
         long startMs = System.currentTimeMillis();
-
         String rewritten = buildMockIntroRewrite(input);
         return mockResult(rewritten, startMs, "intro_rewrite");
     }
-
-    // ────────────────────────── EvaluationDecision ──────────────────────────
 
     @Override
     public AiCallResult<EvaluationDecisionOutput> callEvaluationDecision(EvaluationDecisionInput input) {
@@ -101,38 +84,25 @@ public class MockAiClient implements AiClient {
                 input.getCurrentDomainCode(), input.getCurrentQuestionType(), input.getCurrentTargetDepth());
         long startMs = System.currentTimeMillis();
 
-        String depthReached = input.getCurrentTargetDepth() != null ? input.getCurrentTargetDepth() : "L3";
-
-        EvaluationDecisionOutput.NextQuestionStrategy nextStrategy =
-                resolveNextStrategyFromLedger(input);
-        String signal = nextStrategy != null ? "NEXT_DOMAIN" : "END";
-
-        EvaluationDecisionOutput.LedgerPatch patch = EvaluationDecisionOutput.LedgerPatch.builder()
-                .domainCode(input.getCurrentDomainCode())
-                .domainId(input.getCurrentDomainId())
-                .currentDepth(depthReached)
-                .domainStatus(DomainStatus.COVERED)
-                .saturated(true)
-                .questionType(input.getCurrentQuestionType())
-                .build();
-
-        log.info("[MockAI] callEvaluationDecision 完成, signal={}, nextDomain={}",
-                signal, nextStrategy != null ? nextStrategy.getNextDomainCode() : "N/A");
+        AnswerAssessment assessment = assessAnswer(input.getAnswerText());
+        boolean passCurrentLevel = assessment == AnswerAssessment.PASS;
+        boolean deepen = passCurrentLevel && shouldDeepen(input);
+        String signal = resolveSignal(input, assessment, deepen);
+        EvaluationDecisionOutput.NextQuestionStrategy nextStrategy = "END".equals(signal)
+                ? null
+                : buildNextStrategy(input, signal, deepen);
 
         EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
-                .domainCode(input.getCurrentDomainCode())
-                .depthReached(depthReached)
-                .saturated(true)
+                .passCurrentLevel(passCurrentLevel)
+                .deepen(deepen)
                 .signal(signal)
-                .patch(patch)
                 .nextStrategy(nextStrategy)
-                .reasoning("[Mock] 候选人回答达标，进入下一知识域。")
+                .reasoning(deepen
+                        ? "[Mock] 当前层通过，继续同域加深。"
+                        : "[Mock] 当前层判断已完成，给出下一步策略。")
                 .build();
-
         return mockResult(output, startMs, "evaluation_decision");
     }
-
-    // ─────────────────────────── ReportGeneration ───────────────────────────
 
     @Override
     public AiCallResult<ReportGenerationOutput> callReportGeneration(ReportGenerationInput input) {
@@ -148,9 +118,6 @@ public class MockAiClient implements AiClient {
                         .map(ReportGenerationOutput.SkillDomainScore::getScore)
                         .reduce(BigDecimal.ZERO, BigDecimal::add)
                         .divide(BigDecimal.valueOf(domainScores.size()), 1, java.math.RoundingMode.HALF_UP);
-
-        log.info("[MockAI] callReportGeneration 完成, overallScore={}, domains={}",
-                overallScore, domainScores.size());
 
         ReportGenerationOutput output = ReportGenerationOutput.builder()
                 .overallScore(overallScore)
@@ -226,11 +193,213 @@ public class MockAiClient implements AiClient {
         return mockResult(output, startMs, "question_detail_evaluation");
     }
 
-    // ──────────────────────────── 私有工具 ──────────────────────────────────
+    private EvaluationDecisionOutput.NextQuestionStrategy buildNextStrategy(EvaluationDecisionInput input,
+                                                                            String signal,
+                                                                            boolean deepen) {
+        String currentDomainCode = input.getCurrentDomainCode() != null ? input.getCurrentDomainCode() : "intro";
+        String currentDomainName = input.getCurrentDomainName() != null ? input.getCurrentDomainName() : currentDomainCode;
+        if ("RETRY_SAME_DOMAIN".equals(signal)) {
+            String currentDepth = normalizeDepth(input.getCurrentTargetDepth());
+            return EvaluationDecisionOutput.NextQuestionStrategy.builder()
+                    .nextDomainId(input.getCurrentDomainId())
+                    .nextDomainCode(currentDomainCode)
+                    .nextDomainName(currentDomainName)
+                    .questionType(input.getCurrentQuestionType() != null ? input.getCurrentQuestionType() : "PRINCIPLE")
+                    .targetDepth(currentDepth)
+                    .difficulty(currentDepth)
+                    .targetSkill(currentDomainName)
+                    .expectedPoints(List.of(
+                            "说明" + currentDomainName + "的核心概念",
+                            "结合场景说明" + currentDomainName + "的基本用法"))
+                    .focusPoint(currentDomainName)
+                    .build();
+        }
+        if (deepen) {
+            String currentDepth = normalizeDepth(input.getCurrentTargetDepth());
+            String targetDepth = nextDepth(currentDepth, resolveDomainTargetDepth(input.getSyllabusJson(), currentDomainCode, currentDepth));
+            return EvaluationDecisionOutput.NextQuestionStrategy.builder()
+                    .nextDomainId(input.getCurrentDomainId())
+                    .nextDomainCode(currentDomainCode)
+                    .nextDomainName(currentDomainName)
+                    .questionType("PRINCIPLE")
+                    .targetDepth(targetDepth)
+                    .difficulty(targetDepth)
+                    .targetSkill(currentDomainName + " 深度追问")
+                    .expectedPoints(List.of(
+                            "说明" + currentDomainName + "的关键机制",
+                            "比较" + currentDomainName + "的常见取舍",
+                            "结合场景说明" + currentDomainName + "的排查思路"))
+                    .focusPoint(currentDomainName)
+                    .build();
+        }
 
-    /**
-     * 构造 Mock 结果：promptTokens / responseTokens 填 0，latencyMs 取实际耗时。
-     */
+        String nextDomainCode = resolveNextDomainCode(input.getStateLedger(), currentDomainCode);
+        if (nextDomainCode == null) {
+            nextDomainCode = currentDomainCode;
+        }
+        return buildStrategyFromSyllabus(input.getSyllabusJson(), nextDomainCode);
+    }
+
+    private String resolveSignal(EvaluationDecisionInput input, AnswerAssessment assessment, boolean deepen) {
+        if (assessment == AnswerAssessment.PARTIAL) {
+            return "RETRY_SAME_DOMAIN";
+        }
+        if (assessment == AnswerAssessment.HARD_FAIL) {
+            String nextDomainCode = resolveNextDomainCode(input.getStateLedger(), input.getCurrentDomainCode());
+            return nextDomainCode == null ? "END" : "NEXT_DOMAIN";
+        }
+        if (deepen) {
+            return "DEEPEN";
+        }
+        String nextDomainCode = resolveNextDomainCode(input.getStateLedger(), input.getCurrentDomainCode());
+        return nextDomainCode == null ? "END" : "NEXT_DOMAIN";
+    }
+
+    private String resolveNextDomainCode(Map<String, Object> ledger, String currentDomainCode) {
+        if (ledger == null) {
+            return null;
+        }
+        Object domainStatesObj = ledger.get("domain_states");
+        if (!(domainStatesObj instanceof List<?> states)) {
+            return null;
+        }
+        for (Object item : states) {
+            if (!(item instanceof Map<?, ?> state)) {
+                continue;
+            }
+            String code = Objects.toString(state.get("domain_id"), "");
+            String status = Objects.toString(state.get("status"), "");
+            if (code.isBlank() || Objects.equals(code, currentDomainCode)) {
+                continue;
+            }
+            if (status.isBlank() || "UNASKED".equalsIgnoreCase(status)) {
+                return code;
+            }
+        }
+        return null;
+    }
+
+    private EvaluationDecisionOutput.NextQuestionStrategy buildStrategyFromSyllabus(Map<String, Object> syllabus,
+                                                                                    String domainCode) {
+        Long nextDomainId = null;
+        String nextDomainName = domainCode;
+        String targetDepth = "L2";
+        String focusPoint = domainCode;
+
+        if (syllabus != null && syllabus.get("domains") instanceof List<?> domains) {
+            for (Object d : domains) {
+                if (!(d instanceof Map<?, ?> raw)) {
+                    continue;
+                }
+                Map<String, Object> domain = new LinkedHashMap<>();
+                raw.forEach((k, v) -> domain.put(String.valueOf(k), v));
+                if (!Objects.equals(domainCode, domain.get("domainCode"))) {
+                    continue;
+                }
+                Object idObj = domain.get("domainId");
+                if (idObj instanceof Number num) {
+                    nextDomainId = num.longValue();
+                }
+                if (domain.get("domainName") instanceof String name && !name.isBlank()) {
+                    nextDomainName = name;
+                }
+                if (domain.get("targetDepth") instanceof String td && !td.isBlank()) {
+                    targetDepth = normalizeDepth(td);
+                }
+                if (domain.get("focusPoints") instanceof List<?> focusPoints) {
+                    for (Object focus : focusPoints) {
+                        if (focus instanceof String fp && !fp.isBlank()) {
+                            focusPoint = fp;
+                            break;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+
+        return EvaluationDecisionOutput.NextQuestionStrategy.builder()
+                .nextDomainId(nextDomainId)
+                .nextDomainCode(domainCode)
+                .nextDomainName(nextDomainName)
+                .questionType("PRINCIPLE")
+                .targetDepth(targetDepth)
+                .difficulty(targetDepth)
+                .targetSkill(focusPoint)
+                .expectedPoints(List.of(
+                        "说明" + focusPoint + "的核心概念",
+                        "比较" + focusPoint + "的常见方案",
+                        "结合场景说明" + focusPoint + "的选择依据"))
+                .focusPoint(focusPoint)
+                .build();
+    }
+
+    private boolean shouldDeepen(EvaluationDecisionInput input) {
+        String currentDomainCode = input.getCurrentDomainCode() != null ? input.getCurrentDomainCode() : "intro";
+        String currentTargetDepth = normalizeDepth(input.getCurrentTargetDepth());
+        String domainTargetDepth = resolveDomainTargetDepth(input.getSyllabusJson(), currentDomainCode, currentTargetDepth);
+        return depthIndex(currentTargetDepth) < depthIndex(domainTargetDepth)
+                && !"INTRO".equalsIgnoreCase(input.getCurrentQuestionType());
+    }
+
+    private String resolveDomainTargetDepth(Map<String, Object> syllabus, String domainCode, String fallbackDepth) {
+        if (syllabus != null && syllabus.get("domains") instanceof List<?> domains) {
+            for (Object d : domains) {
+                if (!(d instanceof Map<?, ?> dm)) {
+                    continue;
+                }
+                if (!Objects.equals(domainCode, dm.get("domainCode"))) {
+                    continue;
+                }
+                String targetDepth = Objects.toString(dm.get("targetDepth"), "");
+                if (!targetDepth.isBlank()) {
+                    return normalizeDepth(targetDepth);
+                }
+            }
+        }
+        return normalizeDepth(fallbackDepth);
+    }
+
+    private AnswerAssessment assessAnswer(String answerText) {
+        if (answerText == null || answerText.isBlank()) {
+            return AnswerAssessment.HARD_FAIL;
+        }
+        String normalized = answerText.toLowerCase();
+        if (normalized.contains("不会")
+                || normalized.contains("不熟悉")
+                || normalized.contains("不知道")
+                || normalized.contains("不了解")) {
+            return AnswerAssessment.HARD_FAIL;
+        }
+        if (normalized.contains("有点忘了")
+                || normalized.contains("记不清")
+                || normalized.contains("大概")
+                || normalized.contains("部分")) {
+            return AnswerAssessment.PARTIAL;
+        }
+        return AnswerAssessment.PASS;
+    }
+
+    private String normalizeDepth(String depth) {
+        if (depth == null || depth.isBlank()) {
+            return "L2";
+        }
+        String normalized = depth.trim().toUpperCase();
+        if (normalized.matches("L[1-5]")) {
+            return normalized;
+        }
+        return "L2";
+    }
+
+    private int depthIndex(String depth) {
+        return normalizeDepth(depth).charAt(1) - '0';
+    }
+
+    private String nextDepth(String currentDepth, String targetDepth) {
+        int next = Math.min(depthIndex(currentDepth) + 1, depthIndex(targetDepth));
+        return "L" + next;
+    }
+
     private <T> AiCallResult<T> mockResult(T output, long startMs, String promptCode) {
         return AiCallResult.<T>builder()
                 .output(output)
@@ -242,9 +411,6 @@ public class MockAiClient implements AiClient {
                 .build();
     }
 
-    /**
-     * 根据题型生成不同的 Mock 题目文本。
-     */
     private String buildMockStem(String domainName, String questionType) {
         String domain = domainName != null ? domainName : "技术";
         if ("INTRO".equals(questionType)) {
@@ -267,73 +433,10 @@ public class MockAiClient implements AiClient {
         return base.trim();
     }
 
-    /**
-     * 从账本 domain_states 找第一个 UNASKED 域，并从 syllabusJson 补充完整信息。
-     */
-    private EvaluationDecisionOutput.NextQuestionStrategy resolveNextStrategyFromLedger(
-            EvaluationDecisionInput input) {
-        if (input.getStateLedger() == null) return null;
-
-        Object domainStatesObj = input.getStateLedger().get("domain_states");
-        if (!(domainStatesObj instanceof List<?> domainStates)) return null;
-
-        String nextDomainCode = null;
-        for (Object ds : domainStates) {
-            if (!(ds instanceof Map<?, ?> dsMap)) continue;
-            String code = (String) dsMap.get("domain_id");
-            String status = (String) dsMap.get("status");
-            if (code == null || Objects.equals(code, input.getCurrentDomainCode())) continue;
-            // 账本中状态字符串统一与枚举对比，支持大小写容错
-            if (status == null || DomainStatus.UNASKED.getValue().equalsIgnoreCase(status)) {
-                nextDomainCode = code;
-                break;
-            }
+    private List<ReportGenerationOutput.SkillDomainScore> buildMockDomainScores(ReportGenerationInput input) {
+        if (input.getQuestionAnswerPairs() == null) {
+            return List.of();
         }
-        if (nextDomainCode == null) return null;
-
-        Long nextDomainId = null;
-        String nextDomainName = nextDomainCode;
-        String targetDepth = "L3";
-
-        if (input.getSyllabusJson() != null) {
-            Object domainsObj = input.getSyllabusJson().get("domains");
-            if (domainsObj instanceof List<?> domains) {
-                for (Object d : domains) {
-                    if (!(d instanceof Map<?, ?> dMap)) continue;
-                    if (Objects.equals(nextDomainCode, dMap.get("domainCode"))) {
-                        Object idObj = dMap.get("domainId");
-                        if (idObj instanceof Number num) nextDomainId = num.longValue();
-                        if (dMap.get("domainName") instanceof String name) nextDomainName = name;
-                        if (dMap.get("targetDepth") instanceof String td) targetDepth = td;
-                        break;
-                    }
-                }
-            }
-        }
-
-        return EvaluationDecisionOutput.NextQuestionStrategy.builder()
-                .nextDomainId(nextDomainId)
-                .nextDomainCode(nextDomainCode)
-                .nextDomainName(nextDomainName)
-                .questionType("PRINCIPLE")
-                .targetDepth(targetDepth)
-                .difficulty(targetDepth)
-                .targetSkill(nextDomainName + " 核心原理")
-                .expectedPoints(List.of(
-                        "解释核心概念和关键机制",
-                        "结合项目场景说明取舍",
-                        "说明常见风险与优化方式"))
-                .focusPoint(nextDomainName + " 核心原理")
-                .build();
-    }
-
-    /**
-     * 从 Q/A 列表中提取知识域，每域生成模拟评分（75 分）。
-     */
-    private List<ReportGenerationOutput.SkillDomainScore> buildMockDomainScores(
-            ReportGenerationInput input) {
-        if (input.getQuestionAnswerPairs() == null) return List.of();
-
         List<ReportGenerationOutput.SkillDomainScore> scores = new ArrayList<>();
         input.getQuestionAnswerPairs().stream()
                 .filter(pair -> pair.getDomainCode() != null && !pair.getDomainCode().isBlank()
@@ -352,5 +455,11 @@ public class MockAiClient implements AiClient {
                                 .commentary("候选人对该知识域有基本掌握，核心概念理解正确，建议进一步加深实践深度。")
                                 .build()));
         return scores;
+    }
+
+    private enum AnswerAssessment {
+        PASS,
+        PARTIAL,
+        HARD_FAIL
     }
 }

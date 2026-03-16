@@ -1,7 +1,6 @@
 package com.a05.aiinterview.interview.service;
 
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
-import com.a05.aiinterview.common.enums.DomainStatus;
 import com.a05.aiinterview.interview.dto.SkipAndNextRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptResponse;
@@ -83,28 +82,18 @@ public class InterviewSkipService {
     }
 
     private EvaluationDecisionOutput buildSkipDecision(InterviewSession session, InterviewQuestion question) {
-        String domainCode = resolveDomainCode(question);
         boolean shouldEnd = shouldForceEndByMaxQuestions(session);
-
-        EvaluationDecisionOutput.LedgerPatch patch = EvaluationDecisionOutput.LedgerPatch.builder()
-                .domainCode(domainCode)
-                .domainId(question.getDomainId())
-                .currentDepth(StringUtils.hasText(question.getTargetDepth()) ? question.getTargetDepth() : "L2")
-                .domainStatus(shouldEnd ? DomainStatus.COVERED : DomainStatus.IN_PROGRESS)
-                .saturated(shouldEnd)
-                .questionType(question.getQuestionType())
-                .build();
-
         EvaluationDecisionOutput.NextQuestionStrategy nextStrategy = shouldEnd
                 ? null
-                : buildNextStrategy(session, question, domainCode);
+                : buildNextStrategy(session, question, resolveDomainCode(question));
+        if (!shouldEnd && nextStrategy == null) {
+            shouldEnd = true;
+        }
 
         return EvaluationDecisionOutput.builder()
-                .domainCode(domainCode)
-                .depthReached(StringUtils.hasText(question.getTargetDepth()) ? question.getTargetDepth() : "L2")
-                .saturated(shouldEnd)
+                .passCurrentLevel(false)
+                .deepen(false)
                 .signal(shouldEnd ? "END" : "NEXT_DOMAIN")
-                .patch(patch)
                 .nextStrategy(nextStrategy)
                 .reasoning("question skipped")
                 .build();
@@ -115,9 +104,11 @@ public class InterviewSkipService {
             InterviewSession session,
             InterviewQuestion question,
             String fallbackDomainCode) {
-        String nextDomainCode = fallbackDomainCode;
-        String nextDomainName = fallbackDomainCode;
-        Long nextDomainId = question.getDomainId();
+        String currentDomainCode = fallbackDomainCode;
+        String nextDomainCode = null;
+        String nextDomainName = null;
+        Long nextDomainId = null;
+        String inProgressFallback = null;
 
         if (session.getStateLedgerJson() != null) {
             Object domainStatesObj = session.getStateLedgerJson().get("domain_states");
@@ -128,13 +119,26 @@ public class InterviewSkipService {
                     }
                     Object status = state.get("status");
                     Object code = state.get("domain_id");
-                    if (code instanceof String c && (status == null || "UNASKED".equalsIgnoreCase(String.valueOf(status)))) {
+                    if (!(code instanceof String c) || c.equals(currentDomainCode) || "COVERED".equalsIgnoreCase(String.valueOf(status))) {
+                        continue;
+                    }
+                    if (status == null || "UNASKED".equalsIgnoreCase(String.valueOf(status))) {
                         nextDomainCode = c;
                         break;
+                    }
+                    if ("IN_PROGRESS".equalsIgnoreCase(String.valueOf(status)) && inProgressFallback == null) {
+                        inProgressFallback = c;
                     }
                 }
             }
         }
+        if (!StringUtils.hasText(nextDomainCode)) {
+            nextDomainCode = inProgressFallback;
+        }
+        if (!StringUtils.hasText(nextDomainCode)) {
+            return null;
+        }
+        nextDomainName = nextDomainCode;
 
         if (session.getSyllabusJson() != null) {
             Object domainsObj = session.getSyllabusJson().get("domains");
@@ -159,8 +163,8 @@ public class InterviewSkipService {
             }
         }
 
-        String targetDepth = StringUtils.hasText(question.getTargetDepth()) ? question.getTargetDepth() : "L2";
-        String targetSkill = StringUtils.hasText(question.getTargetSkill()) ? question.getTargetSkill() : nextDomainName;
+        String targetDepth = "L2";
+        String targetSkill = nextDomainName;
 
         return EvaluationDecisionOutput.NextQuestionStrategy.builder()
                 .nextDomainId(nextDomainId)

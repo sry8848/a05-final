@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -243,59 +244,64 @@ public class TtsService {
         }
     }
 
+    /**
+     * 调用阿里云 DashScope CosyVoice TTS API。
+     * 
+     * <p>HTTP API 端点：POST https://dashscope.aliyuncs.com/api/v1/services/aigc/text2audio/text-to-audio
+     * <p>响应格式：直接返回音频二进制数据（MP3/WAV/PCM）
+     * 
+     * @param text 待合成的文本
+     * @return 音频二进制数据
+     */
     private byte[] requestAlibabaCosyVoice(String text) throws IOException, InterruptedException {
         SpeechProperties.Tts tts = speechProperties.getTts();
         HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(Math.max(tts.getTimeoutMs(), 3000)))
                 .build();
 
-        Map<String, Object> body = Map.of(
-                "model", tts.getModel(),
-                "input", Map.of("text", text),
-                "parameters", Map.of("voice", tts.getVoice())
-        );
+        // 构建符合阿里云 DashScope API 格式的请求体
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", tts.getModel());
+        body.put("input", Map.of("text", text));
+        
+        // 构建参数，添加必要的音频参数
+        Map<String, Object> parameters = new LinkedHashMap<>();
+        parameters.put("voice", tts.getVoice());
+        parameters.put("format", "mp3");
+        parameters.put("sample_rate", 22050);
+        parameters.put("volume", 50);
+        parameters.put("rate", 1.0);
+        parameters.put("pitch", 1.0);
+        body.put("parameters", parameters);
+
         String requestBody = objectMapper.writeValueAsString(body);
+        log.debug("TTS 请求体: {}", requestBody);
+        
         HttpRequest request = HttpRequest.newBuilder(URI.create(tts.getEndpoint()))
                 .timeout(Duration.ofMillis(Math.max(tts.getTimeoutMs(), 3000)))
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + tts.getApiKey())
                 .header(HttpHeaders.CONTENT_TYPE, "application/json")
+                .header("Accept", "audio/mpeg")
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
                 .build();
 
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        // HTTP API 直接返回音频二进制，不是 JSON
+        HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        
         if (response.statusCode() >= 400) {
-            throw new IllegalStateException("阿里云 TTS 调用失败，status=" + response.statusCode());
+            // 尝试解析错误信息
+            String errorBody = response.body() != null ? new String(response.body(), StandardCharsets.UTF_8) : "无响应体";
+            log.error("阿里云 TTS 调用失败，status={}, body={}", response.statusCode(), errorBody);
+            throw new IllegalStateException("阿里云 TTS 调用失败，status=" + response.statusCode() + ", body=" + errorBody);
         }
 
-        JsonNode root = objectMapper.readTree(response.body());
-        JsonNode output = root.path("output");
-        JsonNode audioNode = output.path("audio");
-        String audioUrl = firstNonBlank(
-                audioNode.path("url").asText(null),
-                output.path("audio_url").asText(null),
-                output.path("url").asText(null)
-        );
-        String audioBase64 = firstNonBlank(
-                audioNode.path("data").asText(null),
-                output.path("audio_data").asText(null)
-        );
-
-        if (audioBase64 != null) {
-            return Base64.getDecoder().decode(audioBase64);
+        byte[] audioData = response.body();
+        if (audioData == null || audioData.length == 0) {
+            throw new IllegalStateException("阿里云 TTS 返回空音频数据");
         }
-        if (audioUrl == null) {
-            throw new IllegalStateException("阿里云 TTS 响应未包含 audio url/data");
-        }
-
-        HttpRequest audioReq = HttpRequest.newBuilder(URI.create(audioUrl))
-                .timeout(Duration.ofMillis(Math.max(tts.getTimeoutMs(), 3000)))
-                .GET()
-                .build();
-        HttpResponse<byte[]> audioResp = client.send(audioReq, HttpResponse.BodyHandlers.ofByteArray());
-        if (audioResp.statusCode() >= 400) {
-            throw new IllegalStateException("音频下载失败，status=" + audioResp.statusCode());
-        }
-        return audioResp.body();
+        
+        log.debug("TTS 合成成功，音频大小: {} bytes", audioData.length);
+        return audioData;
     }
 
     private String questionHashKey(Long sessionId, Long questionId) {

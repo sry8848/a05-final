@@ -2,11 +2,16 @@ package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.common.enums.DomainStatus;
+import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.entity.SessionSkillState;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.a05.aiinterview.interview.mapper.SessionSkillStateMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -14,23 +19,16 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 /**
- * 状态账本 Patch 应用服务（单一职责）。
+ * 账本写入服务。
  *
- * <p>职责：将评估决策服务返回的 {@link EvaluationDecisionOutput.LedgerPatch} 安全地写入：
- * <ol>
- *   <li>{@code interview_sessions.state_ledger_json} —— 更新 domain_states、question_mix_progress、
- *       asked_total、last_attempt_id</li>
- *   <li>{@code session_skill_states} —— 更新对应行的 current_depth、saturated、status、tested_count</li>
- * </ol>
- *
- * <p>并发安全：通过 {@code SELECT FOR UPDATE} 对同一 sessionId 的会话行加排他锁，
- * 保证同一场面试的账本 Patch 串行执行，避免并发覆写。
- *
- * <p>事务：整个方法在同一数据库事务中完成，任何子步骤失败均整体回滚。
+ * <p>AI 不再回写正式账本；这里统一根据当前题和 AI 最小决策，使用 reducer 计算新账本后落库。
  */
 @Slf4j
 @Service
@@ -39,171 +37,230 @@ public class StateLedgerPatchService {
 
     private final InterviewSessionMapper interviewSessionMapper;
     private final SessionSkillStateMapper sessionSkillStateMapper;
+    private final StateLedgerReducer stateLedgerReducer;
+    private final StateLedgerDiffService stateLedgerDiffService;
 
-    /**
-     * 将评估决策 Patch 应用到账本，同时更新 session_skill_states 行。
-     *
-     * @param sessionId          面试会话 ID
-     * @param patch              评估决策返回的账本变更描述
-     * @param attemptId          本次 attempt 的幂等键（写入账本 last_attempt_id）
-     * @param evidenceQuestionId 本次被回答题目的 ID（追加到账本 evidence_refs，可为 null）
-     */
     @Transactional(rollbackFor = Exception.class)
-    public void applyPatch(Long sessionId,
-                           EvaluationDecisionOutput.LedgerPatch patch,
-                           String attemptId,
-                           Long evidenceQuestionId) {
-        log.info("开始应用账本 Patch, sessionId={}, domainCode={}, attemptId={}",
-                sessionId, patch != null ? patch.getDomainCode() : "null", attemptId);
-
-        // 以排他行锁加载会话，保证同 session 的 Patch 串行
+    public ReductionAudit applyReduction(Long sessionId,
+                                         EvaluationDecisionOutput evalOutput,
+                                         InterviewQuestion currentQuestion,
+                                         String attemptId,
+                                         Long evidenceQuestionId,
+                                         String answerText) {
         InterviewSession session = interviewSessionMapper.selectForUpdate(sessionId);
         if (session == null) {
             throw new IllegalArgumentException("面试会话不存在, sessionId=" + sessionId);
         }
-
-        Map<String, Object> ledger = session.getStateLedgerJson();
-        if (ledger == null) {
+        Map<String, Object> oldLedger = session.getStateLedgerJson();
+        if (oldLedger == null) {
             throw new IllegalStateException("状态账本为空, sessionId=" + sessionId);
         }
 
-        // 更新账本 domain_states
-        if (patch != null && patch.getDomainCode() != null) {
-            applyDomainStatePatch(ledger, patch, evidenceQuestionId);
-        }
+        LedgerMutation mutation = buildMutation(session, currentQuestion, evalOutput, answerText);
+        validateMutation(oldLedger, mutation);
 
-        // 递增 question_mix_progress 计数
-        if (patch != null && patch.getQuestionType() != null) {
-            incrementMixProgress(ledger, patch.getQuestionType());
-        }
+        Map<String, Object> newLedger = stateLedgerReducer.reduce(oldLedger, mutation, attemptId, evidenceQuestionId);
+        Map<String, Object> diff = stateLedgerDiffService.diff(oldLedger, newLedger);
 
-        // 递增 asked_total
-        int askedTotal = toInt(ledger.getOrDefault("asked_total", 0)) + 1;
-        ledger.put("asked_total", askedTotal);
-
-        // 更新 last_attempt_id
-        ledger.put("last_attempt_id", attemptId);
-
-        // 写回会话
         InterviewSession update = new InterviewSession();
         update.setId(sessionId);
-        update.setStateLedgerJson(ledger);
+        update.setStateLedgerJson(newLedger);
         update.setUpdatedAt(LocalDateTime.now());
         interviewSessionMapper.updateById(update);
 
-        // 同步更新 session_skill_states 行
-        if (patch != null && patch.getDomainId() != null) {
-            updateSkillState(sessionId, patch);
+        if (!isIntro(currentQuestion.getQuestionType()) && mutation.getCurrentDomainId() != null) {
+            syncSkillState(sessionId, mutation, newLedger, evidenceQuestionId);
         }
 
-        log.info("账本 Patch 应用完成, sessionId={}, domain={}, depth={}, askedTotal={}, attemptId={}",
-                sessionId, patch != null ? patch.getDomainCode() : "null",
-                patch != null ? patch.getCurrentDepth() : "null",
-                askedTotal, attemptId);
+        return ReductionAudit.builder()
+                .newLedger(newLedger)
+                .diff(diff)
+                .domainClosureReason(resolveDomainClosureReason(currentQuestion, mutation))
+                .build();
     }
 
-    // ────────────────────────────────────────────────────────────
-    // 私有方法
-    // ────────────────────────────────────────────────────────────
+    private LedgerMutation buildMutation(InterviewSession session,
+                                         InterviewQuestion currentQuestion,
+                                         EvaluationDecisionOutput evalOutput,
+                                         String answerText) {
+        return LedgerMutation.builder()
+                .questionType(currentQuestion.getQuestionType())
+                .currentDomainCode(resolveDomainCode(currentQuestion))
+                .currentDomainId(currentQuestion.getDomainId())
+                .currentTargetDepth(currentQuestion.getTargetDepth())
+                .passCurrentLevel(evalOutput.isPassCurrentLevel())
+                .deepen(evalOutput.isDeepen())
+                .signal(evalOutput.getSignal())
+                .activeProjectId(resolveActiveProjectId(session, currentQuestion, evalOutput))
+                .skipCurrentQuestion("[skip]".equals(answerText))
+                .build();
+    }
 
-    /**
-     * 更新账本 domain_states 中对应域的条目。
-     * 匹配规则：账本中 domain_id 字段存储的是知识域编码（domainCode）。
-     */
-    @SuppressWarnings("unchecked")
-    private void applyDomainStatePatch(Map<String, Object> ledger,
-                                       EvaluationDecisionOutput.LedgerPatch patch,
-                                       Long evidenceQuestionId) {
-        Object domainStatesObj = ledger.get("domain_states");
-        if (!(domainStatesObj instanceof List<?> rawList)) {
+    private void validateMutation(Map<String, Object> oldLedger, LedgerMutation mutation) {
+        String questionType = normalizeQuestionType(mutation.getQuestionType());
+        mutation.setQuestionType(questionType);
+        if (isIntro(questionType)) {
             return;
         }
-
-        for (Object item : rawList) {
-            if (!(item instanceof Map<?, ?> rawMap)) continue;
-            Map<String, Object> ds = (Map<String, Object>) rawMap;
-            if (!patch.getDomainCode().equals(ds.get("domain_id"))) continue;
-
-            ds.put("current_depth", patch.getCurrentDepth());
-            // 统一使用枚举 getValue() 写入账本，确保始终为 UNASKED/IN_PROGRESS/COVERED/CIRCUIT_BROKEN
-            DomainStatus domainStatus = patch.getDomainStatus() != null
-                    ? patch.getDomainStatus() : DomainStatus.IN_PROGRESS;
-            ds.put("status", domainStatus.getValue());
-            ds.put("saturated", patch.isSaturated());
-
-            // 追加 evidence_ref（题目 ID）
-            if (evidenceQuestionId != null) {
-                List<Object> refs = (List<Object>) ds.computeIfAbsent("evidence_refs", k -> new ArrayList<>());
-                refs.add(evidenceQuestionId);
-            }
-            break;
+        String domainCode = mutation.getCurrentDomainCode();
+        if (domainCode == null || domainCode.isBlank()) {
+            throw new IllegalArgumentException("非 INTRO 题必须提供 currentDomainCode");
+        }
+        if (!domainCodeExists(oldLedger, domainCode)) {
+            throw new IllegalArgumentException("currentDomainCode 不存在于账本: " + domainCode);
+        }
+        String signal = asString(mutation.getSignal()).trim().toUpperCase(Locale.ROOT);
+        if ("RETRY_SAME_DOMAIN".equals(signal) && mutation.isPassCurrentLevel()) {
+            throw new IllegalArgumentException("RETRY_SAME_DOMAIN 不允许 passCurrentLevel=true");
         }
     }
 
-    /**
-     * 递增 question_mix_progress 中指定题型的计数。
-     */
-    @SuppressWarnings("unchecked")
-    private void incrementMixProgress(Map<String, Object> ledger, String questionType) {
-        Object mixObj = ledger.get("question_mix_progress");
-        if (!(mixObj instanceof Map<?, ?> rawMap)) {
-            return;
+    private String resolveDomainClosureReason(InterviewQuestion currentQuestion, LedgerMutation mutation) {
+        if (isIntro(currentQuestion.getQuestionType())) {
+            return null;
         }
-        Map<String, Object> mixProgress = (Map<String, Object>) rawMap;
-        int current = toInt(mixProgress.getOrDefault(questionType, 0));
-        mixProgress.put(questionType, current + 1);
+        String signal = asString(mutation.getSignal()).trim().toUpperCase(Locale.ROOT);
+        if (mutation.isSkipCurrentQuestion()) {
+            return "NO_FURTHER_VALUE";
+        }
+        if ("END".equals(signal)) {
+            return "NO_FURTHER_VALUE";
+        }
+        if ("NEXT_DOMAIN".equals(signal) && !mutation.isPassCurrentLevel()) {
+            return "FAILED_HARD";
+        }
+        if ("NEXT_DOMAIN".equals(signal) && mutation.isPassCurrentLevel()) {
+            return "DEPTH_REACHED";
+        }
+        return null;
     }
 
-    /**
-     * 更新 session_skill_states 表对应行的覆盖状态。
-     */
-    private void updateSkillState(Long sessionId, EvaluationDecisionOutput.LedgerPatch patch) {
+    private void syncSkillState(Long sessionId,
+                                LedgerMutation mutation,
+                                Map<String, Object> newLedger,
+                                Long evidenceQuestionId) {
         SessionSkillState existing = sessionSkillStateMapper.selectOne(
                 new LambdaQueryWrapper<SessionSkillState>()
                         .eq(SessionSkillState::getSessionId, sessionId)
-                        .eq(SessionSkillState::getDomainId, patch.getDomainId())
+                        .eq(SessionSkillState::getDomainId, mutation.getCurrentDomainId())
         );
-
         if (existing == null) {
-            log.warn("session_skill_states 未找到对应行, sessionId={}, domainId={}", sessionId, patch.getDomainId());
+            log.warn("session_skill_states 未找到对应行, sessionId={}, domainId={}", sessionId, mutation.getCurrentDomainId());
             return;
         }
 
-        // 枚举直接提供关系表侧的写入值，无需字符串映射转换
-        String skillStatus = resolveSkillStateValue(patch.getDomainStatus(), patch.isSaturated());
-
-        existing.setCurrentDepth(patch.getCurrentDepth());
-        existing.setSaturated(patch.isSaturated());
-        existing.setStatus(skillStatus);
-        existing.setTestedCount(existing.getTestedCount() + 1);
-        if (patch.getEvidenceQuestionId() != null) {
-            List<Long> refs = existing.getEvidenceRefs() != null
-                    ? new ArrayList<>(existing.getEvidenceRefs()) : new ArrayList<>();
-            refs.add(patch.getEvidenceQuestionId());
+        Map<String, Object> domainState = findDomainState(newLedger, mutation.getCurrentDomainCode());
+        if (domainState == null) {
+            return;
+        }
+        DomainStatus domainStatus = DomainStatus.fromLedgerValue(asString(domainState.get("status")));
+        existing.setCurrentDepth(asString(domainState.get("current_depth")));
+        existing.setSaturated(Boolean.TRUE.equals(domainState.get("saturated")));
+        existing.setStatus(Boolean.TRUE.equals(domainState.get("saturated"))
+                ? DomainStatus.COVERED.getSkillStateValue()
+                : domainStatus.getSkillStateValue());
+        existing.setTestedCount(existing.getTestedCount() == null ? 1 : existing.getTestedCount() + 1);
+        if (evidenceQuestionId != null) {
+            List<Long> refs = existing.getEvidenceRefs() != null ? new ArrayList<>(existing.getEvidenceRefs()) : new ArrayList<>();
+            refs.add(evidenceQuestionId);
             existing.setEvidenceRefs(refs);
         }
         existing.setUpdatedAt(LocalDateTime.now());
         sessionSkillStateMapper.updateById(existing);
     }
 
-    /**
-     * 将 {@link DomainStatus} 枚举解析为 session_skill_states.status 列的写入值。
-     * saturated=true 时强制写 COVERED，否则直接使用枚举的 skillStateValue。
-     *
-     * @param domainStatus 账本侧枚举（可为 null，兜底为 IN_PROGRESS）
-     * @param saturated    是否已问透
-     * @return session_skill_states.status 列应写入的字符串（小写下划线风格）
-     */
-    private String resolveSkillStateValue(DomainStatus domainStatus, boolean saturated) {
-        if (saturated) {
-            return DomainStatus.COVERED.getSkillStateValue();
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> findDomainState(Map<String, Object> ledger, String domainCode) {
+        Object statesObj = ledger.get("domain_states");
+        if (!(statesObj instanceof List<?> states)) {
+            return null;
         }
-        DomainStatus effective = domainStatus != null ? domainStatus : DomainStatus.IN_PROGRESS;
-        return effective.getSkillStateValue();
+        for (Object item : states) {
+            if (!(item instanceof Map<?, ?> raw)) {
+                continue;
+            }
+            Map<String, Object> state = new LinkedHashMap<>((Map<String, Object>) raw);
+            if (Objects.equals(domainCode, asString(state.get("domain_id")))) {
+                return state;
+            }
+        }
+        return null;
     }
 
-    private int toInt(Object val) {
-        if (val instanceof Number n) return n.intValue();
-        try { return Integer.parseInt(String.valueOf(val)); } catch (Exception e) { return 0; }
+    @SuppressWarnings("unchecked")
+    private boolean domainCodeExists(Map<String, Object> ledger, String domainCode) {
+        Object statesObj = ledger.get("domain_states");
+        if (!(statesObj instanceof List<?> states)) {
+            return false;
+        }
+        for (Object item : states) {
+            if (item instanceof Map<?, ?> state && Objects.equals(domainCode, asString(state.get("domain_id")))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String resolveDomainCode(InterviewQuestion question) {
+        if (question.getGenerationContextJson() != null) {
+            Object code = question.getGenerationContextJson().get("domainCode");
+            if (code instanceof String domainCode && !domainCode.isBlank()) {
+                return domainCode;
+            }
+        }
+        return isIntro(question.getQuestionType()) ? null : "intro";
+    }
+
+    private String resolveActiveProjectId(InterviewSession session,
+                                          InterviewQuestion currentQuestion,
+                                          EvaluationDecisionOutput evalOutput) {
+        if (!isIntro(currentQuestion.getQuestionType())) {
+            return null;
+        }
+        Object existing = session.getStateLedgerJson() != null ? session.getStateLedgerJson().get("active_project_id") : null;
+        if (existing instanceof String projectId && !projectId.isBlank()) {
+            return projectId;
+        }
+        if (session.getSyllabusJson() == null) {
+            return null;
+        }
+        Object projectsObj = session.getSyllabusJson().get("projects");
+        if (!(projectsObj instanceof List<?> projects) || projects.isEmpty()) {
+            return null;
+        }
+        Object first = projects.getFirst();
+        if (!(first instanceof Map<?, ?> project)) {
+            return null;
+        }
+        Object projectId = project.get("projectId");
+        if (projectId instanceof String str && !str.isBlank()) {
+            return str;
+        }
+        return null;
+    }
+
+    private boolean isIntro(String questionType) {
+        return "INTRO".equalsIgnoreCase(asString(questionType));
+    }
+
+    private String normalizeQuestionType(String questionType) {
+        if (questionType == null || questionType.isBlank()) {
+            return "PRINCIPLE";
+        }
+        return questionType.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String asString(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ReductionAudit {
+        private Map<String, Object> newLedger;
+        private Map<String, Object> diff;
+        private String domainClosureReason;
     }
 }

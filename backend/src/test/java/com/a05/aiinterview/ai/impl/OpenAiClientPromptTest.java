@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.a05.aiinterview.ai.config.PromptProperties;
+import com.a05.aiinterview.ai.contract.AiOutputContractValidator;
 import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.IntroRewriteInput;
 import com.a05.aiinterview.ai.dto.PlannerInput;
@@ -49,8 +50,9 @@ class OpenAiClientPromptTest {
         OpenAiClient client = new OpenAiClient(
                 chatModel,
                 new ClasspathPromptTemplateService(new ObjectMapper()),
-                new PromptProperties(),
-                new ObjectMapper()
+                promptProperties(),
+                new ObjectMapper(),
+                new AiOutputContractValidator(new ObjectMapper())
         );
 
         PlannerInput input = PlannerInput.builder()
@@ -74,12 +76,12 @@ class OpenAiClientPromptTest {
         verify(chatModel).call(captor.capture());
         Prompt prompt = captor.getValue();
         assertThat(((SystemMessage) prompt.getSystemMessage()).getText())
-                .contains("你的任务是：根据候选人的岗位、工作年限、JD、简历和侧重知识点");
+                .contains("你的任务是：根据候选人的岗位、工作年限、面试模式、JD 内容、简历原文");
         assertThat(((UserMessage) prompt.getUserMessage()).getText())
                 .contains("岗位：Java 后端开发（JAVA_BACKEND）")
-                .contains("可考察的知识域列表");
+                .contains("岗位涵盖的知识域列表");
         assertThat(result.getPromptCode()).isEqualTo("planner");
-        assertThat(result.getPromptVersion()).isEqualTo("v1");
+        assertThat(result.getPromptVersion()).isEqualTo("v2");
     }
 
     @Test
@@ -91,8 +93,9 @@ class OpenAiClientPromptTest {
         OpenAiClient client = new OpenAiClient(
                 chatModel,
                 new ClasspathPromptTemplateService(new ObjectMapper()),
-                new PromptProperties(),
-                new ObjectMapper()
+                promptProperties(),
+                new ObjectMapper(),
+                new AiOutputContractValidator(new ObjectMapper())
         );
 
         IntroRewriteInput input = IntroRewriteInput.builder()
@@ -125,11 +128,20 @@ class OpenAiClientPromptTest {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse("""
                 {
-                  "domainCode": "java",
-                  "depthReached": "L3",
-                  "saturated": true,
+                  "passCurrentLevel": true,
+                  "deepen": false,
                   "signal": "NEXT_DOMAIN",
-                  "reasoning": "ok"
+                  "reasoning": "ok",
+                  "nextStrategy": {
+                    "nextDomainCode": "java_core",
+                    "nextDomainName": "Java 核心",
+                    "questionType": "PRINCIPLE",
+                    "targetDepth": "L2",
+                    "difficulty": "L2",
+                    "targetSkill": "集合框架",
+                    "expectedPoints": ["说明 ArrayList 与 LinkedList 区别"],
+                    "focusPoint": "集合框架"
+                  }
                 }
                 """));
         ListAppender<ILoggingEvent> appender = startLogCapture();
@@ -137,8 +149,9 @@ class OpenAiClientPromptTest {
         OpenAiClient client = new OpenAiClient(
                 chatModel,
                 new ClasspathPromptTemplateService(new ObjectMapper()),
-                new PromptProperties(),
-                new ObjectMapper()
+                promptProperties(),
+                new ObjectMapper(),
+                new AiOutputContractValidator(new ObjectMapper())
         );
 
         client.callEvaluationDecision(com.a05.aiinterview.ai.dto.EvaluationDecisionInput.builder()
@@ -163,7 +176,7 @@ class OpenAiClientPromptTest {
         assertThat(audit).contains("\"questionId\":1001");
         assertThat(audit).contains("\"promptCode\":\"evaluation_decision\"");
         assertThat(audit).contains("\"status\":\"success\"");
-        assertThat(audit).contains("\"promptVersion\":\"v1\"");
+        assertThat(audit).contains("\"promptVersion\":\"v2\"");
         assertThat(audit).doesNotContain("这是用户完整回答，不应该出现在审计日志中");
     }
 
@@ -177,8 +190,9 @@ class OpenAiClientPromptTest {
         OpenAiClient client = new OpenAiClient(
                 chatModel,
                 new ClasspathPromptTemplateService(new ObjectMapper()),
-                new PromptProperties(),
-                new ObjectMapper()
+                promptProperties(),
+                new ObjectMapper(),
+                new AiOutputContractValidator(new ObjectMapper())
         );
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.callPlanner(PlannerInput.builder()
@@ -201,6 +215,12 @@ class OpenAiClientPromptTest {
         assertThat(audit).contains("\"errorType\":\"RuntimeException\"");
     }
 
+    private PromptProperties promptProperties() {
+        PromptProperties properties = new PromptProperties();
+        properties.setPlanner("v2");
+        properties.setEvaluationDecision("v2");
+        return properties;
+    }
     private ChatResponse chatResponse(String text) {
         return new ChatResponse(List.of(new Generation(new org.springframework.ai.chat.messages.AssistantMessage(text))));
     }
@@ -213,3 +233,4 @@ class OpenAiClientPromptTest {
         return appender;
     }
 }
+

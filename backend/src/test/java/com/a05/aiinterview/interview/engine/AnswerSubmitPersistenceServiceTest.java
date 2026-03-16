@@ -11,7 +11,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -45,8 +47,11 @@ class AnswerSubmitPersistenceServiceTest {
 
         InterviewQuestion question = new InterviewQuestion();
         question.setId(2L);
+        question.setQuestionType("PRINCIPLE");
 
         EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
+                .passCurrentLevel(true)
+                .deepen(false)
                 .signal("NEXT_DOMAIN")
                 .build();
 
@@ -54,8 +59,9 @@ class AnswerSubmitPersistenceServiceTest {
 
         ArgumentCaptor<InterviewAttempt> attemptCaptor = ArgumentCaptor.forClass(InterviewAttempt.class);
         verify(attemptMapper).insert(attemptCaptor.capture());
-        assertEquals("pending", attemptCaptor.getValue().getDetailEvaluationStatus());
+        assertThat(attemptCaptor.getValue().getDetailEvaluationStatus()).isEqualTo("pending");
         verify(eventPublisher).publishEvent(any(Object.class));
+        verify(patchService).applyReduction(1L, output, question, "attempt-1", 2L, "answer");
     }
 
     @Test
@@ -77,14 +83,18 @@ class AnswerSubmitPersistenceServiceTest {
 
         InterviewQuestion question = new InterviewQuestion();
         question.setId(3L);
+        question.setQuestionType("PRINCIPLE");
 
         EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
+                .passCurrentLevel(false)
+                .deepen(false)
                 .signal("NEXT_DOMAIN")
                 .build();
 
         service.persist(1L, question, request, output);
 
         verify(eventPublisher, never()).publishEvent(any(Object.class));
+        verify(patchService).applyReduction(1L, output, question, "attempt-2", 3L, "draft");
     }
 
     @Test
@@ -107,8 +117,11 @@ class AnswerSubmitPersistenceServiceTest {
 
         InterviewQuestion question = new InterviewQuestion();
         question.setId(5L);
+        question.setQuestionType("PRINCIPLE");
 
         EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
+                .passCurrentLevel(false)
+                .deepen(false)
                 .signal("NEXT_DOMAIN")
                 .build();
 
@@ -116,6 +129,66 @@ class AnswerSubmitPersistenceServiceTest {
 
         ArgumentCaptor<InterviewQuestion> captor = ArgumentCaptor.forClass(InterviewQuestion.class);
         verify(questionMapper).updateById(captor.capture());
-        assertEquals("skipped", captor.getValue().getStatus());
+        assertThat(captor.getValue().getStatus()).isEqualTo("skipped");
+    }
+
+    @Test
+    void persist_shouldStoreAiDecisionAndReducerAuditSnapshot() {
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        StateLedgerPatchService patchService = mock(StateLedgerPatchService.class);
+        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+        AnswerSubmitPersistenceService service = new AnswerSubmitPersistenceService(
+                attemptMapper, questionMapper, sessionMapper, patchService, eventPublisher
+        );
+
+        when(attemptMapper.insert(any())).thenReturn(1);
+        when(patchService.applyReduction(org.mockito.ArgumentMatchers.eq(1L), any(EvaluationDecisionOutput.class), any(InterviewQuestion.class), any(String.class), any(Long.class), any(String.class)))
+                .thenReturn(StateLedgerPatchService.ReductionAudit.builder()
+                        .newLedger(java.util.Map.of("asked_total", 1))
+                        .diff(java.util.Map.of("asked_total", 1, "last_attempt_id", "attempt-4"))
+                        .domainClosureReason("DEPTH_REACHED")
+                        .build());
+
+        SubmitAttemptRequest request = new SubmitAttemptRequest();
+        request.setAttemptId("attempt-4");
+        request.setAnswerText("answer");
+        request.setIsFinal(true);
+
+        InterviewQuestion question = new InterviewQuestion();
+        question.setId(7L);
+        question.setQuestionType("INTRO");
+
+        EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
+                .passCurrentLevel(true)
+                .deepen(false)
+                .signal("NEXT_DOMAIN")
+                .reasoning("intro passed")
+                .nextStrategy(EvaluationDecisionOutput.NextQuestionStrategy.builder()
+                        .nextDomainId(1L)
+                        .nextDomainCode("java_core")
+                        .nextDomainName("Java 核心基础")
+                        .questionType("PRINCIPLE")
+                        .targetDepth("L2")
+                        .difficulty("L2")
+                        .targetSkill("集合框架")
+                        .expectedPoints(List.of("说明 ArrayList 与 LinkedList 区别"))
+                        .focusPoint("集合框架")
+                        .build())
+                .build();
+
+        service.persist(1L, question, request, output);
+
+        ArgumentCaptor<InterviewAttempt> attemptCaptor = ArgumentCaptor.forClass(InterviewAttempt.class);
+        verify(attemptMapper).insert(attemptCaptor.capture());
+        assertThat(attemptCaptor.getValue().getEvaluationJson())
+                .containsEntry("signal", "NEXT_DOMAIN")
+                .containsEntry("passCurrentLevel", true)
+                .containsEntry("deepen", false)
+                .containsEntry("domainClosureReason", "DEPTH_REACHED")
+                .containsKey("ledgerDiff")
+                .containsKey("nextStrategy");
     }
 }
+

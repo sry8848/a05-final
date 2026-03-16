@@ -2,6 +2,7 @@ package com.a05.aiinterview.ai.impl;
 
 import com.a05.aiinterview.ai.AiClient;
 import com.a05.aiinterview.ai.config.PromptProperties;
+import com.a05.aiinterview.ai.contract.AiOutputContractValidator;
 import com.a05.aiinterview.ai.dto.*;
 import com.a05.aiinterview.ai.prompt.PromptTemplateService;
 import com.a05.aiinterview.ai.prompt.RenderedPrompt;
@@ -44,17 +45,20 @@ public class OpenAiClient implements AiClient {
     private final PromptTemplateService promptTemplateService;
     private final PromptProperties promptProperties;
     private final ObjectMapper objectMapper;
+    private final AiOutputContractValidator aiOutputContractValidator;
     @Value("${ai.openai.model:${OPENAI_MODEL:gpt-4o-mini}}")
     private String configuredModel = "unknown";
 
     public OpenAiClient(ChatModel chatModel,
                         PromptTemplateService promptTemplateService,
                         PromptProperties promptProperties,
-                        ObjectMapper objectMapper) {
+                        ObjectMapper objectMapper,
+                        AiOutputContractValidator aiOutputContractValidator) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.promptTemplateService = promptTemplateService;
         this.promptProperties = promptProperties;
         this.objectMapper = objectMapper;
+        this.aiOutputContractValidator = aiOutputContractValidator;
         log.info("OpenAiClient 已初始化（Spring AI ChatClient 模式）");
     }
 
@@ -219,7 +223,9 @@ public class OpenAiClient implements AiClient {
                     buildEvaluationDecisionVariables(input, converter.getFormat()));
 
             ChatResponse response = callChat(rendered.getSystemPrompt(), rendered.getUserPrompt());
-            EvaluationDecisionOutput output = requireConvert(converter, response, "evaluation_decision");
+            EvaluationDecisionOutput output = aiOutputContractValidator.validateEvaluationDecision(
+                    requireConvert(converter, response, "evaluation_decision")
+            );
             long latencyMs = System.currentTimeMillis() - startMs;
             auditLite(
                     rendered.getPromptCode(),
@@ -377,6 +383,7 @@ public class OpenAiClient implements AiClient {
 
     /**
      * 将模型文本输出转换为结构化 DTO；结果为 null 时抛出描述性异常。
+     * 解析失败时会尝试提取具体字段错误信息，便于快速定位问题。
      */
     private <T> T requireConvert(BeanOutputConverter<T> converter, ChatResponse response,
                                   String promptCode) {
@@ -384,12 +391,45 @@ public class OpenAiClient implements AiClient {
         if (text == null || text.isBlank()) {
             throw new RuntimeException(promptCode + " AI 返回空文本");
         }
-        T result = converter.convert(text);
-        if (result == null) {
-            log.error("{} AI 响应解析失败，rawText={}", promptCode, text);
-            throw new RuntimeException(promptCode + " AI 响应解析失败：BeanOutputConverter 返回 null");
+        try {
+            T result = converter.convert(text);
+            if (result == null) {
+                log.error("{} AI 响应解析失败，rawText={}", promptCode, text);
+                throw new RuntimeException(promptCode + " AI 响应解析失败：BeanOutputConverter 返回 null");
+            }
+            return result;
+        } catch (Exception e) {
+            // 尝试提取字段级错误信息
+            String fieldHint = extractFieldErrorHint(e.getMessage());
+            log.error("{} AI 响应解析失败, field={}, reason={}, rawText={}",
+                    promptCode, fieldHint, e.getMessage(), text);
+            throw new RuntimeException(promptCode + " AI 响应解析失败: field=" + fieldHint + ", reason=" + e.getMessage(), e);
         }
-        return result;
+    }
+
+    /**
+     * 从异常信息中提取字段级错误提示。
+     * 例如从 "Unexpected character 'a' ... at patch.evidenceQuestionId" 提取出 "patch.evidenceQuestionId"
+     */
+    private String extractFieldErrorHint(String errorMessage) {
+        if (errorMessage == null || errorMessage.isEmpty()) {
+            return "unknown";
+        }
+        // Jackson 错误通常包含字段路径，如 "at [Source: ...] through reference chain: ...["patch"]["evidenceQuestionId"]"
+        int throughRefIdx = errorMessage.indexOf("through reference chain:");
+        if (throughRefIdx > 0) {
+            String refChain = errorMessage.substring(throughRefIdx);
+            int bracketStart = refChain.lastIndexOf('[');
+            int bracketEnd = refChain.lastIndexOf(']');
+            if (bracketStart > 0 && bracketEnd > bracketStart) {
+                return refChain.substring(bracketStart + 2, bracketEnd - 1);
+            }
+        }
+        // 尝试匹配 "Unexpected character" 模式，提示可能是 UUID 未加引号
+        if (errorMessage.contains("Unexpected character") && errorMessage.contains("expecting comma")) {
+            return "likely_uuid_without_quotes";
+        }
+        return "parse_error";
     }
 
     /**
@@ -412,6 +452,9 @@ public class OpenAiClient implements AiClient {
                         usage.getTotalTokens().longValue() - usage.getPromptTokens().longValue());
             }
         }
+        String rawResponse = response.getResult() != null 
+                ? response.getResult().getOutput().getText() 
+                : null;
         return AiCallResult.<T>builder()
                 .output(output)
                 .promptCode(renderedPrompt.getPromptCode())
@@ -419,6 +462,9 @@ public class OpenAiClient implements AiClient {
                 .promptTokens(promptTokens)
                 .responseTokens(responseTokens)
                 .latencyMs(latencyMs)
+                .systemPrompt(renderedPrompt.getSystemPrompt())
+                .userPrompt(renderedPrompt.getUserPrompt())
+                .rawResponse(rawResponse)
                 .build();
     }
 
@@ -544,6 +590,7 @@ public class OpenAiClient implements AiClient {
         variables.put("currentTargetDepth", safeString(input.getCurrentTargetDepth()));
         variables.put("currentQuestionType", safeString(input.getCurrentQuestionType()));
         variables.put("answerText", safeString(input.getAnswerText()));
+        variables.put("resumeText", truncate(input.getResumeText(), 1000));
         variables.put("expectedPoints", formatBulletLines(input.getExpectedPoints()));
         variables.put("recentContext", formatRecentContext(input.getRecentContext()));
         variables.put("pauseStats", formatPauseStats(input.getPauseStats()));
@@ -792,3 +839,6 @@ public class OpenAiClient implements AiClient {
         return value.substring(0, maxLen);
     }
 }
+
+
+

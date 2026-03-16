@@ -10,6 +10,9 @@ import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.resume.entity.Resume;
+import com.a05.aiinterview.resume.mapper.ResumeMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -17,7 +20,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -31,6 +34,7 @@ class AnswerSubmitServiceExpectedPointsTest {
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        ResumeMapper resumeMapper = mock(ResumeMapper.class);
         AnswerSubmitPersistenceService persistenceService = mock(AnswerSubmitPersistenceService.class);
         ReportGenerationService reportService = mock(ReportGenerationService.class);
 
@@ -39,8 +43,10 @@ class AnswerSubmitServiceExpectedPointsTest {
                 sessionMapper,
                 questionMapper,
                 attemptMapper,
+                resumeMapper,
                 persistenceService,
-                reportService
+                reportService,
+                new ObjectMapper()
         );
 
         Long sessionId = 1L;
@@ -54,6 +60,7 @@ class AnswerSubmitServiceExpectedPointsTest {
         session.setTargetRole("JAVA_BACKEND");
         session.setExperienceLevel("SENIOR");
         session.setMode("professional");
+        session.setResumeId(7001L);
         session.setCurrentQuestionNo(1);
         session.setContextWindowSize(5);
         session.setStateLedgerJson(new HashMap<>());
@@ -74,11 +81,15 @@ class AnswerSubmitServiceExpectedPointsTest {
         when(questionMapper.selectById(questionId)).thenReturn(question);
         when(questionMapper.selectList(any())).thenReturn(List.of(question));
         when(attemptMapper.selectList(any())).thenReturn(List.of());
+        Resume resume = new Resume();
+        resume.setId(7001L);
+        resume.setParsedText("候选人主做高并发服务，熟悉线程池和锁优化。");
+        when(resumeMapper.selectById(7001L)).thenReturn(resume);
 
         EvaluationDecisionOutput evalOutput = EvaluationDecisionOutput.builder()
-                .signal("NEXT_DOMAIN")
-                .patch(EvaluationDecisionOutput.LedgerPatch.builder().build())
-                .nextStrategy(null)
+                .passCurrentLevel(true)
+                .deepen(false)
+                .signal("END")
                 .build();
         when(aiClient.callEvaluationDecision(any())).thenReturn(
                 AiCallResult.<EvaluationDecisionOutput>builder().output(evalOutput).build()
@@ -104,6 +115,7 @@ class AnswerSubmitServiceExpectedPointsTest {
 
         ArgumentCaptor<EvaluationDecisionInput> captor = ArgumentCaptor.forClass(EvaluationDecisionInput.class);
         verify(aiClient).callEvaluationDecision(captor.capture());
-        assertEquals(List.of("corePoolSize", "拒绝策略"), captor.getValue().getExpectedPoints());
+        assertThat(captor.getValue().getExpectedPoints()).containsExactly("corePoolSize", "拒绝策略");
+        assertThat(captor.getValue().getResumeText()).isEqualTo("候选人主做高并发服务，熟悉线程池和锁优化。");
     }
 }

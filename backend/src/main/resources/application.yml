@@ -71,8 +71,9 @@ mybatis-plus:
 
 logging:
   level:
+    org.springframework.ai: DEBUG
     root: INFO
-    com.a05.aiinterview: INFO
+    com.a05.aiinterview: DEBUG
 
 # 简历文件上传目录配置，默认使用系统临时目录，生产环境建议配置固定路径
 resume:
@@ -118,9 +119,12 @@ rag:
 # follow.poll-interval-ms: 尾随回放轮询间隔（毫秒）
 # follow.idle-timeout-seconds: 尾随等待超时（秒）
 sse:
+  #TODO 生成缓存过期时间（秒），默认 300s
   generation-cache-ttl-seconds: ${SSE_CACHE_TTL:1800}
   follow:
+    #TODO 尾随回放轮询间隔（毫秒），默认 250ms
     poll-interval-ms: ${SSE_FOLLOW_POLL_INTERVAL_MS:250}
+    #TODO 尾随等待超时（秒），默认 30s
     idle-timeout-seconds: ${SSE_FOLLOW_IDLE_TIMEOUT_SECONDS:30}
 
 # 语音服务配置（ASR + TTS）
@@ -147,5 +151,7 @@ speech:
     endpoint: ${TTS_ENDPOINT:https://dashscope.aliyuncs.com/api/v1/services/aigc/text2speech/speech-synthesis}
     model: ${TTS_MODEL:cosyvoice-v1}
     voice: ${TTS_VOICE:longxiaochun}
-    cache-ttl-seconds: ${TTS_CACHE_TTL:3600}
-    timeout-ms: ${TTS_TIMEOUT_MS:10000}
+    #TODO 语音缓存过期时间（秒），默认 3600s = 1 小时
+    cache-ttl-seconds: ${TTS_CACHE_TTL:36000000}
+    #TODO 语音合成超时（毫秒），默认 10s
+    timeout-ms: ${TTS_TIMEOUT_MS:10000000}

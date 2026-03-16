@@ -7,6 +7,7 @@ import com.a05.aiinterview.interview.mapper.SessionSkillStateMapper;
 import com.a05.aiinterview.position.entity.PositionSkillDomain;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -67,8 +68,15 @@ public class StateLedgerInitService {
             return state;
         }).collect(Collectors.toList());
 
-        // 逐条插入（MyBatis-Plus 批量插入需要 IService，这里保持简单）
-        states.forEach(sessionSkillStateMapper::insert);
+        // 逐条插入（幂等容错：若并发重复初始化导致唯一键冲突，忽略该条并继续）
+        for (SessionSkillState state : states) {
+            try {
+                sessionSkillStateMapper.insert(state);
+            } catch (DuplicateKeyException ex) {
+                log.warn("session_skill_states 已存在，忽略重复初始化, sessionId={}, domainId={}",
+                        sessionId, state.getDomainId());
+            }
+        }
 
         log.info("session_skill_states 批量创建完成, sessionId={}, 共 {} 条", sessionId, states.size());
 
@@ -87,6 +95,7 @@ public class StateLedgerInitService {
         ledger.put("active_project_id", null);
 
         // 各知识域初始状态
+        //TODO 知识域描述过于简单随意
         List<Map<String, Object>> domainStates = new ArrayList<>();
         if (plannerOutput.getDomains() != null) {
             plannerOutput.getDomains().forEach(d -> {

@@ -12,18 +12,10 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * AI 输出 DTO 契约验证器。
- *
- * <p>职责：对三类核心 AI 调用（Planner / EvaluationDecision / Report）
- * 的输出 DTO 进行必填字段校验和兜底降级处理，确保主链路不因 AI 输出格式漂移而中断。
- *
- * <p>降级策略：
- * <ul>
- *   <li>缺少必填字段 → 填入兜底默认值，同时 {@code log.warn} 打印字段路径</li>
- *   <li>字段类型漂移（JSON 解析异常）→ {@code log.error} 打印完整堆栈，返回最小可用降级对象</li>
- * </ul>
  */
 @Slf4j
 @Component
@@ -32,40 +24,19 @@ public class AiOutputContractValidator {
 
     private final ObjectMapper objectMapper;
 
-    // ─────────────────────────── Planner ────────────────────────────────────
-
-    /**
-     * 验证并修复 Planner 输出契约。
-     *
-     * <p>必填契约：
-     * <ol>
-     *   <li>{@code domains} 非空列表</li>
-     *   <li>{@code questionMixPlan} 非空 Map</li>
-     *   <li>{@code projects} 中每个锚点必须有 {@code projectId} 和 {@code name}</li>
-     * </ol>
-     *
-     * @param output AI 返回的 PlannerOutput，可能含 null 字段
-     * @return 经验证修复后的输出，保证必填字段非 null
-     */
     public PlannerOutput validatePlanner(PlannerOutput output) {
         if (output == null) {
             log.warn("[契约] Planner 输出为 null，返回最小降级对象");
             return buildFallbackPlannerOutput();
         }
-
-        // 校验 domains
         if (output.getDomains() == null || output.getDomains().isEmpty()) {
             log.warn("[契约] Planner.domains 为空，已填入空列表兜底，请检查 Prompt 或 AI 输出格式");
             output.setDomains(new ArrayList<>());
         }
-
-        // 校验 questionMixPlan
         if (output.getQuestionMixPlan() == null || output.getQuestionMixPlan().isEmpty()) {
             log.warn("[契约] Planner.questionMixPlan 为空，已填入默认配额兜底");
             output.setQuestionMixPlan(buildDefaultQuestionMixPlan());
         }
-
-        // 校验 projects 中关键字段完整性
         if (output.getProjects() != null) {
             for (PlannerOutput.ProjectAnchor anchor : output.getProjects()) {
                 if (anchor.getProjectId() == null || anchor.getProjectId().isBlank()) {
@@ -76,16 +47,9 @@ public class AiOutputContractValidator {
                 }
             }
         }
-
         return output;
     }
 
-    /**
-     * 从 JSON 字符串安全解析 PlannerOutput；解析失败时记录异常并返回降级对象。
-     *
-     * @param json AI 返回的原始 JSON 文本
-     * @return 验证后的输出，类型漂移时返回最小降级对象
-     */
     public PlannerOutput parseAndValidatePlanner(String json) {
         try {
             PlannerOutput output = objectMapper.readValue(json, PlannerOutput.class);
@@ -97,64 +61,60 @@ public class AiOutputContractValidator {
         }
     }
 
-    // ────────────────────────── EvaluationDecision ──────────────────────────
-
-    /**
-     * 验证并修复 EvaluationDecision 输出契约。
-     *
-     * <p>必填契约：
-     * <ol>
-     *   <li>{@code signal} 非空（NEXT_DOMAIN / DEEPEN / END 之一）</li>
-     *   <li>{@code patch}（ledgerPatch）非 null</li>
-     *   <li>signal != END 时 {@code nextStrategy} 非 null</li>
-     * </ol>
-     *
-     * @param output AI 返回的 EvaluationDecisionOutput
-     * @return 验证修复后的输出
-     */
     public EvaluationDecisionOutput validateEvaluationDecision(EvaluationDecisionOutput output) {
         if (output == null) {
             log.warn("[契约] EvaluationDecision 输出为 null，返回最小降级对象");
             return buildFallbackEvaluationDecisionOutput();
         }
 
-        if (output.getSignal() == null || output.getSignal().isBlank()) {
-            log.warn("[契约] EvaluationDecision.signal 为空，已兜底为 NEXT_DOMAIN");
-            output = EvaluationDecisionOutput.builder()
-                    .domainCode(output.getDomainCode())
-                    .depthReached(output.getDepthReached())
-                    .saturated(output.isSaturated())
-                    .signal("NEXT_DOMAIN")
-                    .patch(output.getPatch())
-                    .nextStrategy(output.getNextStrategy())
-                    .reasoning(output.getReasoning())
-                    .build();
+        String signal = normalizeSignal(output.getSignal());
+        if (signal == null) {
+            log.warn("[契约] EvaluationDecision.signal 非法，降级为 END");
+            return buildFallbackEvaluationDecisionOutput();
+        }
+        output.setSignal(signal);
+
+        if ("END".equals(signal)) {
+            output.setDeepen(false);
+            output.setNextStrategy(null);
+            return output;
         }
 
-        if (output.getPatch() == null) {
-            log.warn("[契约] EvaluationDecision.patch(ledgerPatch) 为 null，已填入最小 patch 兜底");
-            EvaluationDecisionOutput.LedgerPatch emptyPatch = EvaluationDecisionOutput.LedgerPatch.builder()
-                    .domainCode(output.getDomainCode())
-                    .build();
-            output.setPatch(emptyPatch);
+        if (output.getNextStrategy() == null) {
+            log.warn("[契约] signal={} 但 nextStrategy 为空，降级为 END", signal);
+            return buildFallbackEvaluationDecisionOutput();
         }
 
-        // signal 非 END 时检查 nextStrategy
-        if (!"END".equalsIgnoreCase(output.getSignal()) && output.getNextStrategy() == null) {
-            log.warn("[契约] EvaluationDecision.signal={} 但 nextStrategy 为 null，将降级为 END 信号",
-                    output.getSignal());
-            output.setSignal("END");
+        sanitizeNextStrategy(output.getNextStrategy());
+
+        switch (signal) {
+            case "DEEPEN" -> {
+                if (!output.isPassCurrentLevel()) {
+                    log.warn("[契约] signal=DEEPEN 但 passCurrentLevel=false，降级为 NEXT_DOMAIN");
+                    output.setSignal("NEXT_DOMAIN");
+                    output.setDeepen(false);
+                } else {
+                    output.setDeepen(true);
+                }
+            }
+            case "RETRY_SAME_DOMAIN" -> {
+                if (output.isPassCurrentLevel()) {
+                    log.warn("[契约] signal=RETRY_SAME_DOMAIN 但 passCurrentLevel=true，已回收为未通过当前层");
+                    output.setPassCurrentLevel(false);
+                }
+                output.setDeepen(false);
+            }
+            default -> {
+                if (output.isDeepen()) {
+                    log.warn("[契约] deepen=true 但 signal!=DEEPEN，已回收 deepen 标记");
+                    output.setDeepen(false);
+                }
+            }
         }
 
         return output;
     }
 
-    /**
-     * 从 JSON 字符串安全解析 EvaluationDecisionOutput；解析失败时降级。
-     *
-     * @param json AI 返回的原始 JSON 文本
-     * @return 验证后的输出
-     */
     public EvaluationDecisionOutput parseAndValidateEvaluationDecision(String json) {
         try {
             EvaluationDecisionOutput output = objectMapper.readValue(json, EvaluationDecisionOutput.class);
@@ -166,28 +126,12 @@ public class AiOutputContractValidator {
         }
     }
 
-    // ─────────────────────────── Report ────────────────────────────────────
-
-    /**
-     * 验证并修复 ReportGeneration 输出契约。
-     *
-     * <p>必填契约：
-     * <ol>
-     *   <li>{@code overallScore} 在 [0, 100] 范围内</li>
-     *   <li>{@code skillDomainScores} 非 null</li>
-     *   <li>{@code summary} 非空</li>
-     * </ol>
-     *
-     * @param output AI 返回的 ReportGenerationOutput
-     * @return 验证修复后的输出
-     */
     public ReportGenerationOutput validateReport(ReportGenerationOutput output) {
         if (output == null) {
             log.warn("[契约] Report 输出为 null，返回最小降级对象");
             return buildFallbackReportOutput();
         }
 
-        // 校验 overallScore 范围
         if (output.getOverallScore() == null) {
             log.warn("[契约] Report.overallScore 为 null，已兜底为 0");
             output.setOverallScore(BigDecimal.ZERO);
@@ -212,12 +156,6 @@ public class AiOutputContractValidator {
         return output;
     }
 
-    /**
-     * 从 JSON 字符串安全解析 ReportGenerationOutput；解析失败时降级。
-     *
-     * @param json AI 返回的原始 JSON 文本
-     * @return 验证后的输出
-     */
     public ReportGenerationOutput parseAndValidateReport(String json) {
         try {
             ReportGenerationOutput output = objectMapper.readValue(json, ReportGenerationOutput.class);
@@ -229,7 +167,110 @@ public class AiOutputContractValidator {
         }
     }
 
-    // ──────────────────────────── 降级构造 ────────────────────────────────
+    private void sanitizeNextStrategy(EvaluationDecisionOutput.NextQuestionStrategy strategy) {
+        strategy.setQuestionType(normalizeQuestionType(strategy.getQuestionType()));
+        strategy.setTargetDepth(normalizeDepth(strategy.getTargetDepth()));
+        strategy.setDifficulty(normalizeDepth(strategy.getDifficulty()));
+        String focus = sanitizeSingleFocus(firstNonBlank(
+                strategy.getFocusPoint(),
+                strategy.getTargetSkill(),
+                strategy.getNextDomainName(),
+                strategy.getNextDomainCode()
+        ));
+        strategy.setFocusPoint(focus);
+        if (strategy.getTargetSkill() == null || strategy.getTargetSkill().isBlank()) {
+            strategy.setTargetSkill(focus);
+        } else {
+            strategy.setTargetSkill(sanitizeSingleFocus(strategy.getTargetSkill()));
+        }
+        List<String> expectedPoints = strategy.getExpectedPoints();
+        if (expectedPoints == null || expectedPoints.isEmpty()) {
+            strategy.setExpectedPoints(List.of(
+                    "说明" + focus + "的核心概念",
+                    "结合场景说明" + focus + "的使用方式"
+            ));
+            return;
+        }
+        List<String> sanitized = new ArrayList<>();
+        for (String point : expectedPoints) {
+            if (point == null || point.isBlank()) {
+                continue;
+            }
+            String normalized = point.trim();
+            if (containsAnotherFocus(normalized, focus)) {
+                continue;
+            }
+            if (!normalized.contains(focus)) {
+                sanitized.add("围绕" + focus + "说明：" + normalized);
+            } else {
+                sanitized.add(normalized);
+            }
+        }
+        if (sanitized.isEmpty()) {
+            sanitized = List.of(
+                    "说明" + focus + "的核心概念",
+                    "比较" + focus + "的常见方案与取舍",
+                    "结合场景说明" + focus + "的选择依据"
+            );
+        }
+        strategy.setExpectedPoints(sanitized.stream().limit(5).toList());
+    }
+
+    private boolean containsAnotherFocus(String text, String focus) {
+        if (focus == null || focus.isBlank()) {
+            return false;
+        }
+        String normalizedFocus = focus.toLowerCase(Locale.ROOT);
+        String normalizedText = text.toLowerCase(Locale.ROOT);
+        if (normalizedText.contains(normalizedFocus)) {
+            return false;
+        }
+        return normalizedText.contains("seata") || normalizedText.contains("tcc") || normalizedText.contains("saga");
+    }
+
+    private String normalizeSignal(String signal) {
+        if (signal == null || signal.isBlank()) {
+            return null;
+        }
+        String normalized = signal.trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "DEEPEN", "RETRY_SAME_DOMAIN", "NEXT_DOMAIN", "END" -> normalized;
+            default -> null;
+        };
+    }
+
+    private String normalizeQuestionType(String questionType) {
+        if (questionType == null || questionType.isBlank()) {
+            return "PRINCIPLE";
+        }
+        return questionType.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeDepth(String depth) {
+        if (depth == null || depth.isBlank()) {
+            return "L2";
+        }
+        String normalized = depth.trim().toUpperCase(Locale.ROOT);
+        return normalized.matches("L[1-5]") ? normalized : "L2";
+    }
+
+    private String sanitizeSingleFocus(String value) {
+        if (value == null || value.isBlank()) {
+            return "基础能力";
+        }
+        String[] parts = value.split("(?i)\\band\\b|\\bor\\b|\\bvs\\b|与|和|及|以及|、|/|\\+|,|，|;|；|\\|");
+        String focus = parts.length > 0 ? parts[0].trim() : value.trim();
+        return focus.isBlank() ? "基础能力" : focus;
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "基础能力";
+    }
 
     private PlannerOutput buildFallbackPlannerOutput() {
         PlannerOutput fallback = new PlannerOutput();
@@ -242,6 +283,8 @@ public class AiOutputContractValidator {
 
     private EvaluationDecisionOutput buildFallbackEvaluationDecisionOutput() {
         return EvaluationDecisionOutput.builder()
+                .passCurrentLevel(false)
+                .deepen(false)
                 .signal("END")
                 .reasoning("[降级] AI 评估决策解析失败，强制结束本轮面试")
                 .build();
@@ -268,11 +311,10 @@ public class AiOutputContractValidator {
         return plan;
     }
 
-    /**
-     * 截取 JSON 前 200 字符用于日志摘要，避免超长日志。
-     */
     private String safeSnippet(String json) {
-        if (json == null) return "null";
+        if (json == null) {
+            return "null";
+        }
         return json.length() > 200 ? json.substring(0, 200) + "..." : json;
     }
 }

@@ -130,6 +130,7 @@ public class InterviewService {
         dto.setStatus(session.getStatus());
 
         // 提取考纲摘要（plannedDomains 列表，用于 Loading 页展示）
+        //TODO  Loading 页不展示
         dto.setSyllabusSummary(buildSyllabusSummary(session));
 
         // 若已进入 in_progress，内嵌首题
@@ -367,6 +368,24 @@ public class InterviewService {
             case "DEVOPS" -> "DevOps 工程师";
             default -> targetRole;
         };
+    }
+
+    /**
+     * 获取面试会话的状态账本（调试用）。
+     *
+     * @param sessionId 会话 ID
+     * @param userId    用户 ID（用于权限校验）
+     * @return 状态账本 JSON
+     */
+    public Object getStateLedger(Long sessionId, Long userId) {
+        InterviewSession session = interviewSessionMapper.selectById(sessionId);
+        if (session == null) {
+            throw new IllegalArgumentException("面试会话不存在: " + sessionId);
+        }
+        if (!session.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("无权访问该面试会话");
+        }
+        return session.getStateLedgerJson();
     }
 
 }

@@ -1893,13 +1893,15 @@ export default {
 
     const SIGNAL_SCORE_MAP = {
       NEXT_DOMAIN: 78,
+      RETRY_SAME_DOMAIN: 72,
       DEEPEN: 84,
       END: 80
     }
 
     const SIGNAL_TEXT_MAP = {
-      NEXT_DOMAIN: '好的，我们进入下一个知识点。',
-      DEEPEN: '回答不错，我们继续深挖这个方向。',
+      NEXT_DOMAIN: '',
+      RETRY_SAME_DOMAIN: '',
+      DEEPEN: '',
       END: '本轮问答已完成，正在生成你的面试报告。'
     }
 
@@ -2111,13 +2113,6 @@ export default {
 
     const sendWelcomeMessage = () => {
       isAiSpeaking.value = true
-      const welcomeMsg = singleQuestionMode.value
-        ? '开始「' + jobDisplayName.value + '」单题练习。'
-        : '欢迎参加「' + jobDisplayName.value + '」面试，我们从第一题开始。'
-      messages.value.push({
-        type: 'ai',
-        content: welcomeMsg
-      })
       const firstQuestion = questions.value[0]
       if (firstQuestion) {
         messages.value.push({

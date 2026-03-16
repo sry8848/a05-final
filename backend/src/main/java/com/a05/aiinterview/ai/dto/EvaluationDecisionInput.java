@@ -57,6 +57,9 @@ public class EvaluationDecisionInput {
     /** 候选人回答文本（语音模式为含 [停顿 Xs] 标签的富文本） */
     private String answerText;
 
+    /** 候选人简历解析文本（可为空，供评估对齐候选人背景） */
+    private String resumeText;
+
     /**
      * 语音停顿统计（语音模式专属，文字模式为 null）。
      * 包含 wpm（语速）、longPauseCount（长停顿次数）、longestPauseMs（最长停顿毫秒数）。

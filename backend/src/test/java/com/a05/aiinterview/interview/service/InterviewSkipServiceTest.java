@@ -4,6 +4,7 @@ import com.a05.aiinterview.interview.dto.SkipAndNextRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptResponse;
 import com.a05.aiinterview.interview.engine.AnswerSubmitPersistenceService;
+import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.interview.engine.ReportGenerationService;
 import com.a05.aiinterview.interview.entity.InterviewAttempt;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
@@ -14,6 +15,7 @@ import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -71,14 +73,29 @@ class InterviewSkipServiceTest {
         session.setUserId(3L);
         session.setStatus("in_progress");
         session.setCurrentQuestionNo(3);
-        session.setStateLedgerJson(Map.of("max_questions", 10));
+        session.setStateLedgerJson(Map.of(
+                "max_questions", 10,
+                "domain_states", List.of(
+                        Map.of("domain_id", "redis", "status", "IN_PROGRESS"),
+                        Map.of("domain_id", "java_core", "status", "UNASKED"),
+                        Map.of("domain_id", "mq", "status", "COVERED")
+                )
+        ));
+        session.setSyllabusJson(Map.of(
+                "domains", List.of(
+                        Map.of("domainId", 1L, "domainCode", "java_core", "domainName", "Java 核心"),
+                        Map.of("domainId", 8L, "domainCode", "mq", "domainName", "消息队列")
+                )
+        ));
         when(sessionMapper.selectById(1L)).thenReturn(session);
 
         InterviewQuestion question = new InterviewQuestion();
         question.setId(2L);
         question.setSessionId(1L);
+        question.setDomainId(6L);
         question.setTargetDepth("L2");
         question.setTargetSkill("并发控制");
+        question.setGenerationContextJson(Map.of("domainCode", "redis"));
         when(questionMapper.selectById(2L)).thenReturn(question);
 
         SkipAndNextRequest request = new SkipAndNextRequest();
@@ -90,10 +107,12 @@ class InterviewSkipServiceTest {
         assertEquals("in_progress", response.getSessionStatus());
 
         ArgumentCaptor<SubmitAttemptRequest> submitCaptor = ArgumentCaptor.forClass(SubmitAttemptRequest.class);
-        verify(persistenceService).persist(eq(1L), eq(question), submitCaptor.capture(), any());
+        ArgumentCaptor<EvaluationDecisionOutput> evalCaptor = ArgumentCaptor.forClass(EvaluationDecisionOutput.class);
+        verify(persistenceService).persist(eq(1L), eq(question), submitCaptor.capture(), evalCaptor.capture());
         assertEquals("attempt-2", submitCaptor.getValue().getAttemptId());
         assertEquals("[skip]", submitCaptor.getValue().getAnswerText());
         assertEquals(true, submitCaptor.getValue().getIsFinal());
+        assertEquals("java_core", evalCaptor.getValue().getNextStrategy().getNextDomainCode());
     }
 
     @Test
@@ -131,4 +150,3 @@ class InterviewSkipServiceTest {
         verify(reportGenerationService).generateAsync(1L);
     }
 }
-

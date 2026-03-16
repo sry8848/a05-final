@@ -56,7 +56,7 @@ public interface AiClient {
      * @param input 包含当前题目信息、候选人回答、历史 Q/A 上下文和状态账本
      * @return 包含评估结果、账本 Patch、下一题策略和 Token 消耗的结果包装
      */
-    AiCallResult<EvaluationDecisionOutput> callEvaluationDecision(EvaluationDecisionInput input);
+    AiCallResult<EvaluationDecisionOutput>  callEvaluationDecision(EvaluationDecisionInput input);
 
     /**
      * 调用报告生成服务，根据全场 Q/A 记录和状态账本生成结构化评估报告。
