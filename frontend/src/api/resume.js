@@ -186,6 +186,11 @@ export function getInterviewReport(sessionId) {
   return request('/interviews/' + sessionId + '/report', { method: 'GET' })
 }
 
+/** Delete interview session */
+export function deleteInterviewSession(sessionId) {
+  return request('/interviews/' + sessionId, { method: 'DELETE' })
+}
+
 /** Get interview question detail */
 export function getInterviewQuestionDetail(sessionId, questionId) {
   return request('/interviews/' + sessionId + '/questions/' + questionId, { method: 'GET' })

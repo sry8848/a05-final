@@ -11,6 +11,7 @@ import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.interview.service.InterviewSessionStatusService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -53,6 +54,7 @@ public class ReportGenerationService {
     private final InterviewQuestionMapper interviewQuestionMapper;
     private final InterviewAttemptMapper interviewAttemptMapper;
     private final InterviewReportMapper interviewReportMapper;
+    private final InterviewSessionStatusService interviewSessionStatusService;
 
     /**
      * 异步生成面试报告。
@@ -71,8 +73,8 @@ public class ReportGenerationService {
         }
 
         if (interviewReportMapper.selectBySessionId(sessionId) != null) {
-            log.info("报告已存在，跳过重复生成，直接更新状态, sessionId={}", sessionId);
-            ensureCompleted(sessionId);
+            log.info("报告已存在，跳过重复生成，转为同步状态, sessionId={}", sessionId);
+            interviewSessionStatusService.resolveAndSync(sessionId);
             return;
         }
 
@@ -113,22 +115,16 @@ public class ReportGenerationService {
             InterviewReport report = buildReport(sessionId, output);
             interviewReportMapper.insert(report);
 
-            // 更新会话状态为 completed
-            InterviewSession update = new InterviewSession();
-            update.setId(sessionId);
-            update.setStatus("completed");
-            update.setUpdatedAt(LocalDateTime.now());
-            interviewSessionMapper.updateById(update);
+            interviewSessionStatusService.resolveAndSync(sessionId);
 
-            log.info("报告生成完成, sessionId={}, overallScore={}, status=completed",
+            log.info("报告生成完成, sessionId={}, overallScore={}",
                     sessionId, report.getOverallScore());
 
         } catch (Exception e) {
             log.error("报告生成异常, sessionId={}", sessionId, e);
-            // 调用失败时保持状态为 report_generating，或改为 aborted 并通知用户重试
             InterviewSession update = new InterviewSession();
             update.setId(sessionId);
-            update.setStatus("report_generating");
+            update.setStatus("aborted");
             update.setUpdatedAt(LocalDateTime.now());
             interviewSessionMapper.updateById(update);
         }
@@ -252,14 +248,4 @@ public class ReportGenerationService {
         Object code = q.getGenerationContextJson().get("domainCode");
         return (code instanceof String s && !s.isBlank()) ? s : "intro";
     }
-
-    /** 确保会话状态为 completed（若已存在报告则补充更新状态）。 */
-    private void ensureCompleted(Long sessionId) {
-        InterviewSession update = new InterviewSession();
-        update.setId(sessionId);
-        update.setStatus("completed");
-        update.setUpdatedAt(LocalDateTime.now());
-        interviewSessionMapper.updateById(update);
-    }
-
 }

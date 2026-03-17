@@ -7,6 +7,7 @@ import com.a05.aiinterview.interview.entity.InterviewReport;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.interview.service.InterviewSessionStatusService;
 import com.a05.aiinterview.position.entity.PositionSkillDomain;
 import com.a05.aiinterview.position.service.PositionService;
 import com.a05.aiinterview.profile.config.ProfileAvatarStorageConfig;
@@ -64,6 +65,7 @@ public class ProfileService {
     private final InterviewReportMapper interviewReportMapper;
     private final PositionService positionService;
     private final ProfileAvatarStorageConfig avatarStorageConfig;
+    private final InterviewSessionStatusService interviewSessionStatusService;
 
     public ProfileDto getProfile(Long userId) {
         User user = requireUser(userId);
@@ -148,7 +150,7 @@ public class ProfileService {
     }
 
     public ProfileStatisticsDto getStatistics(Long userId, String positionCode) {
-        List<InterviewSession> sessions = loadSessions(userId, positionCode);
+        List<InterviewSession> sessions = loadFinishedSessions(userId, positionCode);
 
         ProfileStatisticsDto dto = new ProfileStatisticsDto();
         dto.setTotalSessions(sessions.size());
@@ -164,7 +166,7 @@ public class ProfileService {
     }
 
     public SkillOverviewDto getSkillOverview(Long userId, String positionCode) {
-        List<InterviewSession> sessions = loadSessions(userId, positionCode);
+        List<InterviewSession> sessions = loadFinishedSessions(userId, positionCode);
         List<InterviewReport> reports = loadReportsBySessions(sessions);
         List<ReportedSession> recentReportedSessions = collectRecentReportedSessions(sessions, reports, 8, false);
         Map<String, PositionSkillDomain> allowedDomains = loadAllowedDomains(positionCode);
@@ -189,6 +191,32 @@ public class ProfileService {
             wrapper.eq(InterviewSession::getTargetRole, role);
         }
         return interviewSessionMapper.selectList(wrapper);
+    }
+
+    private List<InterviewSession> loadFinishedSessions(Long userId, String positionCode) {
+        return loadSessions(userId, positionCode).stream()
+                .filter(this::shouldCountForGrowthStatistics)
+                .toList();
+    }
+
+    private boolean shouldCountForGrowthStatistics(InterviewSession session) {
+        if (session == null) {
+            return false;
+        }
+        String effectiveStatus = resolveEffectiveStatus(session);
+        if (session.getFinishedAt() != null) {
+            return true;
+        }
+        return "completed".equalsIgnoreCase(effectiveStatus)
+                || "report_generating".equalsIgnoreCase(effectiveStatus);
+    }
+
+    private String resolveEffectiveStatus(InterviewSession session) {
+        String resolved = interviewSessionStatusService.resolveAndSync(session);
+        if (StringUtils.hasText(resolved)) {
+            return resolved;
+        }
+        return session.getStatus();
     }
 
     private List<InterviewReport> loadReportsBySessions(List<InterviewSession> sessions) {

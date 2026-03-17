@@ -9,6 +9,7 @@ import com.a05.aiinterview.interview.dto.SubmitAttemptResponse;
 import com.a05.aiinterview.interview.engine.AnswerSubmitService;
 import com.a05.aiinterview.interview.service.InterviewHintService;
 import com.a05.aiinterview.interview.service.InterviewHistoryService;
+import com.a05.aiinterview.interview.service.InterviewManagementService;
 import com.a05.aiinterview.interview.service.InterviewQuestionReviewService;
 import com.a05.aiinterview.interview.service.InterviewReportService;
 import com.a05.aiinterview.interview.service.InterviewService;
@@ -33,6 +34,7 @@ class InterviewControllerNewEndpointsTest {
         InterviewSkipService skipService = mock(InterviewSkipService.class);
         InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
         InterviewReportService reportService = mock(InterviewReportService.class);
+        InterviewManagementService managementService = mock(InterviewManagementService.class);
         LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
         QuestionStreamService streamService = mock(QuestionStreamService.class);
 
@@ -44,6 +46,7 @@ class InterviewControllerNewEndpointsTest {
                 skipService,
                 reviewService,
                 reportService,
+                managementService,
                 recommendationService,
                 streamService
         );
@@ -68,6 +71,7 @@ class InterviewControllerNewEndpointsTest {
         InterviewSkipService skipService = mock(InterviewSkipService.class);
         InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
         InterviewReportService reportService = mock(InterviewReportService.class);
+        InterviewManagementService managementService = mock(InterviewManagementService.class);
         LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
         QuestionStreamService streamService = mock(QuestionStreamService.class);
 
@@ -79,6 +83,7 @@ class InterviewControllerNewEndpointsTest {
                 skipService,
                 reviewService,
                 reportService,
+                managementService,
                 recommendationService,
                 streamService
         );
@@ -99,6 +104,7 @@ class InterviewControllerNewEndpointsTest {
         InterviewSkipService skipService = mock(InterviewSkipService.class);
         InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
         InterviewReportService reportService = mock(InterviewReportService.class);
+        InterviewManagementService managementService = mock(InterviewManagementService.class);
         LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
         QuestionStreamService streamService = mock(QuestionStreamService.class);
 
@@ -110,6 +116,7 @@ class InterviewControllerNewEndpointsTest {
                 skipService,
                 reviewService,
                 reportService,
+                managementService,
                 recommendationService,
                 streamService
         );
@@ -128,5 +135,35 @@ class InterviewControllerNewEndpointsTest {
         assertEquals(0, response.getCode());
         assertEquals("NEXT_DOMAIN", response.getData().getEvaluationSignal());
     }
-}
 
+    @Test
+    void deleteInterview_shouldReturnWrappedResponse() {
+        InterviewService interviewService = mock(InterviewService.class);
+        InterviewHistoryService historyService = mock(InterviewHistoryService.class);
+        AnswerSubmitService answerSubmitService = mock(AnswerSubmitService.class);
+        InterviewHintService hintService = mock(InterviewHintService.class);
+        InterviewSkipService skipService = mock(InterviewSkipService.class);
+        InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
+        InterviewReportService reportService = mock(InterviewReportService.class);
+        InterviewManagementService managementService = mock(InterviewManagementService.class);
+        LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
+        QuestionStreamService streamService = mock(QuestionStreamService.class);
+
+        InterviewController controller = new InterviewController(
+                interviewService,
+                historyService,
+                answerSubmitService,
+                hintService,
+                skipService,
+                reviewService,
+                reportService,
+                managementService,
+                recommendationService,
+                streamService
+        );
+
+        ApiResponse<Void> response = controller.deleteInterview(9L, 101L);
+
+        assertEquals(0, response.getCode());
+    }
+}

@@ -33,8 +33,9 @@ class InterviewReportServiceTest {
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
         ReportGenerationService generationService = mock(ReportGenerationService.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
         InterviewReportService service = new InterviewReportService(
-                sessionMapper, reportMapper, questionMapper, attemptMapper, generationService
+                sessionMapper, reportMapper, questionMapper, attemptMapper, generationService, statusService
         );
 
         Long sessionId = 2001L;
@@ -45,6 +46,7 @@ class InterviewReportServiceTest {
         session.setMode("professional");
         session.setTargetRole("JAVA_BACKEND");
         when(sessionMapper.selectById(sessionId)).thenReturn(session);
+        when(statusService.resolveAndSync(session)).thenReturn("completed");
 
         InterviewReport report = new InterviewReport();
         report.setId(1L);
@@ -66,15 +68,22 @@ class InterviewReportServiceTest {
         LocalDateTime now = LocalDateTime.now();
         InterviewAttempt q1OldFinal = buildAttempt(
                 101L, sessionId, 11L, true, "old answer", now.minusMinutes(2), Map.of("score", 66));
+        q1OldFinal.setDetailEvaluationStatus("ready");
         InterviewAttempt q1NewerFinal = buildAttempt(
                 102L, sessionId, 11L, true, "newer answer", now.minusMinutes(1), Map.of("score", 88.5));
+        q1NewerFinal.setDetailEvaluationStatus("ready");
+        q1NewerFinal.setDetailEvaluationJson(Map.of("score", 88.5, "commentary", "较完整"));
         InterviewAttempt q1SameTimeHigherId = buildAttempt(
                 103L, sessionId, 11L, true, "latest answer", now.minusMinutes(1), Map.of("score", "89"));
+        q1SameTimeHigherId.setDetailEvaluationStatus("ready");
+        q1SameTimeHigherId.setDetailEvaluationJson(Map.of("score", "89"));
         InterviewAttempt q1NonFinal = buildAttempt(
                 104L, sessionId, 11L, false, "draft", now, Map.of("score", 99));
 
         InterviewAttempt q2Skip = buildAttempt(
                 201L, sessionId, 12L, true, "[skip]", now.minusSeconds(30), Map.of("score", 50));
+        q2Skip.setDetailEvaluationStatus("ready");
+        q2Skip.setDetailEvaluationJson(Map.of("score", 50, "commentary", "建议补强"));
 
         when(attemptMapper.selectBySessionId(sessionId)).thenReturn(
                 List.of(q1OldFinal, q1NewerFinal, q1SameTimeHigherId, q1NonFinal, q2Skip)
@@ -105,6 +114,115 @@ class InterviewReportServiceTest {
         assertEquals(13L, s3.getQuestionId());
         assertEquals("pending", s3.getStatus());
         assertNull(s3.getScore());
+    }
+
+    @Test
+    void getReport_shouldReturnGeneratingWhenDetailEvaluationStillRunning() {
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        ReportGenerationService generationService = mock(ReportGenerationService.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
+        InterviewReportService service = new InterviewReportService(
+                sessionMapper, reportMapper, questionMapper, attemptMapper, generationService, statusService
+        );
+
+        Long sessionId = 3001L;
+        Long userId = 4001L;
+        InterviewSession session = new InterviewSession();
+        session.setId(sessionId);
+        session.setUserId(userId);
+        session.setStatus("report_generating");
+        session.setMode("professional");
+        when(sessionMapper.selectById(sessionId)).thenReturn(session);
+        when(statusService.resolveAndSync(session)).thenReturn("report_generating");
+
+        InterviewReport report = new InterviewReport();
+        report.setSessionId(sessionId);
+        report.setOverallScore(BigDecimal.valueOf(88));
+        when(reportMapper.selectBySessionId(sessionId)).thenReturn(report);
+
+        InterviewQuestion question = buildQuestion(31L, sessionId, 1, "Q1");
+        when(questionMapper.selectList(any())).thenReturn(List.of(question));
+
+        InterviewAttempt attempt = buildAttempt(
+                301L, sessionId, 31L, true, "answer", LocalDateTime.now(), Map.of("score", 88));
+        attempt.setDetailEvaluationStatus("generating");
+        when(attemptMapper.selectBySessionId(sessionId)).thenReturn(List.of(attempt));
+
+        InterviewReportDto dto = service.getReport(sessionId, userId);
+
+        assertEquals("generating", dto.getReportStatus());
+        assertNull(dto.getQuestions());
+    }
+
+    @Test
+    void getReport_shouldReturnFailedWhenAnyDetailEvaluationFailed() {
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        ReportGenerationService generationService = mock(ReportGenerationService.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
+        InterviewReportService service = new InterviewReportService(
+                sessionMapper, reportMapper, questionMapper, attemptMapper, generationService, statusService
+        );
+
+        Long sessionId = 5001L;
+        Long userId = 6001L;
+        InterviewSession session = new InterviewSession();
+        session.setId(sessionId);
+        session.setUserId(userId);
+        session.setStatus("aborted");
+        session.setMode("practice");
+        when(sessionMapper.selectById(sessionId)).thenReturn(session);
+        when(statusService.resolveAndSync(session)).thenReturn("aborted");
+
+        InterviewReport report = new InterviewReport();
+        report.setSessionId(sessionId);
+        report.setOverallScore(BigDecimal.valueOf(70));
+        when(reportMapper.selectBySessionId(sessionId)).thenReturn(report);
+
+        InterviewQuestion question = buildQuestion(51L, sessionId, 1, "Q1");
+        when(questionMapper.selectList(any())).thenReturn(List.of(question));
+
+        InterviewAttempt attempt = buildAttempt(
+                501L, sessionId, 51L, true, "answer", LocalDateTime.now(), Map.of("score", 70));
+        attempt.setDetailEvaluationStatus("failed");
+        when(attemptMapper.selectBySessionId(sessionId)).thenReturn(List.of(attempt));
+
+        InterviewReportDto dto = service.getReport(sessionId, userId);
+
+        assertEquals("failed", dto.getReportStatus());
+        assertNull(dto.getQuestions());
+    }
+
+    @Test
+    void getReport_shouldReturnFailedWhenSessionAlreadyAbortedAndReportMissing() {
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        ReportGenerationService generationService = mock(ReportGenerationService.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
+        InterviewReportService service = new InterviewReportService(
+                sessionMapper, reportMapper, questionMapper, attemptMapper, generationService, statusService
+        );
+
+        Long sessionId = 7001L;
+        Long userId = 8001L;
+        InterviewSession session = new InterviewSession();
+        session.setId(sessionId);
+        session.setUserId(userId);
+        session.setStatus("aborted");
+        when(sessionMapper.selectById(sessionId)).thenReturn(session);
+        when(reportMapper.selectBySessionId(sessionId)).thenReturn(null);
+        when(statusService.resolveAndSync(session)).thenReturn("aborted");
+
+        InterviewReportDto dto = service.getReport(sessionId, userId);
+
+        assertEquals("failed", dto.getReportStatus());
     }
 
     private InterviewQuestion buildQuestion(Long id, Long sessionId, int no, String stem) {

@@ -42,6 +42,7 @@ public class QuestionDetailEvaluationService {
     private final InterviewQuestionMapper interviewQuestionMapper;
     private final InterviewSessionMapper interviewSessionMapper;
     private final ObjectMapper objectMapper;
+    private final InterviewSessionStatusService interviewSessionStatusService;
 
     /**
      * 按 attempt 主键触发单题详细评估。
@@ -99,6 +100,7 @@ public class QuestionDetailEvaluationService {
             log.error("单题详细评估失败, sessionId={}, questionId={}, attemptId={}",
                     attempt.getSessionId(), attempt.getQuestionId(), attempt.getAttemptId(), ex);
         }
+        interviewSessionStatusService.resolveAndSync(attempt.getSessionId());
     }
 
     private QuestionDetailEvaluationInput buildInput(

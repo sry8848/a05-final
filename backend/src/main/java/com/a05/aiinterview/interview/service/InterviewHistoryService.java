@@ -16,6 +16,7 @@ import java.util.Locale;
 public class InterviewHistoryService {
 
     private final InterviewSessionMapper interviewSessionMapper;
+    private final InterviewSessionStatusService interviewSessionStatusService;
 
     public InterviewHistoryPageDto list(Long userId,
                                         int page,
@@ -50,6 +51,10 @@ public class InterviewHistoryService {
         dto.setTotal(total);
         dto.setPage(safePage);
         dto.setPageSize(safePageSize);
+        items.forEach(item -> item.setStatus(
+                interviewSessionStatusService.toDisplayStatus(
+                        interviewSessionStatusService.resolveAndSync(item.getSessionId())
+                )));
         dto.setItems(items);
         return dto;
     }

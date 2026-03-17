@@ -12,6 +12,7 @@ import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.interview.service.InterviewSessionStatusService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -37,8 +38,9 @@ class ReportGenerationServiceTest {
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
         InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
         ReportGenerationService service = new ReportGenerationService(
-                aiClient, sessionMapper, questionMapper, attemptMapper, reportMapper
+                aiClient, sessionMapper, questionMapper, attemptMapper, reportMapper, statusService
         );
 
         InterviewSession session = new InterviewSession();
@@ -122,8 +124,9 @@ class ReportGenerationServiceTest {
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
         InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
         ReportGenerationService service = new ReportGenerationService(
-                aiClient, sessionMapper, questionMapper, attemptMapper, reportMapper
+                aiClient, sessionMapper, questionMapper, attemptMapper, reportMapper, statusService
         );
 
         InterviewSession session = new InterviewSession();

@@ -439,7 +439,7 @@ export default {
 
     const getStatusText = (status) => {
       const normalized = normalizeAnswerStatus(status)
-      if (normalized === 'answered') return '待评估'
+      if (normalized === 'answered') return '已完成'
       if (normalized === 'skipped') return '已跳过'
       return '待同步'
     }
@@ -460,7 +460,7 @@ export default {
       const score = Number(item?.score)
       const hasNumericScore = Number.isFinite(score)
       if (!hasNumericScore) {
-        if (status === 'answered') return '本题已回答，评分待生成或待评估。'
+        if (status === 'answered') return '本题复盘信息暂时缺失，请稍后重试或查看单题详情。'
         if (status === 'skipped') return '本题已跳过，建议优先补强该知识点。'
         return '本题尚未作答或结果待同步。'
       }

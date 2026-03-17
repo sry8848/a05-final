@@ -6,6 +6,7 @@ import com.a05.aiinterview.interview.engine.AnswerSubmitService;
 import com.a05.aiinterview.interview.service.InterviewHistoryService;
 import com.a05.aiinterview.interview.service.InterviewHintService;
 import com.a05.aiinterview.interview.service.InterviewQuestionReviewService;
+import com.a05.aiinterview.interview.service.InterviewManagementService;
 import com.a05.aiinterview.interview.service.InterviewReportService;
 import com.a05.aiinterview.interview.service.InterviewSkipService;
 import com.a05.aiinterview.interview.service.InterviewService;
@@ -29,6 +30,7 @@ class InterviewControllerQuestionDetailTest {
         InterviewSkipService skipService = mock(InterviewSkipService.class);
         InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
         InterviewReportService reportService = mock(InterviewReportService.class);
+        InterviewManagementService managementService = mock(InterviewManagementService.class);
         LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
         QuestionStreamService streamService = mock(QuestionStreamService.class);
 
@@ -40,6 +42,7 @@ class InterviewControllerQuestionDetailTest {
                 skipService,
                 reviewService,
                 reportService,
+                managementService,
                 recommendationService,
                 streamService
         );
@@ -62,6 +65,7 @@ class InterviewControllerQuestionDetailTest {
         InterviewSkipService skipService = mock(InterviewSkipService.class);
         InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
         InterviewReportService reportService = mock(InterviewReportService.class);
+        InterviewManagementService managementService = mock(InterviewManagementService.class);
         LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
         QuestionStreamService streamService = mock(QuestionStreamService.class);
 
@@ -73,6 +77,7 @@ class InterviewControllerQuestionDetailTest {
                 skipService,
                 reviewService,
                 reportService,
+                managementService,
                 recommendationService,
                 streamService
         );

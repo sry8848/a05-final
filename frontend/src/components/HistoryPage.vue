@@ -12,11 +12,10 @@
     </div>
     
     <div class="history-list">
-      <div 
-        v-for="item in historyList" 
-        :key="item.id" 
+      <div
+        v-for="item in historyList"
+        :key="item.id"
         class="history-item"
-        :class="{ disabled: !isRecordClickable(item) }"
         @click="viewHistoryDetail(item)"
       >
         <div class="history-info">
@@ -39,27 +38,21 @@
           </div>
         </div>
         <div class="history-score">
+          <button
+            class="delete-btn"
+            title="删除面试记录"
+            :disabled="deletingSessionId === item.sessionId"
+            @click.stop="deleteHistoryItem(item)"
+          >
+            <i :class="deletingSessionId === item.sessionId ? 'fas fa-spinner fa-spin' : 'fas fa-trash-alt'"></i>
+          </button>
           <span
             class="score-badge"
             :class="`status-${normalizeReportStatus(item.reportStatus)}`"
           >
             {{ getScoreBadgeText(item) }}
           </span>
-          <i
-            v-if="isRecordClickable(item)"
-            class="fas fa-chevron-right"
-            style="color: var(--text-light);"
-          ></i>
-          <i
-            v-else-if="normalizeReportStatus(item.reportStatus) === 'generating'"
-            class="fas fa-clock"
-            style="color: var(--text-light);"
-          ></i>
-          <i
-            v-else
-            class="fas fa-ban"
-            style="color: var(--text-light);"
-          ></i>
+          <i class="fas fa-chevron-right" style="color: var(--text-light);"></i>
         </div>
       </div>
       
@@ -73,30 +66,28 @@
 
 <script>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { getInterviewHistory } from '../api/resume'
+import { deleteInterviewSession, getInterviewHistory } from '../api/resume'
+import {
+  mapBackendHistoryStatus,
+  normalizeDisplayReportStatus,
+  normalizeStoredInterviewRecord,
+  shouldUseBackendHistory
+} from '../utils/growthHistoryState'
 
 export default {
   name: 'HistoryPage',
   emits: ['goToQuestionBank', 'showInterviewDetail'],
   setup(props, { emit }) {
     const historyList = ref([])
+    const deletingSessionId = ref(null)
     const INTERVIEW_RECORDS_UPDATED_EVENT = 'interview-records-updated'
     const STATUS_READY = 'ready'
     const STATUS_GENERATING = 'generating'
     const STATUS_FAILED = 'failed'
 
-    const normalizeReportStatus = (status) => {
-      const normalized = String(status || '').trim().toLowerCase()
-      if (normalized === STATUS_GENERATING || normalized === STATUS_FAILED || normalized === STATUS_READY) {
-        return normalized
-      }
-      return STATUS_READY
-    }
+    const normalizeReportStatus = (status) => normalizeDisplayReportStatus(status)
 
-    const normalizeRecord = (record) => ({
-      ...record,
-      reportStatus: normalizeReportStatus(record?.reportStatus)
-    })
+    const normalizeRecord = (record, options = {}) => normalizeStoredInterviewRecord(record, options)
 
     const mapRoleLabel = (targetRole) => {
       const map = {
@@ -116,16 +107,6 @@ export default {
       return date.toLocaleString('zh-CN', { hour12: false })
     }
 
-    const mapBackendStatusToReportStatus = (status) => {
-      const normalized = String(status || '').trim().toLowerCase()
-      if (normalized === 'completed') return STATUS_READY
-      if (normalized === 'aborted') return STATUS_FAILED
-      if (normalized === 'report_generating' || normalized === 'planning' || normalized === 'in_progress') {
-        return STATUS_GENERATING
-      }
-      return STATUS_READY
-    }
-
     const mapBackendItem = (item) => {
       const score = Number(item?.overallScore)
       const sessionId = item?.sessionId
@@ -139,7 +120,9 @@ export default {
         score: Number.isFinite(score) ? Math.round(score) : null,
         questions: Number(item?.questionCount) || 0,
         correct: null,
-        reportStatus: mapBackendStatusToReportStatus(item?.status)
+        reportStatus: mapBackendHistoryStatus(item?.status)
+      }, {
+        allowReadyWithoutReportDowngrade: false
       })
     }
 
@@ -147,7 +130,11 @@ export default {
       try {
         const records = JSON.parse(localStorage.getItem('interviewRecords') || '[]')
         if (Array.isArray(records) && records.length > 0) {
-          return records.map(normalizeRecord)
+          const normalized = records.map(normalizeRecord)
+          if (JSON.stringify(normalized) !== JSON.stringify(records)) {
+            localStorage.setItem('interviewRecords', JSON.stringify(normalized))
+          }
+          return normalized
         }
       } catch (error) {
         console.warn('[HistoryPage] 加载本地历史记录失败', error)
@@ -163,19 +150,14 @@ export default {
           sortBy: 'createdAt',
           sortOrder: 'desc'
         })
-        const backendItems = Array.isArray(page?.items) ? page.items : []
-        if (backendItems.length > 0) {
-          historyList.value = backendItems.map(mapBackendItem)
+        if (shouldUseBackendHistory(page)) {
+          historyList.value = page.items.map(mapBackendItem)
           return
         }
       } catch (error) {
         console.warn('[HistoryPage] 加载后端历史记录失败，切换本地兜底', error)
       }
       historyList.value = loadLocalHistory()
-    }
-
-    const isRecordClickable = (item) => {
-      return normalizeReportStatus(item?.reportStatus) === STATUS_READY
     }
 
     const getScoreBadgeText = (item) => {
@@ -187,8 +169,36 @@ export default {
     }
 
     const viewHistoryDetail = (item) => {
-      if (!isRecordClickable(item)) return
       emit('showInterviewDetail', item)
+    }
+
+    const removeLocalRecord = (sessionId) => {
+      try {
+        const records = JSON.parse(localStorage.getItem('interviewRecords') || '[]')
+        const filtered = Array.isArray(records)
+          ? records.filter((item) => String(item?.sessionId || item?.id || '') !== String(sessionId))
+          : []
+        localStorage.setItem('interviewRecords', JSON.stringify(filtered))
+        window.dispatchEvent(new CustomEvent(INTERVIEW_RECORDS_UPDATED_EVENT))
+      } catch (error) {
+        console.warn('[HistoryPage] 删除本地历史记录失败', error)
+      }
+    }
+
+    const deleteHistoryItem = async (item) => {
+      const sessionId = item?.sessionId
+      if (!sessionId) return
+      if (!confirm(`确认删除「${item.job || '本场面试'}」的记录吗？删除后不可恢复。`)) return
+      deletingSessionId.value = sessionId
+      try {
+        await deleteInterviewSession(sessionId)
+        removeLocalRecord(sessionId)
+        await loadHistory()
+      } catch (error) {
+        alert(error?.message || '删除失败，请稍后重试')
+      } finally {
+        deletingSessionId.value = null
+      }
     }
 
     const goToQuestionBank = () => {
@@ -210,10 +220,11 @@ export default {
 
     return {
       historyList,
+      deletingSessionId,
       normalizeReportStatus,
-      isRecordClickable,
       getScoreBadgeText,
       viewHistoryDetail,
+      deleteHistoryItem,
       goToQuestionBank
     }
   }
@@ -234,11 +245,6 @@ export default {
   gap: 8px;
   padding: 10px 20px;
   font-size: 14px;
-}
-
-.history-item.disabled {
-  opacity: 0.8;
-  cursor: not-allowed;
 }
 
 .status-meta.generating {
@@ -262,6 +268,33 @@ export default {
 .score-badge.status-ready {
   background: rgba(16, 185, 129, 0.14);
   color: #059669;
+}
+
+.history-score {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.delete-btn {
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  color: var(--danger-color);
+  background: rgba(239, 68, 68, 0.12);
+  cursor: pointer;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.delete-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(239, 68, 68, 0.18);
+}
+
+.delete-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .empty-state {

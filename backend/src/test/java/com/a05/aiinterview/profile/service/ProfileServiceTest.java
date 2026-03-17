@@ -5,6 +5,7 @@ import com.a05.aiinterview.interview.entity.InterviewReport;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.interview.service.InterviewSessionStatusService;
 import com.a05.aiinterview.position.entity.PositionSkillDomain;
 import com.a05.aiinterview.position.service.PositionService;
 import com.a05.aiinterview.profile.config.ProfileAvatarStorageConfig;
@@ -32,9 +33,10 @@ class ProfileServiceTest {
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
         InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
         PositionService positionService = mock(PositionService.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
         ProfileAvatarStorageConfig storageConfig = new ProfileAvatarStorageConfig();
         ProfileService service = new ProfileService(
-                userMapper, sessionMapper, reportMapper, positionService, storageConfig
+                userMapper, sessionMapper, reportMapper, positionService, storageConfig, statusService
         );
 
         List<InterviewSession> sessions = List.of(
@@ -93,9 +95,10 @@ class ProfileServiceTest {
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
         InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
         PositionService positionService = mock(PositionService.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
         ProfileAvatarStorageConfig storageConfig = new ProfileAvatarStorageConfig();
         ProfileService service = new ProfileService(
-                userMapper, sessionMapper, reportMapper, positionService, storageConfig
+                userMapper, sessionMapper, reportMapper, positionService, storageConfig, statusService
         );
 
         when(sessionMapper.selectList(any())).thenReturn(List.of());
@@ -115,9 +118,10 @@ class ProfileServiceTest {
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
         InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
         PositionService positionService = mock(PositionService.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
         ProfileAvatarStorageConfig storageConfig = new ProfileAvatarStorageConfig();
         ProfileService service = new ProfileService(
-                userMapper, sessionMapper, reportMapper, positionService, storageConfig
+                userMapper, sessionMapper, reportMapper, positionService, storageConfig, statusService
         );
 
         List<InterviewSession> sessions = List.of(
@@ -212,9 +216,10 @@ class ProfileServiceTest {
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
         InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
         PositionService positionService = mock(PositionService.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
         ProfileAvatarStorageConfig storageConfig = new ProfileAvatarStorageConfig();
         ProfileService service = new ProfileService(
-                userMapper, sessionMapper, reportMapper, positionService, storageConfig
+                userMapper, sessionMapper, reportMapper, positionService, storageConfig, statusService
         );
 
         List<InterviewSession> sessions = List.of(
@@ -267,12 +272,52 @@ class ProfileServiceTest {
         assertTrue(dto.getTopWeaknesses().isEmpty());
     }
 
+    @Test
+    void getStatistics_shouldIgnoreUnfinishedSessionsInTotals() {
+        UserMapper userMapper = mock(UserMapper.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
+        PositionService positionService = mock(PositionService.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
+        ProfileAvatarStorageConfig storageConfig = new ProfileAvatarStorageConfig();
+        ProfileService service = new ProfileService(
+                userMapper, sessionMapper, reportMapper, positionService, storageConfig, statusService
+        );
+
+        InterviewSession completed = buildSession(1L, "JAVA_BACKEND", "professional",
+                LocalDateTime.of(2026, 3, 17, 15, 0), 30);
+
+        InterviewSession unfinished = new InterviewSession();
+        unfinished.setId(2L);
+        unfinished.setTargetRole("JAVA_BACKEND");
+        unfinished.setMode("practice");
+        unfinished.setStatus("in_progress");
+        unfinished.setCreatedAt(LocalDateTime.of(2026, 3, 17, 16, 0));
+        unfinished.setStartedAt(LocalDateTime.of(2026, 3, 17, 16, 0));
+
+        when(sessionMapper.selectList(any())).thenReturn(List.of(completed, unfinished));
+        when(statusService.resolveAndSync(completed)).thenReturn("completed");
+        when(statusService.resolveAndSync(unfinished)).thenReturn("in_progress");
+
+        InterviewReport report = new InterviewReport();
+        report.setSessionId(1L);
+        report.setOverallScore(BigDecimal.valueOf(88));
+        when(reportMapper.selectList(any())).thenReturn(List.of(report));
+
+        ProfileStatisticsDto dto = service.getStatistics(9L, "JAVA_BACKEND");
+
+        assertEquals(1, dto.getTotalSessions());
+        assertEquals(30, dto.getTotalMinutes());
+        assertEquals(1, dto.getScoreTrend().size());
+    }
+
     private InterviewSession buildSession(
             Long id, String targetRole, String mode, LocalDateTime createdAt, int durationMinutes) {
         InterviewSession session = new InterviewSession();
         session.setId(id);
         session.setTargetRole(targetRole);
         session.setMode(mode);
+        session.setStatus("completed");
         session.setCreatedAt(createdAt);
         session.setStartedAt(createdAt);
         session.setFinishedAt(createdAt.plusMinutes(durationMinutes));

@@ -34,8 +34,9 @@ class QuestionDetailEvaluationServiceTest {
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
         QuestionDetailEvaluationService service = new QuestionDetailEvaluationService(
-                aiClient, attemptMapper, questionMapper, sessionMapper, new ObjectMapper()
+                aiClient, attemptMapper, questionMapper, sessionMapper, new ObjectMapper(), statusService
         );
 
         InterviewAttempt attempt = new InterviewAttempt();
@@ -59,8 +60,9 @@ class QuestionDetailEvaluationServiceTest {
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
         QuestionDetailEvaluationService service = new QuestionDetailEvaluationService(
-                aiClient, attemptMapper, questionMapper, sessionMapper, new ObjectMapper()
+                aiClient, attemptMapper, questionMapper, sessionMapper, new ObjectMapper(), statusService
         );
 
         InterviewAttempt attempt = new InterviewAttempt();
@@ -81,8 +83,9 @@ class QuestionDetailEvaluationServiceTest {
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
         QuestionDetailEvaluationService service = new QuestionDetailEvaluationService(
-                aiClient, attemptMapper, questionMapper, sessionMapper, new ObjectMapper()
+                aiClient, attemptMapper, questionMapper, sessionMapper, new ObjectMapper(), statusService
         );
 
         InterviewAttempt attempt = new InterviewAttempt();
@@ -156,6 +159,7 @@ class QuestionDetailEvaluationServiceTest {
                 "rewrittenAnswer"
         );
         verify(aiClient).callQuestionDetailEvaluation(any());
+        verify(statusService).resolveAndSync(1L);
     }
 
     @Test
@@ -164,8 +168,9 @@ class QuestionDetailEvaluationServiceTest {
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
         QuestionDetailEvaluationService service = new QuestionDetailEvaluationService(
-                aiClient, attemptMapper, questionMapper, sessionMapper, new ObjectMapper()
+                aiClient, attemptMapper, questionMapper, sessionMapper, new ObjectMapper(), statusService
         );
 
         InterviewAttempt attempt = new InterviewAttempt();
@@ -204,5 +209,6 @@ class QuestionDetailEvaluationServiceTest {
         verify(attemptMapper, times(2)).updateById(updateCaptor.capture());
         assertEquals("generating", updateCaptor.getAllValues().get(0).getDetailEvaluationStatus());
         assertEquals("failed", updateCaptor.getAllValues().get(1).getDetailEvaluationStatus());
+        verify(statusService).resolveAndSync(1L);
     }
 }

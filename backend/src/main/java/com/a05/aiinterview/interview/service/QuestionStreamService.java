@@ -214,7 +214,12 @@ public class QuestionStreamService {
                                 fullText,
                                 sentenceBuffer,
                                 segmentTtsTasks),
-                        error -> onGenerationError(attemptId, session.getId(), error),
+                        error -> onGenerationError(
+                                attemptId,
+                                session,
+                                strategy,
+                                chunkIndex.get() > 0 || fullText.length() > 0,
+                                error),
                         () -> onGenerationCompleted(
                                 session,
                                 strategy,
@@ -297,18 +302,57 @@ public class QuestionStreamService {
             redisTemplate.opsForValue().set(statusKey, STATUS_DONE, cacheTtlSeconds, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.error("题目流式生成后保存失败, attemptId={}", attemptId, e);
-            onGenerationError(attemptId, session.getId(), e);
+            onGenerationError(attemptId, session, strategy, true, e);
         }
     }
 
-    private void onGenerationError(String attemptId, Long sessionId, Throwable error) {
+    private void onGenerationError(String attemptId,
+                                   InterviewSession session,
+                                   EvaluationDecisionOutput.NextQuestionStrategy strategy,
+                                   boolean hasPartialStream,
+                                   Throwable error) {
+        Long sessionId = session != null ? session.getId() : null;
         log.error("AI 题目流式生成异常, sessionId={}, attemptId={}", sessionId, attemptId, error);
         String statusKey = String.format(KEY_STATUS, attemptId);
+        if (!hasPartialStream && session != null && strategy != null && shouldUseFallbackQuestionGeneration(error)) {
+            try {
+                completeGenerationWithFallbackQuestion(session, strategy, attemptId, statusKey);
+                return;
+            } catch (Exception fallbackError) {
+                log.error("程序兜底出题失败, sessionId={}, attemptId={}", sessionId, attemptId, fallbackError);
+            }
+        }
         ServerSentEvent<String> errorEvent = buildErrorEvent(
                 "AI_STREAM_ERROR",
                 "题目生成服务暂时不可用，" + (error.getMessage() != null ? error.getMessage() : "请稍后重试"));
         cacheErrorPayload(attemptId, errorEvent.data());
         redisTemplate.opsForValue().set(statusKey, STATUS_ERROR, cacheTtlSeconds, TimeUnit.SECONDS);
+    }
+
+    private void completeGenerationWithFallbackQuestion(
+            InterviewSession session,
+            EvaluationDecisionOutput.NextQuestionStrategy strategy,
+            String attemptId,
+            String statusKey) {
+        String fallbackStem = buildFallbackQuestionStem(
+                strategy.getQuestionType(),
+                strategy.getNextDomainName(),
+                resolveTargetSkill(strategy.getTargetSkill(), strategy.getFocusPoint()),
+                session.getTargetRole());
+
+        InterviewQuestion question = saveQuestion(session, strategy, fallbackStem);
+        String chunksKey = String.format(KEY_CHUNKS, attemptId);
+        String questionIdKey = String.format(KEY_QUESTION_ID, attemptId);
+        redisTemplate.opsForList().rightPush(chunksKey, fallbackStem);
+        redisTemplate.expire(chunksKey, cacheTtlSeconds, TimeUnit.SECONDS);
+        redisTemplate.opsForValue().set(questionIdKey, String.valueOf(question.getId()),
+                cacheTtlSeconds, TimeUnit.SECONDS);
+        boolean ttsReady = ttsService.triggerQuestionAudioAsync(session.getId(), question.getId(), fallbackStem);
+        ServerSentEvent<String> doneEvent = buildDoneEvent(attemptId, session.getId(), question.getId(), 1, ttsReady);
+        cacheDonePayload(attemptId, doneEvent.data());
+        redisTemplate.opsForValue().set(statusKey, STATUS_DONE, cacheTtlSeconds, TimeUnit.SECONDS);
+        log.warn("AI 出题失败，已降级为程序兜底题, sessionId={}, attemptId={}, questionId={}",
+                session.getId(), attemptId, question.getId());
     }
 
     // ==================== 回放与尾随 ====================
@@ -808,6 +852,85 @@ public class QuestionStreamService {
 
     static Duration resolveFollowIdleTimeout(long configuredSeconds) {
         return Duration.ofSeconds(Math.max(5L, configuredSeconds));
+    }
+
+    static boolean shouldUseFallbackQuestionGeneration(Throwable error) {
+        Throwable current = error;
+        int depth = 0;
+        while (current != null && depth < 8) {
+            if (current instanceof java.net.UnknownHostException
+                    || current instanceof java.net.SocketTimeoutException
+                    || current instanceof java.net.ConnectException) {
+                return true;
+            }
+            String message = current.getMessage() == null
+                    ? ""
+                    : current.getMessage().toLowerCase(Locale.ROOT);
+            if (message.contains("failed to resolve")
+                    || message.contains("timed out")
+                    || message.contains("connection refused")
+                    || message.contains("connection reset")
+                    || message.contains("network is unreachable")) {
+                return true;
+            }
+            if ("org.springframework.web.reactive.function.client.WebClientRequestException"
+                    .equals(current.getClass().getName())) {
+                return true;
+            }
+            current = current.getCause();
+            depth += 1;
+        }
+        return false;
+    }
+
+    static String buildFallbackQuestionStem(
+            String questionType,
+            String nextDomainName,
+            String targetSkill,
+            String targetRole) {
+        String roleLabel = resolveRoleLabel(targetRole);
+        String focus = firstNonBlank(targetSkill, nextDomainName, "核心技术能力");
+        String normalizedType = questionType == null ? "" : questionType.trim().toUpperCase(Locale.ROOT);
+        return switch (normalizedType) {
+            case "INTRO" -> "请你先做一个 1 到 2 分钟的自我介绍，重点说明你作为" + roleLabel
+                    + "的技术方向、核心技术栈、代表项目，以及最近一次解决的实际技术问题。";
+            case "PROJECT_DEEP_DIVE" -> "结合你最近一个与「" + focus
+                    + "」相关的项目，说明项目背景、你的职责、关键技术方案、遇到的问题以及最终结果。";
+            case "SCENARIO" -> "假设线上出现一个与「" + focus
+                    + "」相关的复杂问题，请你说明排查思路、关键判断依据、解决方案以及取舍。";
+            case "BEHAVIORAL" -> "请分享一次你在" + roleLabel + "工作中围绕「" + focus
+                    + "」推进协作或解决分歧的经历，重点说明你的判断、行动和结果。";
+            case "PRINCIPLE" -> "请系统讲讲「" + focus
+                    + "」的核心原理、常见实现方案，以及它在工程落地中的适用场景和取舍。";
+            default -> "请围绕「" + focus + "」出一道适合" + roleLabel
+                    + "的技术面试题，并结合原理、场景和工程实践展开说明。";
+        };
+    }
+
+    private static String resolveRoleLabel(String targetRole) {
+        if (targetRole == null || targetRole.isBlank()) {
+            return "研发工程师";
+        }
+        return switch (targetRole.trim().toUpperCase(Locale.ROOT)) {
+            case "JAVA_BACKEND", "GO_BACKEND" -> "后端工程师";
+            case "FRONTEND" -> "前端工程师";
+            case "DATA_ENGINEER" -> "数据工程师";
+            case "QA" -> "测试工程师";
+            case "DEVOPS" -> "运维工程师";
+            default -> "研发工程师";
+        };
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return "";
     }
 
     private List<QuestionGenerationInput.AskedQuestion> buildAskedQuestionsForPrompt(

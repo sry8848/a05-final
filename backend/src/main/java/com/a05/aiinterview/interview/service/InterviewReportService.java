@@ -38,6 +38,7 @@ public class InterviewReportService {
     private final InterviewQuestionMapper interviewQuestionMapper;
     private final InterviewAttemptMapper interviewAttemptMapper;
     private final ReportGenerationService reportGenerationService;
+    private final InterviewSessionStatusService interviewSessionStatusService;
 
     /**
      * 手动结束面试并触发异步报告生成。
@@ -100,9 +101,13 @@ public class InterviewReportService {
         }
 
         InterviewReport report = interviewReportMapper.selectBySessionId(sessionId);
-        if (report == null) {
-            // 报告尚未生成，返回占位响应
-            log.info("报告尚未就绪，返回 generating 状态, sessionId={}", sessionId);
+        String effectiveStatus = interviewSessionStatusService.resolveAndSync(session);
+        if (InterviewSessionStatusService.STATUS_ABORTED.equals(effectiveStatus)) {
+            log.info("报告查询命中 failed 状态, sessionId={}", sessionId);
+            return InterviewReportDto.failed(sessionId);
+        }
+        if (report == null || !InterviewSessionStatusService.STATUS_COMPLETED.equals(effectiveStatus)) {
+            log.info("报告尚未就绪，返回 generating 状态, sessionId={}, effectiveStatus={}", sessionId, effectiveStatus);
             return InterviewReportDto.generating(sessionId);
         }
 
@@ -144,15 +149,18 @@ public class InterviewReportService {
 
         String status = "pending";
         BigDecimal score = null;
+        String commentary = null;
         var latestFinalAttempt = AttemptEvaluationReader.selectLatestFinalAttempt(attemptsForQuestion);
         if (latestFinalAttempt.isPresent()) {
             InterviewAttempt attempt = latestFinalAttempt.get();
             status = "[skip]".equals(attempt.getAnswerText()) ? "skipped" : "answered";
-            score = AttemptEvaluationReader.readScore(attempt.getEvaluationJson());
+            score = AttemptEvaluationReader.readScore(attempt.getDetailEvaluationJson());
+            commentary = AttemptEvaluationReader.readCommentary(attempt.getDetailEvaluationJson());
         }
 
         summaryDto.setStatus(status);
         summaryDto.setScore(score);
+        summaryDto.setCommentary(commentary);
         return summaryDto;
     }
 }

@@ -269,6 +269,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { getProfile, getProfileSkillOverview, getProfileStatistics } from '../api/resume'
 import CustomSelect from './CustomSelect.vue'
+import { getGrowthRequestPositionCodes } from '../utils/growthHistoryState'
 
 const RADAR_DIMENSIONS = [
   { key: 'fundamentals', label: '基础原理掌握' },
@@ -489,12 +490,12 @@ export default {
     const loadGrowthData = async () => {
       loading.value = true
       loadError.value = ''
-      const positionCode = positionCodeMap[selectedPosition.value]
+      const requestPositionCodes = getGrowthRequestPositionCodes(selectedPosition.value, positionCodeMap)
       try {
         const [profile, statistics, skillOverview] = await Promise.all([
           getProfile(),
-          getProfileStatistics(positionCode),
-          getProfileSkillOverview(positionCode)
+          getProfileStatistics(requestPositionCodes.statisticsPositionCode),
+          getProfileSkillOverview(requestPositionCodes.skillOverviewPositionCode)
         ])
 
         profileNickname.value = profile?.nickname || props.user.name || '面试者'

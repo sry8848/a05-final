@@ -13,6 +13,22 @@
           <i class="fas fa-history"></i>
           返回面试记录
         </button>
+        <button
+          v-if="normalizedStatus === 'failed'"
+          class="btn btn-secondary glass-btn"
+          @click="$emit('refreshStatus')"
+        >
+          <i class="fas fa-rotate"></i>
+          重新拉取报告
+        </button>
+        <button
+          v-if="normalizedStatus === 'failed'"
+          class="btn btn-secondary glass-btn"
+          @click="$emit('restart')"
+        >
+          <i class="fas fa-redo"></i>
+          重新面试
+        </button>
       </div>
     </div>
   </section>
@@ -33,7 +49,7 @@ export default {
       default: '本场面试'
     }
   },
-  emits: ['goHistory'],
+  emits: ['goHistory', 'refreshStatus', 'restart'],
   setup(props) {
     const normalizedStatus = computed(() => {
       return props.status === 'failed' ? 'failed' : 'generating'
@@ -53,7 +69,7 @@ export default {
 
     const subtitleText = computed(() => {
       if (normalizedStatus.value === 'failed') {
-        return `${props.jobName} 的报告暂时未生成成功。你可以先返回面试记录页，稍后再查看。`
+        return `${props.jobName} 的报告生成失败。你可以重新拉取状态，或直接重新发起一场面试。`
       }
       return `${props.jobName} 的报告正在生成，你可以先返回面试记录页。若停留在此页，生成完成后将自动跳转。`
     })
@@ -119,5 +135,7 @@ export default {
 .actions {
   display: flex;
   justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 </style>

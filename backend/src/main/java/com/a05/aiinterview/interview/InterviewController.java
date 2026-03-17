@@ -15,6 +15,7 @@ import com.a05.aiinterview.interview.dto.SubmitAttemptRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptResponse;
 import com.a05.aiinterview.interview.engine.AnswerSubmitService;
 import com.a05.aiinterview.interview.service.InterviewHistoryService;
+import com.a05.aiinterview.interview.service.InterviewManagementService;
 import com.a05.aiinterview.interview.service.InterviewQuestionReviewService;
 import com.a05.aiinterview.interview.service.InterviewReportService;
 import com.a05.aiinterview.interview.service.InterviewService;
@@ -32,6 +33,7 @@ import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -59,6 +61,7 @@ public class InterviewController {
     private final InterviewSkipService interviewSkipService;
     private final InterviewQuestionReviewService interviewQuestionReviewService;
     private final InterviewReportService interviewReportService;
+    private final InterviewManagementService interviewManagementService;
     private final LearningRecommendationService learningRecommendationService;
     private final QuestionStreamService questionStreamService;
 
@@ -194,6 +197,15 @@ public class InterviewController {
             @AuthenticationPrincipal Long userId,
             @PathVariable Long sessionId) {
         return ApiResponse.ok(interviewReportService.getReport(sessionId, userId));
+    }
+
+    @Operation(summary = "Delete interview session")
+    @DeleteMapping("/{sessionId}")
+    public ApiResponse<Void> deleteInterview(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId) {
+        interviewManagementService.deleteInterview(sessionId, userId);
+        return ApiResponse.ok(null);
     }
 
     @Operation(summary = "Get interview question review detail")

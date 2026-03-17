@@ -46,6 +46,8 @@
         :status="reportGeneratingStatus"
         :jobName="reportGeneratingJobName"
         @goHistory="handleGeneratingGoHistory"
+        @refreshStatus="handleGeneratingRefreshStatus"
+        @restart="handleGeneratingRestart"
       />
       <InterviewResultPage 
         v-else-if="showResultPage"
@@ -61,13 +63,6 @@
       <ScoreTrendPage 
         v-else-if="showScoreTrendPage"
         @goBack="showScoreTrendPage = false"
-      />
-      <InterviewDetailPage 
-        v-else-if="showInterviewDetail"
-        :recordId="selectedRecordId"
-        @goBack="showInterviewDetail = false"
-        @retry="handleRetryInterview"
-        @showQuestionDetail="handleShowQuestionDetailFromRecord"
       />
       <div v-else class="main-container" :class="{ 'interview-fullscreen': isInterviewRunning }">
         <Sidebar 
@@ -137,13 +132,18 @@ import QuestionBankPage from './components/QuestionBankPage.vue'
 import GrowthCenterPage from './components/GrowthCenterPage.vue'
 import RadarChartPage from './components/RadarChartPage.vue'
 import ScoreTrendPage from './components/ScoreTrendPage.vue'
-import InterviewDetailPage from './components/InterviewDetailPage.vue'
 import QuestionDetailPage from './components/QuestionDetailPage.vue'
 import InterviewReportGeneratingPage from './components/InterviewReportGeneratingPage.vue'
 import AdminLoginPage from './components/AdminLoginPage.vue'
 import AdminLayout from './components/AdminLayout.vue'
 import ResumesPage from './components/ResumesPage.vue'
 import { createQuestionBankItem, getInterviewQuestionDetail, getInterviewReport } from './api/resume'
+import {
+  applyReadyReportToInterviewRecord,
+  normalizeStoredInterviewRecord,
+  normalizeDisplayReportStatus,
+  upsertReadyInterviewRecord
+} from './utils/growthHistoryState'
 
 export default {
   name: 'App',
@@ -161,7 +161,6 @@ export default {
     GrowthCenterPage,
     RadarChartPage,
     ScoreTrendPage,
-    InterviewDetailPage,
     QuestionDetailPage,
     InterviewReportGeneratingPage,
     AdminLoginPage,
@@ -182,14 +181,13 @@ export default {
     const reportGeneratingJobName = ref('本场面试')
     const pendingGeneratingResult = ref(null)
     const pendingGeneratingSessionId = ref(null)
+    const resultEntrySource = ref('live')
     const historyHasUnread = ref(false)
     const interviewResult = ref(null)
     const showRadarPage = ref(false)
     const showScoreTrendPage = ref(false)
-    const showInterviewDetail = ref(false)
     const showQuestionDetail = ref(false)
     const questionDetailLoading = ref(false)
-    const selectedRecordId = ref(null)
     const selectedQuestionDetail = ref(null)
     const questionDetailContext = ref(null)
     const questionDetailRequestSeq = ref(0)
@@ -197,7 +195,6 @@ export default {
     const INTERVIEW_RECORDS_UPDATED_EVENT = 'interview-records-updated'
     const HISTORY_UNREAD_DOT_KEY = 'historyUnreadDot'
     const REPORT_POLL_INTERVAL_MS = 3000
-    const REPORT_GENERATING_TIMEOUT_MS = 10 * 60 * 1000
     const pollingSessionLocks = new Set()
     let reportPollingTimer = null
     
@@ -232,11 +229,18 @@ export default {
       window.dispatchEvent(new CustomEvent(INTERVIEW_RECORDS_UPDATED_EVENT))
     }
 
+    const normalizeStoredRecord = (record) => normalizeStoredInterviewRecord(record)
+
     const readInterviewRecords = () => {
       try {
         const raw = localStorage.getItem(INTERVIEW_RECORDS_KEY)
         const parsed = raw ? JSON.parse(raw) : []
-        return Array.isArray(parsed) ? parsed : []
+        if (!Array.isArray(parsed)) return []
+        const normalized = parsed.map(normalizeStoredRecord)
+        if (JSON.stringify(normalized) !== JSON.stringify(parsed)) {
+          localStorage.setItem(INTERVIEW_RECORDS_KEY, JSON.stringify(normalized))
+        }
+        return normalized
       } catch (error) {
         return []
       }
@@ -247,13 +251,7 @@ export default {
       emitInterviewRecordsUpdated()
     }
 
-    const normalizeReportStatus = (value) => {
-      const normalized = String(value || '').trim().toLowerCase()
-      if (normalized === 'generating' || normalized === 'failed' || normalized === 'ready') {
-        return normalized
-      }
-      return 'ready'
-    }
+    const normalizeReportStatus = (value) => normalizeDisplayReportStatus(value)
 
     const setHistoryUnreadFlag = (value) => {
       const normalized = !!value
@@ -363,7 +361,8 @@ export default {
           questionStem,
           question: questionStem,
           status,
-          score
+          score,
+          commentary: hasOwn(raw, 'commentary') ? raw.commentary : null
         })
       })
 
@@ -402,39 +401,25 @@ export default {
       return merged
     }
 
-    const applyReadyReportToRecord = (record, report) => {
-      const updated = { ...record }
-      const scoreNum = Number(report?.overallScore)
-      if (Number.isFinite(scoreNum)) {
-        updated.score = Math.round(scoreNum)
-      }
-      updated.reportStatus = 'ready'
-      updated.reportStartedAt = updated.reportStartedAt || new Date().toISOString()
-      updated.reportReadyAt = new Date().toISOString()
-      updated.reportFailedAt = null
-      updated.report = report
-      updated.syncStatus = 'synced'
-      return updated
-    }
+    const applyReadyReportToRecord = (record, report) =>
+      applyReadyReportToInterviewRecord(record, report)
 
     const applyFailedReportToRecord = (record) => {
       const updated = { ...record }
       updated.reportStatus = 'failed'
       updated.reportFailedAt = new Date().toISOString()
+      updated.report = null
       updated.syncStatus = 'report_failed'
       return updated
     }
 
-    const hasReportGeneratingTimedOut = (record) => {
-      const startedAtMs = Date.parse(record?.reportStartedAt || '')
-      const fallbackMs = Date.parse(record?.date || '')
-      const baseMs = Number.isFinite(startedAtMs)
-        ? startedAtMs
-        : (Number.isFinite(fallbackMs) ? fallbackMs : Date.now())
-      return Date.now() - baseMs >= REPORT_GENERATING_TIMEOUT_MS
-    }
-
     const finalizeGeneratingResult = (report) => {
+      const records = upsertReadyInterviewRecord(
+        readInterviewRecords(),
+        pendingGeneratingResult.value,
+        report
+      )
+      writeInterviewRecords(records.slice(0, 50))
       interviewResult.value = mergeResultWithReport(pendingGeneratingResult.value || {}, report || {})
       showReportGeneratingPage.value = false
       reportGeneratingStatus.value = 'generating'
@@ -462,15 +447,6 @@ export default {
         const sessionId = normalizeSessionId(record?.sessionId)
         if (!sessionId) continue
 
-        if (hasReportGeneratingTimedOut(record)) {
-          records[index] = applyFailedReportToRecord(record)
-          changed = true
-          if (showReportGeneratingPage.value && normalizeSessionId(pendingGeneratingSessionId.value) === sessionId) {
-            reportGeneratingStatus.value = 'failed'
-          }
-          continue
-        }
-
         if (pollingSessionLocks.has(sessionId)) continue
         pollingSessionLocks.add(sessionId)
         try {
@@ -486,6 +462,15 @@ export default {
             }
             if (showReportGeneratingPage.value && normalizeSessionId(pendingGeneratingSessionId.value) === sessionId) {
               reportForGeneratingPage = report
+            }
+          } else if (report?.reportStatus === 'failed') {
+            records[index] = applyFailedReportToRecord(record)
+            changed = true
+            if (currentPage.value !== 'history') {
+              shouldSetHistoryUnread = true
+            }
+            if (showReportGeneratingPage.value && normalizeSessionId(pendingGeneratingSessionId.value) === sessionId) {
+              reportGeneratingStatus.value = 'failed'
             }
           }
         } catch (error) {
@@ -878,6 +863,7 @@ export default {
       pendingGeneratingResult.value = null
       pendingGeneratingSessionId.value = null
       reportGeneratingStatus.value = 'generating'
+      resultEntrySource.value = 'live'
       clearHistoryUnreadFlag()
       showNotification('已退出登录', 'info')
     }
@@ -893,6 +879,7 @@ export default {
           pendingGeneratingSessionId.value = normalizeSessionId(resultData.sessionId)
           reportGeneratingStatus.value = 'generating'
           reportGeneratingJobName.value = resultData.jobName || '本场面试'
+          resultEntrySource.value = 'live'
           showReportGeneratingPage.value = true
           return
         }
@@ -901,6 +888,7 @@ export default {
         pendingGeneratingResult.value = null
         pendingGeneratingSessionId.value = null
         interviewResult.value = resultData
+        resultEntrySource.value = 'live'
         showResultPage.value = true
       } else {
         currentPage.value = 'growth'
@@ -1111,7 +1099,7 @@ export default {
     const handleResultGoBack = () => {
       showResultPage.value = false
       interviewResult.value = null
-      currentPage.value = 'growth'
+      currentPage.value = resultEntrySource.value === 'history' ? 'history' : 'growth'
     }
 
     const handleResultRestart = () => {
@@ -1124,6 +1112,31 @@ export default {
       showReportGeneratingPage.value = false
       currentPage.value = 'history'
       clearHistoryUnreadFlag()
+    }
+
+    const handleGeneratingRefreshStatus = async () => {
+      const sessionId = normalizeSessionId(pendingGeneratingSessionId.value)
+      if (!sessionId) return
+      try {
+        const report = await getInterviewReport(sessionId)
+        if (report?.reportStatus === 'ready') {
+          const records = upsertReadyInterviewRecord(readInterviewRecords(), pendingGeneratingResult.value, report)
+          writeInterviewRecords(records.slice(0, 50))
+          finalizeGeneratingResult(report)
+          return
+        }
+        reportGeneratingStatus.value = report?.reportStatus === 'failed' ? 'failed' : 'generating'
+      } catch (error) {
+        showNotification(error?.message || '重新拉取报告失败，请稍后重试', 'error')
+      }
+    }
+
+    const handleGeneratingRestart = () => {
+      showReportGeneratingPage.value = false
+      pendingGeneratingResult.value = null
+      pendingGeneratingSessionId.value = null
+      resultEntrySource.value = 'live'
+      currentPage.value = 'interview'
     }
 
     const handleShowQuestionDetailFromResult = ({ index = 0, questionId = null, sessionId = null } = {}) => {
@@ -1141,52 +1154,83 @@ export default {
       openQuestionDetail(detail, context)
     }
 
-    const handleShowInterviewDetail = (recordOrItem) => {
-      let recordId = recordOrItem
-      if (recordOrItem && typeof recordOrItem === 'object') {
-        const sessionId = normalizeSessionId(recordOrItem.sessionId || recordOrItem.id)
-        const records = readInterviewRecords()
-        let record = records.find((item) => normalizeSessionId(item.sessionId) === sessionId)
+    const handleShowInterviewDetail = async (recordOrItem) => {
+      if (!recordOrItem || typeof recordOrItem !== 'object') return
 
-        if (!record && sessionId != null) {
-          record = {
-            id: sessionId,
-            sessionId,
-            job: recordOrItem.job || recordOrItem.title || '模拟面试',
-            company: '模拟面试',
-            round: '一面',
-            date: recordOrItem.date || new Date().toLocaleString('zh-CN'),
-            score: Number(recordOrItem.score) || 0,
-            duration: recordOrItem.duration || '--',
-            questions: Number(recordOrItem.questions) || 0,
-            correct: Number(recordOrItem.correct) || 0,
-            answers: [],
-            reportStatus: recordOrItem.reportStatus || 'ready'
-          }
-          records.unshift(record)
-          writeInterviewRecords(records.slice(0, 50))
+      const sessionId = normalizeSessionId(recordOrItem.sessionId || recordOrItem.id)
+      if (!sessionId) return
+
+      const records = readInterviewRecords()
+      let record = records.find((item) => normalizeSessionId(item.sessionId) === sessionId)
+
+      if (!record) {
+        record = {
+          id: sessionId,
+          sessionId,
+          job: recordOrItem.job || recordOrItem.title || '模拟面试',
+          jobName: recordOrItem.job || recordOrItem.title || '模拟面试',
+          date: recordOrItem.date || new Date().toLocaleString('zh-CN'),
+          score: Number(recordOrItem.score) || 0,
+          duration: recordOrItem.duration || '--',
+          questions: Number(recordOrItem.questions) || 0,
+          correct: Number(recordOrItem.correct) || 0,
+          answers: [],
+          mode: recordOrItem.mode || 'practice',
+          reportStatus: recordOrItem.reportStatus || 'generating'
         }
-        recordId = record?.id ?? recordOrItem.id
+        records.unshift(record)
+        writeInterviewRecords(records.slice(0, 50))
       }
-      selectedRecordId.value = recordId
-      showInterviewDetail.value = true
-    }
 
-    const handleShowQuestionDetailFromRecord = ({ recordId, questionIndex = 0 }) => {
-      const records = JSON.parse(localStorage.getItem('interviewRecords') || '[]')
-      const record = records.find((item) => item.id === recordId)
-
-      const detail = buildQuestionDetailViewModel({
-        source: 'record',
-        record,
-        questionIndex
-      })
-      const context = {
-        source: 'record',
-        recordId,
-        questionIndex
+      const displayName = record.jobName || record.job || recordOrItem.job || '本场面试'
+      const status = normalizeReportStatus(recordOrItem.reportStatus || record.reportStatus)
+      if (status !== 'ready') {
+        showResultPage.value = false
+        interviewResult.value = null
+        pendingGeneratingResult.value = {
+          ...record,
+          jobName: displayName
+        }
+        pendingGeneratingSessionId.value = sessionId
+        reportGeneratingStatus.value = status
+        reportGeneratingJobName.value = displayName
+        resultEntrySource.value = 'history'
+        showReportGeneratingPage.value = true
+        return
       }
-      openQuestionDetail(detail, context)
+
+      try {
+        const report = await getInterviewReport(sessionId)
+        if (report?.reportStatus !== 'ready') {
+          pendingGeneratingResult.value = {
+            ...record,
+            jobName: displayName
+          }
+          pendingGeneratingSessionId.value = sessionId
+          reportGeneratingStatus.value = report?.reportStatus === 'failed' ? 'failed' : 'generating'
+          reportGeneratingJobName.value = displayName
+          resultEntrySource.value = 'history'
+          showReportGeneratingPage.value = true
+          return
+        }
+
+        const updatedRecords = upsertReadyInterviewRecord(readInterviewRecords(), {
+          ...record,
+          jobName: displayName,
+          interviewMode: record.mode || recordOrItem.mode || 'practice'
+        }, report)
+        writeInterviewRecords(updatedRecords.slice(0, 50))
+        interviewResult.value = mergeResultWithReport({
+          ...record,
+          jobName: displayName,
+          interviewMode: record.mode || recordOrItem.mode || 'practice'
+        }, report)
+        resultEntrySource.value = 'history'
+        showReportGeneratingPage.value = false
+        showResultPage.value = true
+      } catch (error) {
+        showNotification(error?.message || '加载面试报告失败，请稍后重试', 'error')
+      }
     }
 
     const handleCloseQuestionDetail = () => {
@@ -1309,11 +1353,6 @@ export default {
       }
     }
 
-    const handleRetryInterview = (record) => {
-      showInterviewDetail.value = false
-      currentPage.value = 'interview'
-    }
-
     const loadUserSettings = () => {
       const saved = localStorage.getItem('aiInterviewSettings')
       if (saved) {
@@ -1384,10 +1423,8 @@ export default {
       interviewResult,
       showRadarPage,
       showScoreTrendPage,
-      showInterviewDetail,
       showQuestionDetail,
       questionDetailLoading,
-      selectedRecordId,
       selectedQuestionDetail,
       handleLoginSuccess,
       handleRegisterSuccess,
@@ -1409,13 +1446,13 @@ export default {
       handleResultGoBack,
       handleResultRestart,
       handleGeneratingGoHistory,
+      handleGeneratingRefreshStatus,
+      handleGeneratingRestart,
       handleShowInterviewDetail,
-      handleShowQuestionDetailFromRecord,
       handleShowQuestionDetailFromResult,
       handleCloseQuestionDetail,
       handleNavigateQuestionDetail,
-      handleCollectQuestion,
-      handleRetryInterview
+      handleCollectQuestion
     }
   }
 }

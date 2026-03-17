@@ -111,6 +111,9 @@ public class InterviewReportDto {
 
         @Schema(description = "单题分数（可为空）", example = "82.5")
         private BigDecimal score;
+
+        @Schema(description = "单题点评（可为空）")
+        private String commentary;
     }
 
     // ────────────────────────────────────────────
@@ -186,6 +189,13 @@ public class InterviewReportDto {
         InterviewReportDto dto = new InterviewReportDto();
         dto.setSessionId(sessionId);
         dto.setReportStatus("generating");
+        return dto;
+    }
+
+    public static InterviewReportDto failed(Long sessionId) {
+        InterviewReportDto dto = new InterviewReportDto();
+        dto.setSessionId(sessionId);
+        dto.setReportStatus("failed");
         return dto;
     }
 }
