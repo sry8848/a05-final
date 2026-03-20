@@ -322,7 +322,6 @@ Role
 - 当前题目类型：{{currentQuestionType}}
 - 当前知识域：{{currentDomainName}}（{{currentDomainId}}）
 - 当前知识点：{{currentFocus}}
-- 当前追问深度：{{currentTargetDepth}}
 
 
 【候选人回答】
@@ -359,9 +358,6 @@ Role
 
 【历史问题、回答概要、回答评价】
 {{recentInterviewMemory}}
-
-注意：
-这里最好保留最近 3~6 轮，不宜无限增长。
 
 
 【输出 Schema】
@@ -478,7 +474,7 @@ domain：
 7. `expectedAnswerPoints` 只写下一题真正想验证的关键点，保持精炼。
 8. `possibleNextMoves` 写 1~3 条即可，描述“候选人在不同回答下，后续可能怎么走”。
 9. `newCoveredDomains` 只写本轮后可以新增记为“已覆盖”的知识域。
-10. `newCoveredPoints` 只写本轮后可以新增记为“已形成基本判断”的知识点。
+10. `newCoveredPoints` 只写本轮后可以新增记为“已形成基本判断”的知识点。知识点写法要尽量明确，避免歧义
 11. `newCandidatePointsByDomain` 只写从当前回答中挖掘出的、后续值得考察的新知识点，不代表已考完。
 12. `retrievalPlans` 可以为空数组 `[]`；如果不需要检索，必须输出空数组。
 13. 如果需要检索，`retrievalPlans` 中每个对象都必须完整填写。

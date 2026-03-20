@@ -126,6 +126,8 @@ Output Requirements
 面试轮次：{{turn}}
 模式：{{mode}}
 
+注：当 roundType 为空时，不要臆造轮次背景；仅基于 experienceLevel、JD、简历和历史记录规划本次考纲
+
 JD 内容：
 {{jd}}
 
@@ -159,6 +161,7 @@ Output Schema
 ],
 "projects": [
 {
+"itemType": "PROJECT/ INTERNSHIP",
 "projectName": "苍穹外卖",
 "resumeDescription": "简历上的原始项目描述或高度忠实的压缩转述",
 "techHooks": [
