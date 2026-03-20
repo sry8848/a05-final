@@ -411,7 +411,7 @@ domain：
 "finalDecision": "最终选择的动作",
 "nextQuestionType": "THEORY | PROJECT | SCENARIO | SOFT_SKILL",
 "nextFocus": "下一题想问什么",
-"currentTargetDepth":"当前追问深度"
+"currentTargetDepth":"当前追问深度",
 "expectedAnswerPoints": [
 "下一题理想回答点1",
 "下一题理想回答点2"
