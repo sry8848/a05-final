@@ -8,7 +8,9 @@ import java.util.Map;
 
 /**
  * 题目生成 AI 调用入参。
- * 每次出一道题时传入，包含当前考纲、状态账本和历史问题列表。
+ *
+ * <p>新模型以“提问目标驱动”为主，包含 role/project/recent/goal/retrieval/constraints 六类上下文。
+ * 旧字段当前保留为迁移支架，待 QuestionStream/OpenAI Prompt 全部切完后删除。
  */
 @Data
 @Builder
@@ -32,29 +34,12 @@ public class QuestionGenerationInput {
     /** 工作年限枚举 */
     private String experienceLevel;
 
-    /** 本题目标知识域 ID */
-    private Long nextDomainId;
-
-    /** 本题目标知识域编码 */
-    private String nextDomainCode;
-
-    /** 本题目标知识域中文名 */
-    private String nextDomainName;
-
-    /** 本题类型枚举值，如 PRINCIPLE */
-    private String nextQuestionType;
-
-    /** 本题目标深度，如 L3 */
-    private String targetDepth;
-
-    /** 本题难度等级：L1~L5 */
-    private String difficulty;
-
-    /** 本题核心考察点 */
-    private String targetSkill;
-
-    /** 本题理想回答要点列表 */
-    private List<String> expectedPoints;
+    private RoleContext roleContext;
+    private ProjectContext projectContext;
+    private RecentContext recentContext;
+    private NextQuestionGoal nextQuestionGoal;
+    private RetrievalContext retrievalContext;
+    private Constraints constraints;
 
     /** 已问过的题目列表（避免重复出题） */
     private List<AskedQuestion> askedQuestions;
@@ -65,11 +50,75 @@ public class QuestionGenerationInput {
     /** 简历文本摘要（供 AI 出项目相关题） */
     private String resumeTextSummary;
 
-    /**
-     * RAG 检索结果拼装的知识上下文，注入到出题 Prompt。
-     * 为空时正常出题，不影响质量；后续接入 VectorStore 后由 AnswerSubmitService 填充。
-     */
+    // ===== 迁移期兼容字段 =====
+    private Long nextDomainId;
+    private String nextDomainCode;
+    private String nextDomainName;
+    private String nextQuestionType;
+    private String targetDepth;
+    private String difficulty;
+    private String targetSkill;
+    private List<String> expectedPoints;
     private String ragContext;
+
+    @Data
+    @Builder
+    public static class RoleContext {
+        private String roundType;
+        private String candidateLevel;
+        private List<String> difficultyBand;
+        private String style;
+    }
+
+    @Data
+    @Builder
+    public static class ProjectContext {
+        private String activeProjectId;
+        private String projectName;
+        private String currentFocus;
+    }
+
+    @Data
+    @Builder
+    public static class RecentContext {
+        private String lastQuestion;
+        private String lastAnswerSummary;
+        private String recentTurnsSummary;
+        private List<String> lastAnswerHighlights;
+    }
+
+    @Data
+    @Builder
+    public static class NextQuestionGoal {
+        private String decision;
+        private String targetFocus;
+        private String targetAngle;
+        private String difficultyAdjustment;
+        private String questionType;
+        private String focusPoint;
+        private String nextQuestionGoal;
+        private Long nextDomainId;
+        private String nextDomainCode;
+        private String nextDomainName;
+    }
+
+    @Data
+    @Builder
+    public static class RetrievalContext {
+        private String query;
+        private String ragContext;
+        private String domainHint;
+        private String questionTypeHint;
+        private List<String> avoidRecentFamilies;
+    }
+
+    @Data
+    @Builder
+    public static class Constraints {
+        private List<String> avoidRepetitionFamilies;
+        private boolean mustSoundNatural;
+        private Integer maxSentences;
+    }
 
     /** 已问题目摘要（避免重复） */
     @Data
@@ -79,5 +128,8 @@ public class QuestionGenerationInput {
         private String questionType;
         private String domainCode;
         private String stem;
+        private String focusPoint;
+        private String questionFamilyId;
+        private String activeProjectId;
     }
 }

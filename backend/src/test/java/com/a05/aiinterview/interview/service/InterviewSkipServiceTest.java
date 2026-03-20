@@ -42,16 +42,42 @@ class InterviewSkipServiceTest {
 
         InterviewAttempt existing = new InterviewAttempt();
         existing.setAttemptId("attempt-1");
-        existing.setEvaluationJson(Map.of("signal", "END"));
+        existing.setEvaluationJson(Map.of("decision", "wrapup"));
         when(attemptMapper.selectByAttemptId("attempt-1")).thenReturn(existing);
 
         SkipAndNextRequest request = new SkipAndNextRequest();
         request.setAttemptId("attempt-1");
 
         SubmitAttemptResponse response = service.skipAndNext(1L, 2L, 3L, request);
-        assertEquals("END", response.getEvaluationSignal());
+        assertEquals("wrapup", response.getDecision());
         assertNull(response.getStreamAttemptId());
         assertEquals("report_generating", response.getSessionStatus());
+        verify(persistenceService, never()).persist(any(), any(), any(), any());
+    }
+
+    @Test
+    void skipAndNext_shouldIgnoreLegacySignalWhenDecisionMissing() {
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        AnswerSubmitPersistenceService persistenceService = mock(AnswerSubmitPersistenceService.class);
+        ReportGenerationService reportGenerationService = mock(ReportGenerationService.class);
+        InterviewSkipService service = new InterviewSkipService(
+                sessionMapper, questionMapper, attemptMapper, persistenceService, reportGenerationService
+        );
+
+        InterviewAttempt existing = new InterviewAttempt();
+        existing.setAttemptId("attempt-legacy-signal");
+        existing.setEvaluationJson(Map.of("signal", "END"));
+        when(attemptMapper.selectByAttemptId("attempt-legacy-signal")).thenReturn(existing);
+
+        SkipAndNextRequest request = new SkipAndNextRequest();
+        request.setAttemptId("attempt-legacy-signal");
+
+        SubmitAttemptResponse response = service.skipAndNext(1L, 2L, 3L, request);
+        assertEquals("broaden", response.getDecision());
+        assertEquals("attempt-legacy-signal", response.getStreamAttemptId());
+        assertEquals("in_progress", response.getSessionStatus());
         verify(persistenceService, never()).persist(any(), any(), any(), any());
     }
 
@@ -102,7 +128,7 @@ class InterviewSkipServiceTest {
         request.setAttemptId("attempt-2");
 
         SubmitAttemptResponse response = service.skipAndNext(1L, 2L, 3L, request);
-        assertEquals("NEXT_DOMAIN", response.getEvaluationSignal());
+        assertEquals("broaden", response.getDecision());
         assertEquals("attempt-2", response.getStreamAttemptId());
         assertEquals("in_progress", response.getSessionStatus());
 
@@ -112,7 +138,10 @@ class InterviewSkipServiceTest {
         assertEquals("attempt-2", submitCaptor.getValue().getAttemptId());
         assertEquals("[skip]", submitCaptor.getValue().getAnswerText());
         assertEquals(true, submitCaptor.getValue().getIsFinal());
-        assertEquals("java_core", evalCaptor.getValue().getNextStrategy().getNextDomainCode());
+        assertEquals("broaden", evalCaptor.getValue().getDecision());
+        assertEquals("java_core", evalCaptor.getValue().getNextDomainCode());
+        assertEquals("continue", evalCaptor.getValue().getDomainOutcome());
+        assertEquals("PRINCIPLE", evalCaptor.getValue().getQuestionType());
     }
 
     @Test
@@ -145,7 +174,7 @@ class InterviewSkipServiceTest {
         request.setAttemptId("attempt-3");
 
         SubmitAttemptResponse response = service.skipAndNext(1L, 2L, 3L, request);
-        assertEquals("END", response.getEvaluationSignal());
+        assertEquals("wrapup", response.getDecision());
         assertEquals("report_generating", response.getSessionStatus());
         verify(reportGenerationService).generateAsync(1L);
     }

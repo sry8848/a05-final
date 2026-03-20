@@ -11,8 +11,10 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * AI 输出 DTO 契约验证器。
@@ -67,49 +69,57 @@ public class AiOutputContractValidator {
             return buildFallbackEvaluationDecisionOutput();
         }
 
-        String signal = normalizeSignal(output.getSignal());
-        if (signal == null) {
-            log.warn("[契约] EvaluationDecision.signal 非法，降级为 END");
+        if (output.getDecision() == null || output.getDecision().isBlank()) {
+            log.warn("[契约] EvaluationDecision 缺少新 decision，旧 signal 已不再接受，降级为 wrapup");
             return buildFallbackEvaluationDecisionOutput();
         }
-        output.setSignal(signal);
+        return validateNewEvaluationDecision(output);
+    }
 
-        if ("END".equals(signal)) {
-            output.setDeepen(false);
-            output.setNextStrategy(null);
+    private EvaluationDecisionOutput validateNewEvaluationDecision(EvaluationDecisionOutput output) {
+        String decision = normalizeDecision(output.getDecision());
+        if (decision == null) {
+            log.warn("[契约] EvaluationDecision.decision 非法，降级为 wrapup");
+            return buildFallbackEvaluationDecisionOutput();
+        }
+        output.setDecision(decision);
+        output.setAnswerAssessment(trimToNull(output.getAnswerAssessment()));
+        output.setAnswerVerdict(normalizeVerdict(output.getAnswerVerdict()));
+        output.setTargetAngle(normalizeAngle(output.getTargetAngle()));
+        output.setDifficultyAdjustment(normalizeDifficultyAdjustment(output.getDifficultyAdjustment()));
+        output.setDomainOutcome(normalizeDomainOutcome(output.getDomainOutcome(), decision));
+        output.setStatePatch(sanitizeStatePatch(output.getStatePatch()));
+        String targetFocus = trimToNull(output.getTargetFocus());
+        String focusPoint = trimToNull(output.getFocusPoint());
+        output.setTargetFocus(firstNonBlank(targetFocus, focusPoint));
+        output.setFocusPoint(firstNonBlank(focusPoint, targetFocus));
+        output.setQuestionType(normalizeQuestionType(output.getQuestionType()));
+        output.setNextQuestionGoal(trimToNull(output.getNextQuestionGoal()));
+        output.setNextDomainCode(trimToNull(output.getNextDomainCode()));
+        output.setNextDomainName(trimToNull(output.getNextDomainName()));
+        output.setRetrievalIntent(sanitizeRetrievalIntent(output.getRetrievalIntent(), output.getFocusPoint(), output.getQuestionType()));
+        output.setTags(sanitizeTags(output.getTags()));
+
+        if (output.getAnswerAssessment() == null) {
+            log.warn("[契约] EvaluationDecision.answerAssessment 为空，降级为 wrapup");
+            return buildFallbackEvaluationDecisionOutput();
+        }
+
+        if ("wrapup".equals(decision)) {
+            clearNextQuestionFields(output);
             return output;
         }
 
-        if (output.getNextStrategy() == null) {
-            log.warn("[契约] signal={} 但 nextStrategy 为空，降级为 END", signal);
+        if (output.getNextQuestionGoal() == null
+                || output.getTargetFocus() == null
+                || output.getFocusPoint() == null) {
+            log.warn("[契约] EvaluationDecision 缺少下一问关键字段，降级为 wrapup");
             return buildFallbackEvaluationDecisionOutput();
         }
 
-        sanitizeNextStrategy(output.getNextStrategy());
-
-        switch (signal) {
-            case "DEEPEN" -> {
-                if (!output.isPassCurrentLevel()) {
-                    log.warn("[契约] signal=DEEPEN 但 passCurrentLevel=false，降级为 NEXT_DOMAIN");
-                    output.setSignal("NEXT_DOMAIN");
-                    output.setDeepen(false);
-                } else {
-                    output.setDeepen(true);
-                }
-            }
-            case "RETRY_SAME_DOMAIN" -> {
-                if (output.isPassCurrentLevel()) {
-                    log.warn("[契约] signal=RETRY_SAME_DOMAIN 但 passCurrentLevel=true，已回收为未通过当前层");
-                    output.setPassCurrentLevel(false);
-                }
-                output.setDeepen(false);
-            }
-            default -> {
-                if (output.isDeepen()) {
-                    log.warn("[契约] deepen=true 但 signal!=DEEPEN，已回收 deepen 标记");
-                    output.setDeepen(false);
-                }
-            }
+        if (output.getNextDomainCode() == null && !"INTRO".equalsIgnoreCase(output.getQuestionType())) {
+            log.warn("[契约] EvaluationDecision.nextDomainCode 为空，降级为 wrapup");
+            return buildFallbackEvaluationDecisionOutput();
         }
 
         return output;
@@ -187,17 +197,20 @@ public class AiOutputContractValidator {
         strategy.setQuestionType(normalizeQuestionType(strategy.getQuestionType()));
         strategy.setTargetDepth(normalizeDepth(strategy.getTargetDepth()));
         strategy.setDifficulty(normalizeDepth(strategy.getDifficulty()));
-        String focus = sanitizeSingleFocus(firstNonBlank(
-                strategy.getFocusPoint(),
-                strategy.getTargetSkill(),
-                strategy.getNextDomainName(),
-                strategy.getNextDomainCode()
-        ));
+        String focus = firstNonBlank(
+                trimToNull(strategy.getFocusPoint()),
+                trimToNull(strategy.getTargetSkill()),
+                trimToNull(strategy.getNextDomainName()),
+                trimToNull(strategy.getNextDomainCode())
+        );
+        if (focus == null) {
+            focus = "基础能力";
+        }
         strategy.setFocusPoint(focus);
         if (strategy.getTargetSkill() == null || strategy.getTargetSkill().isBlank()) {
             strategy.setTargetSkill(focus);
         } else {
-            strategy.setTargetSkill(sanitizeSingleFocus(strategy.getTargetSkill()));
+            strategy.setTargetSkill(trimToNull(strategy.getTargetSkill()));
         }
         List<String> expectedPoints = strategy.getExpectedPoints();
         if (expectedPoints == null || expectedPoints.isEmpty()) {
@@ -232,6 +245,52 @@ public class AiOutputContractValidator {
         strategy.setExpectedPoints(sanitized.stream().limit(5).toList());
     }
 
+    private EvaluationDecisionOutput.RetrievalIntent sanitizeRetrievalIntent(
+            EvaluationDecisionOutput.RetrievalIntent retrievalIntent,
+            String focusPoint,
+            String questionType) {
+        if (retrievalIntent == null) {
+            return null;
+        }
+        retrievalIntent.setDomainHint(trimToNull(retrievalIntent.getDomainHint()));
+        retrievalIntent.setFocusQuery(firstNonBlank(
+                trimToNull(retrievalIntent.getFocusQuery()),
+                trimToNull(focusPoint)
+        ));
+        retrievalIntent.setQuestionTypeHint(normalizeQuestionType(firstNonBlank(
+                retrievalIntent.getQuestionTypeHint(),
+                questionType
+        )));
+        List<String> families = retrievalIntent.getAvoidRecentFamilies();
+        if (families == null) {
+            retrievalIntent.setAvoidRecentFamilies(List.of());
+        } else {
+            retrievalIntent.setAvoidRecentFamilies(families.stream()
+                    .filter(item -> item != null && !item.isBlank())
+                    .map(String::trim)
+                    .toList());
+        }
+        return retrievalIntent;
+    }
+
+    private EvaluationDecisionOutput.Tags sanitizeTags(EvaluationDecisionOutput.Tags tags) {
+        if (tags == null) {
+            return null;
+        }
+        tags.setQuestionFamilyHint(trimToNull(tags.getQuestionFamilyHint()));
+        tags.setInterviewerIntent(trimToNull(tags.getInterviewerIntent()));
+        return tags;
+    }
+
+    private void clearNextQuestionFields(EvaluationDecisionOutput output) {
+        output.setNextDomainId(null);
+        output.setNextDomainCode(null);
+        output.setNextDomainName(null);
+        output.setQuestionType(null);
+        output.setFocusPoint(null);
+        output.setRetrievalIntent(null);
+    }
+
     private boolean containsAnotherFocus(String text, String focus) {
         if (focus == null || focus.isBlank()) {
             return false;
@@ -244,14 +303,58 @@ public class AiOutputContractValidator {
         return normalizedText.contains("seata") || normalizedText.contains("tcc") || normalizedText.contains("saga");
     }
 
-    private String normalizeSignal(String signal) {
-        if (signal == null || signal.isBlank()) {
+    private String normalizeDecision(String decision) {
+        if (decision == null || decision.isBlank()) {
             return null;
         }
-        String normalized = signal.trim().toUpperCase(Locale.ROOT);
+        String normalized = decision.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
-            case "DEEPEN", "RETRY_SAME_DOMAIN", "NEXT_DOMAIN", "END" -> normalized;
+            case "followup", "probe", "rescue", "broaden", "wrapup" -> normalized;
             default -> null;
+        };
+    }
+
+    private String normalizeVerdict(String verdict) {
+        if (verdict == null || verdict.isBlank()) {
+            return "WEAK";
+        }
+        String normalized = verdict.trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "STRONG", "PARTIAL", "WEAK" -> normalized;
+            default -> "WEAK";
+        };
+    }
+
+    private String normalizeAngle(String angle) {
+        if (angle == null || angle.isBlank()) {
+            return "implementation";
+        }
+        String normalized = angle.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "implementation", "tradeoff", "boundary", "troubleshooting", "role" -> normalized;
+            default -> "implementation";
+        };
+    }
+
+    private String normalizeDifficultyAdjustment(String adjustment) {
+        if (adjustment == null || adjustment.isBlank()) {
+            return "same";
+        }
+        String normalized = adjustment.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "up", "same", "down" -> normalized;
+            default -> "same";
+        };
+    }
+
+    private String normalizeDomainOutcome(String domainOutcome, String decision) {
+        if (domainOutcome == null || domainOutcome.isBlank()) {
+            return "wrapup".equals(decision) ? "covered" : "continue";
+        }
+        String normalized = domainOutcome.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "continue", "covered", "circuit_broken" -> normalized;
+            default -> "wrapup".equals(decision) ? "covered" : "continue";
         };
     }
 
@@ -270,13 +373,19 @@ public class AiOutputContractValidator {
         return normalized.matches("L[1-5]") ? normalized : "L2";
     }
 
-    private String sanitizeSingleFocus(String value) {
-        if (value == null || value.isBlank()) {
-            return "基础能力";
+    private Map<String, Object> sanitizeStatePatch(Map<String, Object> statePatch) {
+        if (statePatch == null) {
+            return new LinkedHashMap<>();
         }
-        String[] parts = value.split("(?i)\\band\\b|\\bor\\b|\\bvs\\b|与|和|及|以及|、|/|\\+|,|，|;|；|\\|");
-        String focus = parts.length > 0 ? parts[0].trim() : value.trim();
-        return focus.isBlank() ? "基础能力" : focus;
+        return new LinkedHashMap<>(statePatch);
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private String firstNonBlank(String... values) {
@@ -285,7 +394,7 @@ public class AiOutputContractValidator {
                 return value;
             }
         }
-        return "基础能力";
+        return null;
     }
 
     private PlannerOutput buildFallbackPlannerOutput() {
@@ -307,9 +416,15 @@ public class AiOutputContractValidator {
         log.info("请检查：1. AI 模型是否正常 2. 评估决策 Prompt 配置");
         log.info("=================================");
         return EvaluationDecisionOutput.builder()
-                .passCurrentLevel(false)
-                .deepen(false)
-                .signal("END")
+                .answerAssessment("[降级] AI 评估决策解析失败，强制进入收束")
+                .answerVerdict("WEAK")
+                .decision("wrapup")
+                .targetFocus("综合收束")
+                .targetAngle("role")
+                .difficultyAdjustment("same")
+                .nextQuestionGoal("结束面试并进入总结")
+                .domainOutcome("covered")
+                .statePatch(new LinkedHashMap<>())
                 .reasoning("[降级] AI 评估决策解析失败，强制结束本轮面试")
                 .build();
     }

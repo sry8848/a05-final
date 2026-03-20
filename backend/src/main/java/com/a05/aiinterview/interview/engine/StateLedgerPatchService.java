@@ -14,6 +14,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,7 +22,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -34,6 +34,12 @@ import java.util.Objects;
 @Service
 @RequiredArgsConstructor
 public class StateLedgerPatchService {
+
+    @Value("${interview.debug.enabled:false}")
+    private boolean interviewDebugEnabled = false;
+
+    @Value("${interview.debug.max-text-chars:1200}")
+    private int interviewDebugMaxTextChars = 1200;
 
     private final InterviewSessionMapper interviewSessionMapper;
     private final SessionSkillStateMapper sessionSkillStateMapper;
@@ -72,6 +78,8 @@ public class StateLedgerPatchService {
             syncSkillState(sessionId, mutation, newLedger, evidenceQuestionId);
         }
 
+        logReductionDebug(sessionId, currentQuestion, mutation, diff, oldLedger, newLedger, attemptId);
+
         return ReductionAudit.builder()
                 .newLedger(newLedger)
                 .diff(diff)
@@ -88,11 +96,15 @@ public class StateLedgerPatchService {
                 .currentDomainCode(resolveDomainCode(currentQuestion))
                 .currentDomainId(currentQuestion.getDomainId())
                 .currentTargetDepth(currentQuestion.getTargetDepth())
-                .passCurrentLevel(evalOutput.isPassCurrentLevel())
-                .deepen(evalOutput.isDeepen())
-                .signal(evalOutput.getSignal())
+                .decision(evalOutput.getDecision())
+                .answerVerdict(evalOutput.getAnswerVerdict())
+                .domainOutcome(evalOutput.getDomainOutcome())
                 .activeProjectId(resolveActiveProjectId(session, currentQuestion, evalOutput))
+                .currentFocus(resolveCurrentFocus(evalOutput))
+                .focusPoint(evalOutput.getFocusPoint())
+                .questionFamilyId(resolveQuestionFamilyId(evalOutput))
                 .skipCurrentQuestion("[skip]".equals(answerText))
+                .statePatch(evalOutput.getStatePatch())
                 .build();
     }
 
@@ -109,9 +121,11 @@ public class StateLedgerPatchService {
         if (!domainCodeExists(oldLedger, domainCode)) {
             throw new IllegalArgumentException("currentDomainCode 不存在于账本: " + domainCode);
         }
-        String signal = asString(mutation.getSignal()).trim().toUpperCase(Locale.ROOT);
-        if ("RETRY_SAME_DOMAIN".equals(signal) && mutation.isPassCurrentLevel()) {
-            throw new IllegalArgumentException("RETRY_SAME_DOMAIN 不允许 passCurrentLevel=true");
+        if (mutation.getDecision() == null || mutation.getDecision().isBlank()) {
+            throw new IllegalArgumentException("mutation.decision 不能为空");
+        }
+        if (mutation.getDomainOutcome() == null || mutation.getDomainOutcome().isBlank()) {
+            throw new IllegalArgumentException("mutation.domainOutcome 不能为空");
         }
     }
 
@@ -119,17 +133,16 @@ public class StateLedgerPatchService {
         if (isIntro(currentQuestion.getQuestionType())) {
             return null;
         }
-        String signal = asString(mutation.getSignal()).trim().toUpperCase(Locale.ROOT);
         if (mutation.isSkipCurrentQuestion()) {
             return "NO_FURTHER_VALUE";
         }
-        if ("END".equals(signal)) {
+        if ("wrapup".equalsIgnoreCase(mutation.getDecision())) {
             return "NO_FURTHER_VALUE";
         }
-        if ("NEXT_DOMAIN".equals(signal) && !mutation.isPassCurrentLevel()) {
+        if ("circuit_broken".equalsIgnoreCase(mutation.getDomainOutcome())) {
             return "FAILED_HARD";
         }
-        if ("NEXT_DOMAIN".equals(signal) && mutation.isPassCurrentLevel()) {
+        if ("covered".equalsIgnoreCase(mutation.getDomainOutcome())) {
             return "DEPTH_REACHED";
         }
         return null;
@@ -156,9 +169,7 @@ public class StateLedgerPatchService {
         DomainStatus domainStatus = DomainStatus.fromLedgerValue(asString(domainState.get("status")));
         existing.setCurrentDepth(asString(domainState.get("current_depth")));
         existing.setSaturated(Boolean.TRUE.equals(domainState.get("saturated")));
-        existing.setStatus(Boolean.TRUE.equals(domainState.get("saturated"))
-                ? DomainStatus.COVERED.getSkillStateValue()
-                : domainStatus.getSkillStateValue());
+        existing.setStatus(domainStatus.getSkillStateValue());
         existing.setTestedCount(existing.getTestedCount() == null ? 1 : existing.getTestedCount() + 1);
         if (evidenceQuestionId != null) {
             List<Long> refs = existing.getEvidenceRefs() != null ? new ArrayList<>(existing.getEvidenceRefs()) : new ArrayList<>();
@@ -214,12 +225,18 @@ public class StateLedgerPatchService {
     private String resolveActiveProjectId(InterviewSession session,
                                           InterviewQuestion currentQuestion,
                                           EvaluationDecisionOutput evalOutput) {
-        if (!isIntro(currentQuestion.getQuestionType())) {
-            return null;
+        if (evalOutput.getStatePatch() != null) {
+            Object projectId = evalOutput.getStatePatch().get("activeProjectId");
+            if (projectId instanceof String str && !str.isBlank()) {
+                return str;
+            }
         }
         Object existing = session.getStateLedgerJson() != null ? session.getStateLedgerJson().get("active_project_id") : null;
         if (existing instanceof String projectId && !projectId.isBlank()) {
             return projectId;
+        }
+        if (!isIntro(currentQuestion.getQuestionType())) {
+            return null;
         }
         if (session.getSyllabusJson() == null) {
             return null;
@@ -239,6 +256,28 @@ public class StateLedgerPatchService {
         return null;
     }
 
+    private String resolveCurrentFocus(EvaluationDecisionOutput evalOutput) {
+        if (evalOutput.getStatePatch() == null) {
+            return null;
+        }
+        Object focus = evalOutput.getStatePatch().get("currentFocus");
+        if (focus instanceof String str && !str.isBlank()) {
+            return str;
+        }
+        return evalOutput.getFocusPoint();
+    }
+
+    private String resolveQuestionFamilyId(EvaluationDecisionOutput evalOutput) {
+        if (evalOutput.getTags() != null && evalOutput.getTags().getQuestionFamilyHint() != null
+                && !evalOutput.getTags().getQuestionFamilyHint().isBlank()) {
+            return evalOutput.getTags().getQuestionFamilyHint();
+        }
+        if (evalOutput.getNextDomainCode() != null && evalOutput.getFocusPoint() != null) {
+            return evalOutput.getNextDomainCode() + "." + evalOutput.getFocusPoint();
+        }
+        return evalOutput.getFocusPoint();
+    }
+
     private boolean isIntro(String questionType) {
         return "INTRO".equalsIgnoreCase(asString(questionType));
     }
@@ -247,11 +286,61 @@ public class StateLedgerPatchService {
         if (questionType == null || questionType.isBlank()) {
             return "PRINCIPLE";
         }
-        return questionType.trim().toUpperCase(Locale.ROOT);
+        return questionType.trim().toUpperCase();
     }
 
     private String asString(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private void logReductionDebug(Long sessionId,
+                                   InterviewQuestion currentQuestion,
+                                   LedgerMutation mutation,
+                                   Map<String, Object> diff,
+                                   Map<String, Object> oldLedger,
+                                   Map<String, Object> newLedger,
+                                   String attemptId) {
+        if (!interviewDebugEnabled) {
+            return;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sessionId", sessionId);
+        payload.put("attemptId", attemptId);
+        payload.put("questionId", currentQuestion != null ? currentQuestion.getId() : null);
+        payload.put("decision", mutation.getDecision());
+        payload.put("domainCode", mutation.getCurrentDomainCode());
+        payload.put("domainOutcome", mutation.getDomainOutcome());
+        payload.put("focusPoint", mutation.getFocusPoint());
+        payload.put("questionFamilyId", mutation.getQuestionFamilyId());
+        payload.put("ledgerBefore", summarizeLedger(oldLedger));
+        payload.put("ledgerAfter", summarizeLedger(newLedger));
+        payload.put("diff", diff);
+        log.info("[INTERVIEW-DEBUG][ledger.patch] {}", clipDebugText(String.valueOf(payload)));
+    }
+
+    private Map<String, Object> summarizeLedger(Map<String, Object> ledger) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        if (ledger == null) {
+            return summary;
+        }
+        summary.put("activeProjectId", ledger.get("active_project_id"));
+        summary.put("currentFocus", ledger.get("current_focus"));
+        summary.put("coveredDomains", ledger.get("covered_domains"));
+        summary.put("coveredPoints", ledger.get("covered_points"));
+        summary.put("weakSignals", ledger.get("weak_signals"));
+        summary.put("recentQuestionFamilies", ledger.get("recent_question_families"));
+        summary.put("remainingTurnBudget", ledger.get("remaining_turn_budget"));
+        return summary;
+    }
+
+    private String clipDebugText(String text) {
+        if (text == null || text.isBlank()) {
+            return text;
+        }
+        if (interviewDebugMaxTextChars <= 0 || text.length() <= interviewDebugMaxTextChars) {
+            return text;
+        }
+        return text.substring(0, interviewDebugMaxTextChars) + "...(truncated)";
     }
 
     @Data

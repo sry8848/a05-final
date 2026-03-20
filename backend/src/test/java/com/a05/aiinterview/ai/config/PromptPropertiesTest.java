@@ -13,13 +13,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PromptPropertiesTest {
 
     @Test
-    @DisplayName("default versions should be v1")
-    void defaultVersions_shouldBeV1() {
+    @DisplayName("default versions should match current prompt baselines")
+    void defaultVersions_shouldMatchCurrentBaselines() {
         PromptProperties properties = new PromptProperties();
 
-        assertThat(properties.getPlanner()).isEqualTo("v1");
+        assertThat(properties.getPlanner()).isEqualTo("v2");
         assertThat(properties.getQuestionGenerationStream()).isEqualTo("v1");
-        assertThat(properties.getEvaluationDecision()).isEqualTo("v1");
+        assertThat(properties.getEvaluationDecision()).isEqualTo("v2");
         assertThat(properties.getReportGeneration()).isEqualTo("v1");
         assertThat(properties.getIntroRewrite()).isEqualTo("v1");
         assertThat(properties.getQuestionDetailEvaluation()).isEqualTo("v1");

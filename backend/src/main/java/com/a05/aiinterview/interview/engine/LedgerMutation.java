@@ -5,8 +5,10 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Map;
+
 /**
- * 后端状态机使用的最小账本变更输入。
+ * 后端账本使用的最小变更输入。
  */
 @Data
 @Builder
@@ -18,9 +20,13 @@ public class LedgerMutation {
     private String currentDomainCode;
     private Long currentDomainId;
     private String currentTargetDepth;
-    private boolean passCurrentLevel;
-    private boolean deepen;
-    private String signal;
+    private String decision;
+    private String answerVerdict;
+    private String domainOutcome;
     private String activeProjectId;
+    private String currentFocus;
+    private String focusPoint;
+    private String questionFamilyId;
     private boolean skipCurrentQuestion;
+    private Map<String, Object> statePatch;
 }

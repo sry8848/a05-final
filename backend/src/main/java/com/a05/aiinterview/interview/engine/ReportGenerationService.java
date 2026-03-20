@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  *
  * <p>触发时机：
  * <ol>
- *   <li>{@code AnswerSubmitService}检测到评估信号为 {@code END} 时自动调用</li>
+ *   <li>{@code AnswerSubmitService}检测到评估决策为 {@code wrapup} 时自动调用</li>
  *   <li>{@code InterviewController}的{@code POST /interviews/{sessionId}/finish} 手动触发</li>
  * </ol>
  *
@@ -58,7 +58,7 @@ public class ReportGenerationService {
 
     /**
      * 异步生成面试报告。
-     * 由 AnswerSubmitService在 signal=END 时调用，或由 finish 接口手动触发。
+     * 由 AnswerSubmitService 在 decision=wrapup 时调用，或由 finish 接口手动触发。
      *
      * @param sessionId 面试会话 ID
      */

@@ -63,11 +63,11 @@ public class InterviewSkipService {
 
         answerSubmitPersistenceService.persist(sessionId, question, submit, output);
 
-        if ("END".equals(output.getSignal())) {
+        if ("wrapup".equalsIgnoreCase(output.getDecision())) {
             reportGenerationService.generateAsync(sessionId);
             return SubmitAttemptResponse.builder()
                     .attemptId(request.getAttemptId())
-                    .evaluationSignal("END")
+                    .decision("wrapup")
                     .streamAttemptId(null)
                     .sessionStatus("report_generating")
                     .build();
@@ -75,7 +75,7 @@ public class InterviewSkipService {
 
         return SubmitAttemptResponse.builder()
                 .attemptId(request.getAttemptId())
-                .evaluationSignal(output.getSignal())
+                .decision(output.getDecision())
                 .streamAttemptId(request.getAttemptId())
                 .sessionStatus("in_progress")
                 .build();
@@ -91,10 +91,19 @@ public class InterviewSkipService {
         }
 
         return EvaluationDecisionOutput.builder()
-                .passCurrentLevel(false)
-                .deepen(false)
-                .signal(shouldEnd ? "END" : "NEXT_DOMAIN")
-                .nextStrategy(nextStrategy)
+                .answerAssessment("candidate skipped current question")
+                .answerVerdict("WEAK")
+                .decision(shouldEnd ? "wrapup" : "broaden")
+                .targetFocus(nextStrategy != null ? nextStrategy.getFocusPoint() : null)
+                .targetAngle("implementation")
+                .difficultyAdjustment("same")
+                .nextQuestionGoal(shouldEnd ? "end interview after skip" : "broaden to next available domain after skip")
+                .nextDomainId(nextStrategy != null ? nextStrategy.getNextDomainId() : null)
+                .nextDomainCode(nextStrategy != null ? nextStrategy.getNextDomainCode() : null)
+                .nextDomainName(nextStrategy != null ? nextStrategy.getNextDomainName() : null)
+                .questionType(nextStrategy != null ? nextStrategy.getQuestionType() : null)
+                .focusPoint(nextStrategy != null ? nextStrategy.getFocusPoint() : null)
+                .domainOutcome(shouldEnd ? "covered" : "continue")
                 .reasoning("question skipped")
                 .build();
     }
@@ -249,14 +258,17 @@ public class InterviewSkipService {
     }
 
     private SubmitAttemptResponse buildIdempotentResponse(InterviewAttempt existing) {
-        String signal = "NEXT_DOMAIN";
-        if (existing.getEvaluationJson() != null && existing.getEvaluationJson().get("signal") instanceof String s) {
-            signal = s;
+        String decision = "broaden";
+        if (existing.getEvaluationJson() != null) {
+            Object decisionObj = existing.getEvaluationJson().get("decision");
+            if (decisionObj instanceof String s && StringUtils.hasText(s)) {
+                decision = s;
+            }
         }
-        boolean isEnd = "END".equals(signal);
+        boolean isEnd = "wrapup".equalsIgnoreCase(decision);
         return SubmitAttemptResponse.builder()
                 .attemptId(existing.getAttemptId())
-                .evaluationSignal(signal)
+                .decision(decision)
                 .streamAttemptId(isEnd ? null : existing.getAttemptId())
                 .sessionStatus(isEnd ? "report_generating" : "in_progress")
                 .build();

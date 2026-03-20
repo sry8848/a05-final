@@ -240,7 +240,7 @@ public class OpenAiClient implements AiClient {
                     null,
                     null
             );
-            log.info("评估决策调用成功，signal={}", output.getSignal());
+            log.info("评估决策调用成功，decision={}", output.getDecision());
             return buildResult(output, response, latencyMs, rendered);
         } catch (Exception e) {
             long latencyMs = System.currentTimeMillis() - startMs;
@@ -586,6 +586,7 @@ public class OpenAiClient implements AiClient {
         variables.put("positionCode", safeString(input.getPositionCode()));
         variables.put("experienceLevel", safeString(input.getExperienceLevel()));
         variables.put("mode", safeString(input.getMode()));
+        variables.put("interviewHardConstraints", stringifyAsJson(buildInterviewHardConstraints(input)));
         variables.put("currentQuestionStem", safeString(input.getCurrentQuestionStem()));
         variables.put("currentDomainName", safeString(input.getCurrentDomainName()));
         variables.put("currentDomainCode", safeString(input.getCurrentDomainCode()));
@@ -595,6 +596,7 @@ public class OpenAiClient implements AiClient {
         variables.put("resumeText", truncate(input.getResumeText(), 1000));
         variables.put("expectedPoints", formatBulletLines(input.getExpectedPoints()));
         variables.put("recentContext", formatRecentContext(input.getRecentContext()));
+        variables.put("currentInterviewContext", stringifyAsJson(buildCurrentInterviewContext(input)));
         variables.put("pauseStats", formatPauseStats(input.getPauseStats()));
         variables.put("stateLedgerJson", stringifyAsJson(input.getStateLedger()));
         variables.put("syllabusJson", stringifyAsJson(input.getSyllabusJson()));
@@ -633,6 +635,120 @@ public class OpenAiClient implements AiClient {
         return variables;
     }
 
+    private Map<String, Object> buildInterviewHardConstraints(EvaluationDecisionInput input) {
+        Map<String, Object> constraints = new LinkedHashMap<>();
+        constraints.put("difficultyBand", List.of(normalizeDepth(safeString(input.getCurrentTargetDepth()))));
+        constraints.put("remainingTurnBudget", extractLedgerScalar(input.getStateLedger(), "remaining_turn_budget"));
+        constraints.put("requiredDomains", extractSyllabusDomainCodes(input.getSyllabusJson()));
+        constraints.put("maxDomainRescueCount", 1);
+        constraints.put("maxSessionRescueCount", 3);
+        constraints.put("maxFocusFollowupStreak", 5);
+        return constraints;
+    }
+
+    private Map<String, Object> buildCurrentInterviewContext(EvaluationDecisionInput input) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("activeProjectId", extractLedgerScalar(input.getStateLedger(), "active_project_id"));
+        context.put("currentFocus", extractLedgerScalar(input.getStateLedger(), "current_focus"));
+        context.put("coveredDomains", extractLedgerList(input.getStateLedger(), "covered_domains"));
+        context.put("coveredPoints", extractLedgerList(input.getStateLedger(), "covered_points"));
+        context.put("weakSignals", extractLedgerList(input.getStateLedger(), "weak_signals"));
+        context.put("recentQuestionFamilies", extractLedgerList(input.getStateLedger(), "recent_question_families"));
+        int sessionRescueCount = toInt(extractLedgerScalar(input.getStateLedger(), "rescue_total"));
+        int currentFocusFollowupStreak = toInt(extractLedgerScalar(input.getStateLedger(), "current_focus_streak"));
+        String currentDomainCode = safeString(input.getCurrentDomainCode());
+        context.put("domainRescueUsed", domainRescueUsed(input.getStateLedger(), currentDomainCode));
+        context.put("sessionRescueCount", sessionRescueCount);
+        context.put("currentFocusFollowupStreak", currentFocusFollowupStreak);
+        context.put("lastFocusPoint", extractLedgerScalar(input.getStateLedger(), "last_focus_point"));
+        context.put("maxDomainRescueCount", 1);
+        context.put("maxSessionRescueCount", 3);
+        context.put("maxFocusFollowupStreak", 5);
+        return context;
+    }
+
+    private Map<String, Object> buildQuestionRoleContext(QuestionGenerationInput input) {
+        if (input.getRoleContext() != null) {
+            return toMap(input.getRoleContext());
+        }
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("roundType", input.getMode());
+        context.put("candidateLevel", input.getExperienceLevel());
+        context.put("difficultyBand", List.of(normalizeDepth(safeString(input.getTargetDepth()))));
+        context.put("style", "natural_followup");
+        return context;
+    }
+
+    private Map<String, Object> buildQuestionProjectContext(QuestionGenerationInput input) {
+        if (input.getProjectContext() != null) {
+            return toMap(input.getProjectContext());
+        }
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("activeProjectId", null);
+        context.put("projectName", null);
+        context.put("currentFocus", safeString(input.getTargetSkill()));
+        return context;
+    }
+
+    private Map<String, Object> buildQuestionRecentContext(QuestionGenerationInput input) {
+        if (input.getRecentContext() != null) {
+            return toMap(input.getRecentContext());
+        }
+        Map<String, Object> context = new LinkedHashMap<>();
+        String lastQuestion = null;
+        if (input.getAskedQuestions() != null && !input.getAskedQuestions().isEmpty()) {
+            QuestionGenerationInput.AskedQuestion last = input.getAskedQuestions().getLast();
+            lastQuestion = safeString(last.getStem());
+        }
+        context.put("lastQuestion", lastQuestion);
+        context.put("lastAnswerSummary", null);
+        context.put("recentTurnsSummary", null);
+        context.put("lastAnswerHighlights", List.of());
+        return context;
+    }
+
+    private Map<String, Object> buildQuestionGoalContext(QuestionGenerationInput input) {
+        if (input.getNextQuestionGoal() != null) {
+            return toMap(input.getNextQuestionGoal());
+        }
+        Map<String, Object> goal = new LinkedHashMap<>();
+        goal.put("decision", "broaden");
+        goal.put("targetFocus", safeString(input.getTargetSkill()));
+        goal.put("targetAngle", "implementation");
+        goal.put("difficultyAdjustment", "same");
+        goal.put("questionType", safeString(input.getNextQuestionType()));
+        goal.put("focusPoint", safeString(input.getTargetSkill()));
+        goal.put("nextQuestionGoal", safeString(input.getTargetSkill()));
+        goal.put("nextDomainId", input.getNextDomainId());
+        goal.put("nextDomainCode", safeString(input.getNextDomainCode()));
+        goal.put("nextDomainName", safeString(input.getNextDomainName()));
+        return goal;
+    }
+
+    private Map<String, Object> buildQuestionRetrievalContext(QuestionGenerationInput input) {
+        if (input.getRetrievalContext() != null) {
+            return toMap(input.getRetrievalContext());
+        }
+        Map<String, Object> retrieval = new LinkedHashMap<>();
+        retrieval.put("query", safeString(input.getTargetSkill()));
+        retrieval.put("ragContext", safeString(input.getRagContext()));
+        retrieval.put("domainHint", safeString(input.getNextDomainCode()));
+        retrieval.put("questionTypeHint", safeString(input.getNextQuestionType()));
+        retrieval.put("avoidRecentFamilies", List.of());
+        return retrieval;
+    }
+
+    private Map<String, Object> buildQuestionConstraints(QuestionGenerationInput input) {
+        if (input.getConstraints() != null) {
+            return toMap(input.getConstraints());
+        }
+        Map<String, Object> constraints = new LinkedHashMap<>();
+        constraints.put("avoidRepetitionFamilies", List.of());
+        constraints.put("mustSoundNatural", true);
+        constraints.put("maxSentences", 2);
+        return constraints;
+    }
+
     private RenderedPrompt renderPrompt(String promptCode, Map<String, Object> variables) {
         String promptVersion = promptProperties.resolveVersion(promptCode);
         RenderedPrompt rendered = promptTemplateService.render(promptCode, promptVersion, variables);
@@ -643,17 +759,16 @@ public class OpenAiClient implements AiClient {
 
     private Map<String, Object> buildQuestionGenerationStreamVariables(QuestionGenerationInput input) {
         Map<String, Object> variables = new LinkedHashMap<>();
-        variables.put("nextDomainName", safeString(input.getNextDomainName()));
-        variables.put("nextDomainCode", safeString(input.getNextDomainCode()));
-        variables.put("nextQuestionType", safeString(input.getNextQuestionType()));
-        variables.put("targetDepth", safeString(input.getTargetDepth()));
-        variables.put("difficulty", safeString(input.getDifficulty()));
-        variables.put("targetSkill", safeString(input.getTargetSkill()));
-        variables.put("expectedPoints", formatBulletLines(input.getExpectedPoints()));
         variables.put("positionCode", safeString(input.getPositionCode()));
         variables.put("experienceLevel", safeString(input.getExperienceLevel()));
         variables.put("mode", safeString(input.getMode()));
-        variables.put("ragContext", safeString(input.getRagContext()));
+        variables.put("resumeTextSummary", truncate(input.getResumeTextSummary(), 500));
+        variables.put("roleContext", stringifyAsJson(buildQuestionRoleContext(input)));
+        variables.put("projectContext", stringifyAsJson(buildQuestionProjectContext(input)));
+        variables.put("recentContext", stringifyAsJson(buildQuestionRecentContext(input)));
+        variables.put("nextQuestionGoal", stringifyAsJson(buildQuestionGoalContext(input)));
+        variables.put("retrievalContext", stringifyAsJson(buildQuestionRetrievalContext(input)));
+        variables.put("constraints", stringifyAsJson(buildQuestionConstraints(input)));
         variables.put("askedQuestions", formatAskedQuestions(input.getAskedQuestions()));
         variables.put("syllabus", stringifyAsJson(input.getSyllabus()));
         return variables;
@@ -739,6 +854,33 @@ public class OpenAiClient implements AiClient {
         return sb.toString();
     }
 
+    @SuppressWarnings("unchecked")
+    private boolean domainRescueUsed(Map<String, Object> ledger, String domainCode) {
+        if (ledger == null || domainCode == null || domainCode.isBlank()) {
+            return false;
+        }
+        Object raw = ledger.get("rescue_counts_by_domain");
+        if (!(raw instanceof Map<?, ?> rescueCounts)) {
+            return false;
+        }
+        Object value = rescueCounts.get(domainCode);
+        return toInt(value) >= 1;
+    }
+
+    private int toInt(Object value) {
+        if (value instanceof Number n) {
+            return n.intValue();
+        }
+        if (value == null) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
     private String formatReportQaPairs(List<ReportGenerationInput.QuestionAnswerPair> pairs) {
         if (pairs == null || pairs.isEmpty()) {
             return "- 无";
@@ -804,6 +946,68 @@ public class OpenAiClient implements AiClient {
         return sb.isEmpty() ? "- 无" : sb.toString();
     }
 
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> toMap(Object value) {
+        if (value == null) {
+            return new LinkedHashMap<>();
+        }
+        return new LinkedHashMap<>(objectMapper.convertValue(value, Map.class));
+    }
+
+    private Object extractLedgerScalar(Map<String, Object> ledger, String key) {
+        if (ledger == null || key == null || key.isBlank()) {
+            return null;
+        }
+        return ledger.get(key);
+    }
+
+    private List<String> extractLedgerList(Map<String, Object> ledger, String key) {
+        if (ledger == null || key == null || key.isBlank()) {
+            return List.of();
+        }
+        Object value = ledger.get(key);
+        if (!(value instanceof List<?> rawList)) {
+            return List.of();
+        }
+        List<String> result = new java.util.ArrayList<>();
+        for (Object item : rawList) {
+            String text = safeString(item == null ? null : String.valueOf(item)).trim();
+            if (!text.isBlank()) {
+                result.add(text);
+            }
+        }
+        return result;
+    }
+
+    private List<String> extractSyllabusDomainCodes(Map<String, Object> syllabus) {
+        if (syllabus == null) {
+            return List.of();
+        }
+        Object domainsObj = syllabus.get("domains");
+        if (!(domainsObj instanceof List<?> domains)) {
+            return List.of();
+        }
+        List<String> result = new java.util.ArrayList<>();
+        for (Object domainObj : domains) {
+            if (!(domainObj instanceof Map<?, ?> domain)) {
+                continue;
+            }
+            String code = safeString(domain.get("domainCode") == null ? null : String.valueOf(domain.get("domainCode"))).trim();
+            if (!code.isBlank()) {
+                result.add(code);
+            }
+        }
+        return result;
+    }
+
+    private String normalizeDepth(String depth) {
+        if (depth == null || depth.isBlank()) {
+            return "L2";
+        }
+        String normalized = depth.trim().toUpperCase();
+        return normalized.matches("L[1-5]") ? normalized : "L2";
+    }
+
     private String stringifyAsJson(Object value) {
         if (value == null) {
             return "{}";
@@ -842,6 +1046,3 @@ public class OpenAiClient implements AiClient {
         return value.substring(0, maxLen);
     }
 }
-
-
-

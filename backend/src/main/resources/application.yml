@@ -75,6 +75,12 @@ logging:
     root: INFO
     com.a05.aiinterview: DEBUG
 
+interview:
+  debug:
+    enabled: ${INTERVIEW_DEBUG_ENABLED:false}
+    include-prompts: ${INTERVIEW_DEBUG_INCLUDE_PROMPTS:false}
+    max-text-chars: ${INTERVIEW_DEBUG_MAX_TEXT_CHARS:1200}
+
 # 简历文件上传目录配置，默认使用系统临时目录，生产环境建议配置固定路径
 resume:
   upload-dir: ${RESUME_UPLOAD_DIR:${java.io.tmpdir}/aiinterview-resumes}
@@ -91,9 +97,9 @@ ai:
     model: ${OPENAI_MODEL:gpt-4o-mini}
   prompt:
     version:
-      planner: ${AI_PROMPT_PLANNER_VERSION:v1}
+      planner: ${AI_PROMPT_PLANNER_VERSION:v2}
       question-generation-stream: ${AI_PROMPT_QUESTION_GENERATION_STREAM_VERSION:v1}
-      evaluation-decision: ${AI_PROMPT_EVALUATION_DECISION_VERSION:v1}
+      evaluation-decision: ${AI_PROMPT_EVALUATION_DECISION_VERSION:v2}
       report-generation: ${AI_PROMPT_REPORT_GENERATION_VERSION:v1}
       intro-rewrite: ${AI_PROMPT_INTRO_REWRITE_VERSION:v1}
       question-detail-evaluation: ${AI_PROMPT_QUESTION_DETAIL_EVALUATION_VERSION:v1}

@@ -87,9 +87,14 @@ class AnswerSubmitServiceExpectedPointsTest {
         when(resumeMapper.selectById(7001L)).thenReturn(resume);
 
         EvaluationDecisionOutput evalOutput = EvaluationDecisionOutput.builder()
-                .passCurrentLevel(true)
-                .deepen(false)
-                .signal("END")
+                .answerAssessment("当前轮证据足够，结束面试。")
+                .answerVerdict("STRONG")
+                .decision("wrapup")
+                .targetFocus("综合收束")
+                .targetAngle("role")
+                .difficultyAdjustment("same")
+                .nextQuestionGoal("结束当前面试")
+                .domainOutcome("covered")
                 .build();
         when(aiClient.callEvaluationDecision(any())).thenReturn(
                 AiCallResult.<EvaluationDecisionOutput>builder().output(evalOutput).build()
@@ -101,7 +106,7 @@ class AnswerSubmitServiceExpectedPointsTest {
                         .attemptId("attempt-1")
                         .isFinal(true)
                         .shouldEnd(false)
-                        .evaluationSignal("NEXT_DOMAIN")
+                        .decision("wrapup")
                         .build()
         );
 

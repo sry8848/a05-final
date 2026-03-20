@@ -51,6 +51,17 @@ class StateLedgerInitServiceTest {
         Map<String, Object> ledger = ledgerRef.get();
         assertThat(ledger).isNotNull();
         assertThat(ledger.get("asked_total")).isEqualTo(0);
+        assertThat(ledger.get("active_project_id")).isNull();
+        assertThat(ledger.get("current_focus")).isNull();
+        assertThat(ledger.get("remaining_turn_budget")).isEqualTo(3);
+        assertThat(ledger.get("covered_domains")).isEqualTo(List.of());
+        assertThat(ledger.get("covered_points")).isEqualTo(List.of());
+        assertThat(ledger.get("weak_signals")).isEqualTo(List.of());
+        assertThat(ledger.get("recent_question_families")).isEqualTo(List.of());
+        assertThat(ledger.get("rescue_total")).isEqualTo(0);
+        assertThat(ledger.get("rescue_counts_by_domain")).isEqualTo(Map.of());
+        assertThat(ledger.get("last_focus_point")).isNull();
+        assertThat(ledger.get("current_focus_streak")).isEqualTo(0);
         assertThat(ledger.get("question_mix_progress")).isEqualTo(Map.of("INTRO", 0, "PRINCIPLE", 0));
         verify(mapper, times(1)).insert(any());
     }

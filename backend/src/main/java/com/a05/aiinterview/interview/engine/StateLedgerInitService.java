@@ -93,6 +93,19 @@ public class StateLedgerInitService {
         ledger.put("session_id", sessionId.toString());
         ledger.put("overall_status", DomainStatus.IN_PROGRESS.getValue());
         ledger.put("active_project_id", null);
+        ledger.put("current_focus", null);
+        ledger.put("remaining_turn_budget", initialTurnBudget(plannerOutput));
+        ledger.put("covered_domains", new ArrayList<>());
+        ledger.put("covered_points", new ArrayList<>());
+        ledger.put("weak_signals", new ArrayList<>());
+        ledger.put("recent_question_families", new ArrayList<>());
+        ledger.put("rescue_total", 0);
+        ledger.put("rescue_counts_by_domain", new LinkedHashMap<>());
+        ledger.put("last_focus_point", null);
+        ledger.put("current_focus_streak", 0);
+        // 新增：当前知识域连续追问计数，用于限制同一域的追问轮数
+        ledger.put("current_domain_code", null);
+        ledger.put("current_domain_followup_count", 0);
 
         // 各知识域初始状态
         //TODO 知识域描述过于简单随意
@@ -122,5 +135,15 @@ public class StateLedgerInitService {
         ledger.put("last_attempt_id", null);
 
         return ledger;
+    }
+
+    private int initialTurnBudget(PlannerOutput plannerOutput) {
+        if (plannerOutput.getQuestionMixPlan() == null || plannerOutput.getQuestionMixPlan().isEmpty()) {
+            return 0;
+        }
+        return plannerOutput.getQuestionMixPlan().values().stream()
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .sum();
     }
 }

@@ -16,9 +16,9 @@ import java.util.Map;
 @ConfigurationProperties(prefix = "ai.prompt.version")
 public class PromptProperties {
 
-    private String planner = "v1";
+    private String planner = "v2";
     private String questionGenerationStream = "v1";
-    private String evaluationDecision = "v1";
+    private String evaluationDecision = "v2";
     private String reportGeneration = "v1";
     private String introRewrite = "v1";
     private String questionDetailEvaluation = "v1";

@@ -125,7 +125,7 @@ class InterviewControllerNewEndpointsTest {
         req.setAttemptId("a-1");
         SubmitAttemptResponse skipResp = SubmitAttemptResponse.builder()
                 .attemptId("a-1")
-                .evaluationSignal("NEXT_DOMAIN")
+                .decision("broaden")
                 .streamAttemptId("a-1")
                 .sessionStatus("in_progress")
                 .build();
@@ -133,7 +133,7 @@ class InterviewControllerNewEndpointsTest {
 
         ApiResponse<SubmitAttemptResponse> response = controller.skipAndNext(9L, 1L, 2L, req);
         assertEquals(0, response.getCode());
-        assertEquals("NEXT_DOMAIN", response.getData().getEvaluationSignal());
+        assertEquals("broaden", response.getData().getDecision());
     }
 
     @Test

@@ -55,7 +55,7 @@ public class AnswerSubmitPersistenceService {
         InterviewAttempt attempt = saveAttempt(sessionId, currentQuestion.getId(), request, evalOutput, reductionAudit);
         markQuestionStatus(currentQuestion.getId(), request.getAnswerText());
 
-        boolean shouldEnd = "END".equals(evalOutput.getSignal());
+        boolean shouldEnd = "wrapup".equalsIgnoreCase(evalOutput.getDecision());
         if (shouldEnd) {
             markSessionFinishing(sessionId);
         }
@@ -74,7 +74,7 @@ public class AnswerSubmitPersistenceService {
                 .attemptDbId(attempt.getId())
                 .attemptId(attempt.getAttemptId())
                 .isFinal(isFinal)
-                .evaluationSignal(evalOutput.getSignal())
+                .decision(evalOutput.getDecision())
                 .shouldEnd(shouldEnd)
                 .build();
     }
@@ -82,12 +82,22 @@ public class AnswerSubmitPersistenceService {
     private InterviewAttempt saveAttempt(Long sessionId,
                                          Long questionId,
                                          SubmitAttemptRequest request,
-                                         EvaluationDecisionOutput evalOutput,
+        EvaluationDecisionOutput evalOutput,
                                          StateLedgerPatchService.ReductionAudit reductionAudit) {
         Map<String, Object> evalSnapshot = new LinkedHashMap<>();
-        evalSnapshot.put("signal", evalOutput.getSignal());
-        evalSnapshot.put("passCurrentLevel", evalOutput.isPassCurrentLevel());
-        evalSnapshot.put("deepen", evalOutput.isDeepen());
+        evalSnapshot.put("decision", evalOutput.getDecision());
+        evalSnapshot.put("answerAssessment", evalOutput.getAnswerAssessment());
+        evalSnapshot.put("answerVerdict", evalOutput.getAnswerVerdict());
+        evalSnapshot.put("targetFocus", evalOutput.getTargetFocus());
+        evalSnapshot.put("targetAngle", evalOutput.getTargetAngle());
+        evalSnapshot.put("difficultyAdjustment", evalOutput.getDifficultyAdjustment());
+        evalSnapshot.put("nextQuestionGoal", evalOutput.getNextQuestionGoal());
+        evalSnapshot.put("nextDomainId", evalOutput.getNextDomainId());
+        evalSnapshot.put("nextDomainCode", evalOutput.getNextDomainCode());
+        evalSnapshot.put("nextDomainName", evalOutput.getNextDomainName());
+        evalSnapshot.put("questionType", evalOutput.getQuestionType());
+        evalSnapshot.put("focusPoint", evalOutput.getFocusPoint());
+        evalSnapshot.put("domainOutcome", evalOutput.getDomainOutcome());
         if (evalOutput.getReasoning() != null && !evalOutput.getReasoning().isBlank()) {
             evalSnapshot.put("reasoning", evalOutput.getReasoning());
         }
@@ -108,19 +118,22 @@ public class AnswerSubmitPersistenceService {
         if (request.getAsrCorrectionChanges() != null && !request.getAsrCorrectionChanges().isEmpty()) {
             evalSnapshot.put("asrCorrectionChanges", request.getAsrCorrectionChanges());
         }
-        if (evalOutput.getNextStrategy() != null) {
-            EvaluationDecisionOutput.NextQuestionStrategy strat = evalOutput.getNextStrategy();
-            Map<String, Object> nextStrategySnapshot = new LinkedHashMap<>();
-            nextStrategySnapshot.put("nextDomainId", strat.getNextDomainId());
-            nextStrategySnapshot.put("nextDomainCode", strat.getNextDomainCode());
-            nextStrategySnapshot.put("nextDomainName", strat.getNextDomainName());
-            nextStrategySnapshot.put("questionType", strat.getQuestionType());
-            nextStrategySnapshot.put("targetDepth", strat.getTargetDepth());
-            nextStrategySnapshot.put("difficulty", strat.getDifficulty());
-            nextStrategySnapshot.put("targetSkill", strat.getTargetSkill());
-            nextStrategySnapshot.put("expectedPoints", strat.getExpectedPoints());
-            nextStrategySnapshot.put("focusPoint", strat.getFocusPoint());
-            evalSnapshot.put("nextStrategy", nextStrategySnapshot);
+        if (evalOutput.getRetrievalIntent() != null) {
+            Map<String, Object> retrievalIntent = new LinkedHashMap<>();
+            retrievalIntent.put("domainHint", evalOutput.getRetrievalIntent().getDomainHint());
+            retrievalIntent.put("focusQuery", evalOutput.getRetrievalIntent().getFocusQuery());
+            retrievalIntent.put("questionTypeHint", evalOutput.getRetrievalIntent().getQuestionTypeHint());
+            retrievalIntent.put("avoidRecentFamilies", evalOutput.getRetrievalIntent().getAvoidRecentFamilies());
+            evalSnapshot.put("retrievalIntent", retrievalIntent);
+        }
+        if (evalOutput.getStatePatch() != null && !evalOutput.getStatePatch().isEmpty()) {
+            evalSnapshot.put("statePatch", evalOutput.getStatePatch());
+        }
+        if (evalOutput.getTags() != null) {
+            Map<String, Object> tags = new LinkedHashMap<>();
+            tags.put("questionFamilyHint", evalOutput.getTags().getQuestionFamilyHint());
+            tags.put("interviewerIntent", evalOutput.getTags().getInterviewerIntent());
+            evalSnapshot.put("tags", tags);
         }
 
         InterviewAttempt attempt = new InterviewAttempt();
@@ -160,6 +173,6 @@ public class AnswerSubmitPersistenceService {
         private String attemptId;
         private boolean isFinal;
         private boolean shouldEnd;
-        private String evaluationSignal;
+        private String decision;
     }
 }

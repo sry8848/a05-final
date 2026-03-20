@@ -63,8 +63,19 @@ public class MockAiClient implements AiClient {
 
     @Override
     public Flux<String> callQuestionGenerationStream(QuestionGenerationInput input) {
-        log.info("[MockAI] callQuestionGenerationStream, domainCode={}", input.getNextDomainCode());
-        String stem = buildMockStem(input.getNextDomainName(), input.getNextQuestionType());
+        String domainCode = input.getNextQuestionGoal() != null
+                ? input.getNextQuestionGoal().getNextDomainCode()
+                : input.getNextDomainCode();
+        String questionType = input.getNextQuestionGoal() != null
+                ? input.getNextQuestionGoal().getQuestionType()
+                : input.getNextQuestionType();
+        String domainName = input.getNextQuestionGoal() != null
+                ? input.getNextQuestionGoal().getNextDomainName()
+                : input.getNextDomainName();
+        log.info("[MockAI] callQuestionGenerationStream, decision={}, domainCode={}",
+                input.getNextQuestionGoal() != null ? input.getNextQuestionGoal().getDecision() : null,
+                domainCode);
+        String stem = buildMockStem(domainName, questionType);
         return Flux.fromArray(stem.split(""))
                 .delayElements(Duration.ofMillis(30));
     }
@@ -85,23 +96,129 @@ public class MockAiClient implements AiClient {
         long startMs = System.currentTimeMillis();
 
         AnswerAssessment assessment = assessAnswer(input.getAnswerText());
-        boolean passCurrentLevel = assessment == AnswerAssessment.PASS;
-        boolean deepen = passCurrentLevel && shouldDeepen(input);
-        String signal = resolveSignal(input, assessment, deepen);
-        EvaluationDecisionOutput.NextQuestionStrategy nextStrategy = "END".equals(signal)
+        boolean shouldFollowupInDomain = assessment == AnswerAssessment.PASS && shouldDeepen(input);
+        String decision = resolveDecision(input, assessment, shouldFollowupInDomain);
+        EvaluationDecisionOutput.NextQuestionStrategy nextPlan = "wrapup".equals(decision)
                 ? null
-                : buildNextStrategy(input, signal, deepen);
+                : buildNextPlan(input, decision, shouldFollowupInDomain);
 
         EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
-                .passCurrentLevel(passCurrentLevel)
-                .deepen(deepen)
-                .signal(signal)
-                .nextStrategy(nextStrategy)
-                .reasoning(deepen
+                .answerAssessment(buildAssessmentText(assessment, input.getCurrentDomainName()))
+                .answerVerdict(mapVerdict(assessment))
+                .decision(decision)
+                .targetFocus(resolveFocus(nextPlan, input))
+                .targetAngle("implementation")
+                .difficultyAdjustment(resolveDifficultyAdjustment(input, nextPlan))
+                .nextQuestionGoal(buildNextQuestionGoal(decision, nextPlan, input))
+                .nextDomainId(nextPlan != null ? nextPlan.getNextDomainId() : null)
+                .nextDomainCode(nextPlan != null ? nextPlan.getNextDomainCode() : null)
+                .nextDomainName(nextPlan != null ? nextPlan.getNextDomainName() : null)
+                .questionType(nextPlan != null ? nextPlan.getQuestionType() : null)
+                .focusPoint(nextPlan != null ? nextPlan.getFocusPoint() : null)
+                .domainOutcome(resolveDomainOutcome(decision, assessment))
+                .retrievalIntent(buildRetrievalIntent(input, nextPlan))
+                .tags(buildTags(decision, nextPlan))
+                .reasoning(shouldFollowupInDomain
                         ? "[Mock] 当前层通过，继续同域加深。"
                         : "[Mock] 当前层判断已完成，给出下一步策略。")
                 .build();
         return mockResult(output, startMs, "evaluation_decision");
+    }
+
+    private String buildAssessmentText(AnswerAssessment assessment, String domainName) {
+        return switch (assessment) {
+            case PASS -> "候选人对" + domainName + "回答较完整，可以继续验证更有区分度的点。";
+            case PARTIAL -> "候选人掌握了" + domainName + "的部分内容，但关键细节还不够扎实。";
+            case HARD_FAIL -> "候选人在" + domainName + "上回答明显不足，继续硬压收益较低。";
+        };
+    }
+
+    private String mapVerdict(AnswerAssessment assessment) {
+        return switch (assessment) {
+            case PASS -> "STRONG";
+            case PARTIAL -> "PARTIAL";
+            case HARD_FAIL -> "WEAK";
+        };
+    }
+
+    private String resolveDomainOutcome(String decision, AnswerAssessment assessment) {
+        if ("wrapup".equals(decision)) {
+            return "covered";
+        }
+        if ("broaden".equals(decision) && assessment == AnswerAssessment.HARD_FAIL) {
+            return "circuit_broken";
+        }
+        return "continue";
+    }
+
+    private String resolveFocus(EvaluationDecisionOutput.NextQuestionStrategy strategy, EvaluationDecisionInput input) {
+        if (strategy != null && strategy.getFocusPoint() != null && !strategy.getFocusPoint().isBlank()) {
+            return strategy.getFocusPoint();
+        }
+        return input.getCurrentDomainName();
+    }
+
+    private String resolveDifficultyAdjustment(EvaluationDecisionInput input,
+                                               EvaluationDecisionOutput.NextQuestionStrategy strategy) {
+        if (strategy == null) {
+            return "same";
+        }
+        int current = depthIndex(input.getCurrentTargetDepth());
+        int next = depthIndex(strategy.getTargetDepth());
+        if (next > current) {
+            return "up";
+        }
+        if (next < current) {
+            return "down";
+        }
+        return "same";
+    }
+
+    private String buildNextQuestionGoal(String decision,
+                                         EvaluationDecisionOutput.NextQuestionStrategy strategy,
+                                         EvaluationDecisionInput input) {
+        String focus = resolveFocus(strategy, input);
+        return switch (decision) {
+            case "followup" -> "继续顺着当前回答深挖" + focus;
+            case "rescue" -> "降阶补问并验证" + focus + "的基础理解";
+            case "wrapup" -> "结束当前面试";
+            default -> "切到下一个关键域验证" + focus;
+        };
+    }
+
+    private EvaluationDecisionOutput.RetrievalIntent buildRetrievalIntent(
+            EvaluationDecisionInput input,
+            EvaluationDecisionOutput.NextQuestionStrategy nextStrategy) {
+        if (nextStrategy == null) {
+            return null;
+        }
+        String focus = resolveFocus(nextStrategy, input);
+        return EvaluationDecisionOutput.RetrievalIntent.builder()
+                .domainHint(nextStrategy.getNextDomainCode())
+                .focusQuery(focus + " " + nextStrategy.getQuestionType())
+                .questionTypeHint(nextStrategy.getQuestionType())
+                .avoidRecentFamilies(List.of())
+                .build();
+    }
+
+    private EvaluationDecisionOutput.Tags buildTags(String decision,
+                                                    EvaluationDecisionOutput.NextQuestionStrategy nextStrategy) {
+        String intent = decision;
+        String focus = nextStrategy != null ? nextStrategy.getFocusPoint() : "wrapup";
+        return EvaluationDecisionOutput.Tags.builder()
+                .questionFamilyHint(familyKey(nextStrategy, focus))
+                .interviewerIntent(intent)
+                .build();
+    }
+
+    private String familyKey(EvaluationDecisionOutput.NextQuestionStrategy nextStrategy, String focus) {
+        if (nextStrategy == null) {
+            return "interview.wrapup";
+        }
+        String domain = nextStrategy.getNextDomainCode() != null ? nextStrategy.getNextDomainCode() : "unknown";
+        String angle = nextStrategy.getQuestionType() != null ? nextStrategy.getQuestionType().toLowerCase() : "generic";
+        String normalizedFocus = focus == null ? "focus" : focus.replaceAll("\\s+", "-");
+        return domain + "." + angle + "." + normalizedFocus;
     }
 
     @Override
@@ -196,12 +313,12 @@ public class MockAiClient implements AiClient {
         return mockResult(output, startMs, "question_detail_evaluation");
     }
 
-    private EvaluationDecisionOutput.NextQuestionStrategy buildNextStrategy(EvaluationDecisionInput input,
-                                                                            String signal,
-                                                                            boolean deepen) {
+    private EvaluationDecisionOutput.NextQuestionStrategy buildNextPlan(EvaluationDecisionInput input,
+                                                                        String decision,
+                                                                        boolean shouldFollowupInDomain) {
         String currentDomainCode = input.getCurrentDomainCode() != null ? input.getCurrentDomainCode() : "intro";
         String currentDomainName = input.getCurrentDomainName() != null ? input.getCurrentDomainName() : currentDomainCode;
-        if ("RETRY_SAME_DOMAIN".equals(signal)) {
+        if ("rescue".equals(decision)) {
             String currentDepth = normalizeDepth(input.getCurrentTargetDepth());
             return EvaluationDecisionOutput.NextQuestionStrategy.builder()
                     .nextDomainId(input.getCurrentDomainId())
@@ -217,7 +334,7 @@ public class MockAiClient implements AiClient {
                     .focusPoint(currentDomainName)
                     .build();
         }
-        if (deepen) {
+        if (shouldFollowupInDomain) {
             String currentDepth = normalizeDepth(input.getCurrentTargetDepth());
             String targetDepth = nextDepth(currentDepth, resolveDomainTargetDepth(input.getSyllabusJson(), currentDomainCode, currentDepth));
             return EvaluationDecisionOutput.NextQuestionStrategy.builder()
@@ -243,19 +360,21 @@ public class MockAiClient implements AiClient {
         return buildStrategyFromSyllabus(input.getSyllabusJson(), nextDomainCode);
     }
 
-    private String resolveSignal(EvaluationDecisionInput input, AnswerAssessment assessment, boolean deepen) {
+    private String resolveDecision(EvaluationDecisionInput input,
+                                   AnswerAssessment assessment,
+                                   boolean shouldFollowupInDomain) {
         if (assessment == AnswerAssessment.PARTIAL) {
-            return "RETRY_SAME_DOMAIN";
+            return "rescue";
         }
         if (assessment == AnswerAssessment.HARD_FAIL) {
             String nextDomainCode = resolveNextDomainCode(input.getStateLedger(), input.getCurrentDomainCode());
-            return nextDomainCode == null ? "END" : "NEXT_DOMAIN";
+            return nextDomainCode == null ? "wrapup" : "broaden";
         }
-        if (deepen) {
-            return "DEEPEN";
+        if (shouldFollowupInDomain) {
+            return "followup";
         }
         String nextDomainCode = resolveNextDomainCode(input.getStateLedger(), input.getCurrentDomainCode());
-        return nextDomainCode == null ? "END" : "NEXT_DOMAIN";
+        return nextDomainCode == null ? "wrapup" : "broaden";
     }
 
     private String resolveNextDomainCode(Map<String, Object> ledger, String currentDomainCode) {

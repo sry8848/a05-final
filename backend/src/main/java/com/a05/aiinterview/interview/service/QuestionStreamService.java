@@ -78,6 +78,10 @@ public class QuestionStreamService {
     private long followPollIntervalMs;
     @Value("${sse.follow.idle-timeout-seconds:30}")
     private long followIdleTimeoutSeconds;
+    @Value("${interview.debug.enabled:false}")
+    private boolean interviewDebugEnabled = false;
+    @Value("${interview.debug.max-text-chars:1200}")
+    private int interviewDebugMaxTextChars = 1200;
 
     private static final String KEY_STATUS = "sse:gen:%s:status";
     private static final String KEY_CHUNKS = "sse:gen:%s:chunks";
@@ -147,9 +151,9 @@ public class QuestionStreamService {
             return Flux.just(buildErrorEvent("ATTEMPT_NOT_FOUND", "Attempt record not found, submit answer first"));
         }
 
-        EvaluationDecisionOutput.NextQuestionStrategy strategy = extractStrategy(attempt);
-        if (strategy == null) {
-            return Flux.just(buildErrorEvent("NO_STRATEGY", "No next-question strategy in evaluation result"));
+        NextQuestionPlan plan = extractNextQuestionPlan(attempt);
+        if (plan == null) {
+            return Flux.just(buildErrorEvent("NO_PLAN", "No next-question plan in evaluation result"));
         }
 
         List<InterviewQuestion> historyQuestions = interviewQuestionMapper.selectList(
@@ -158,10 +162,10 @@ public class QuestionStreamService {
                         .orderByAsc(InterviewQuestion::getQuestionNo)
         );
 
-        RagContext ragContext = safeRetrieveRag(session, strategy);
+        RagContext ragContext = safeRetrieveRag(session, plan);
 
-        QuestionGenerationInput genInput = buildGenInput(session, strategy, historyQuestions, ragContext);
-        logQuestionGenerationDebugInput(sessionId, attemptId, strategy, genInput);
+        QuestionGenerationInput genInput = buildGenInput(session, plan, historyQuestions, ragContext);
+        logQuestionGenerationDebugInput(sessionId, attemptId, plan, genInput);
 
         String statusKey = String.format(KEY_STATUS, attemptId);
         Boolean locked = redisTemplate.opsForValue().setIfAbsent(
@@ -172,7 +176,7 @@ public class QuestionStreamService {
         }
 
         clearGenerationCache(attemptId);
-        startGenerationInBackground(session, strategy, genInput, attemptId);
+        startGenerationInBackground(session, plan, genInput, attemptId);
 
         return Flux.concat(
                 Flux.just(buildStartEvent(attemptId, session.getId())),
@@ -187,7 +191,7 @@ public class QuestionStreamService {
      */
     private void startGenerationInBackground(
             InterviewSession session,
-            EvaluationDecisionOutput.NextQuestionStrategy strategy,
+            NextQuestionPlan plan,
             QuestionGenerationInput genInput,
             String attemptId) {
         AtomicInteger chunkIndex = new AtomicInteger(0);
@@ -217,12 +221,12 @@ public class QuestionStreamService {
                         error -> onGenerationError(
                                 attemptId,
                                 session,
-                                strategy,
+                                plan,
                                 chunkIndex.get() > 0 || fullText.length() > 0,
                                 error),
                         () -> onGenerationCompleted(
                                 session,
-                                strategy,
+                                plan,
                                 attemptId,
                                 statusKey,
                                 chunkIndex.get(),
@@ -266,7 +270,7 @@ public class QuestionStreamService {
 
     private void onGenerationCompleted(
             InterviewSession session,
-            EvaluationDecisionOutput.NextQuestionStrategy strategy,
+            NextQuestionPlan plan,
             String attemptId,
             String statusKey,
             int totalTokens,
@@ -276,7 +280,7 @@ public class QuestionStreamService {
             String ttsReadyKey,
             List<CompletableFuture<Boolean>> segmentTtsTasks) {
         log.info("AI 题目流式生成完成, attemptId={}, stemLen={}", attemptId, finalStem.length());
-        logQuestionGenerationDebugOutput(session.getId(), attemptId, strategy, finalStem);
+        logQuestionGenerationDebugOutput(session.getId(), attemptId, plan, finalStem);
 
         String trailing = flushTrailingSentence(sentenceBuffer);
         if (!trailing.isBlank()) {
@@ -289,7 +293,7 @@ public class QuestionStreamService {
         }
 
         try {
-            InterviewQuestion question = saveQuestion(session, strategy, finalStem);
+            InterviewQuestion question = saveQuestion(session, plan, finalStem);
             String questionIdKey = String.format(KEY_QUESTION_ID, attemptId);
             redisTemplate.opsForValue().set(questionIdKey, String.valueOf(question.getId()),
                     cacheTtlSeconds, TimeUnit.SECONDS);
@@ -302,21 +306,21 @@ public class QuestionStreamService {
             redisTemplate.opsForValue().set(statusKey, STATUS_DONE, cacheTtlSeconds, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.error("题目流式生成后保存失败, attemptId={}", attemptId, e);
-            onGenerationError(attemptId, session, strategy, true, e);
+            onGenerationError(attemptId, session, plan, true, e);
         }
     }
 
     private void onGenerationError(String attemptId,
                                    InterviewSession session,
-                                   EvaluationDecisionOutput.NextQuestionStrategy strategy,
+                                   NextQuestionPlan plan,
                                    boolean hasPartialStream,
                                    Throwable error) {
         Long sessionId = session != null ? session.getId() : null;
         log.error("AI 题目流式生成异常, sessionId={}, attemptId={}", sessionId, attemptId, error);
         String statusKey = String.format(KEY_STATUS, attemptId);
-        if (!hasPartialStream && session != null && strategy != null && shouldUseFallbackQuestionGeneration(error)) {
+        if (!hasPartialStream && session != null && plan != null && shouldUseFallbackQuestionGeneration(error)) {
             try {
-                completeGenerationWithFallbackQuestion(session, strategy, attemptId, statusKey);
+                completeGenerationWithFallbackQuestion(session, plan, attemptId, statusKey);
                 return;
             } catch (Exception fallbackError) {
                 log.error("程序兜底出题失败, sessionId={}, attemptId={}", sessionId, attemptId, fallbackError);
@@ -331,16 +335,16 @@ public class QuestionStreamService {
 
     private void completeGenerationWithFallbackQuestion(
             InterviewSession session,
-            EvaluationDecisionOutput.NextQuestionStrategy strategy,
+            NextQuestionPlan plan,
             String attemptId,
             String statusKey) {
         String fallbackStem = buildFallbackQuestionStem(
-                strategy.getQuestionType(),
-                strategy.getNextDomainName(),
-                resolveTargetSkill(strategy.getTargetSkill(), strategy.getFocusPoint()),
+                plan.getQuestionType(),
+                plan.getNextDomainName(),
+                resolveTargetSkill(plan.getTargetFocus(), plan.getFocusPoint()),
                 session.getTargetRole());
 
-        InterviewQuestion question = saveQuestion(session, strategy, fallbackStem);
+        InterviewQuestion question = saveQuestion(session, plan, fallbackStem);
         String chunksKey = String.format(KEY_CHUNKS, attemptId);
         String questionIdKey = String.format(KEY_QUESTION_ID, attemptId);
         redisTemplate.opsForList().rightPush(chunksKey, fallbackStem);
@@ -542,42 +546,70 @@ public class QuestionStreamService {
     // ==================== 辅助方法 ====================
 
     /**
-     * 从 attempt.evaluationJson 提取下一题策略，供 AI 调用时使用。
+     * 从 attempt.evaluationJson 提取下一题计划，供 AI 调用时使用。
      */
     @SuppressWarnings("unchecked")
-    private EvaluationDecisionOutput.NextQuestionStrategy extractStrategy(InterviewAttempt attempt) {
+    private NextQuestionPlan extractNextQuestionPlan(InterviewAttempt attempt) {
         Map<String, Object> evalJson = attempt.getEvaluationJson();
-        if (evalJson == null) return null;
+        if (evalJson == null) {
+            return null;
+        }
+        String decision = toStr(evalJson.get("decision"));
+        if ("wrapup".equalsIgnoreCase(decision)) {
+            return null;
+        }
 
-        Object strategyObj = evalJson.get("nextStrategy");
-        if (!(strategyObj instanceof Map)) return null;
+        Map<String, Object> retrieval = evalJson.get("retrievalIntent") instanceof Map<?, ?> rawRetrieval
+                ? new LinkedHashMap<>((Map<String, Object>) rawRetrieval)
+                : new LinkedHashMap<>();
+        Map<String, Object> statePatch = evalJson.get("statePatch") instanceof Map<?, ?> rawPatch
+                ? new LinkedHashMap<>((Map<String, Object>) rawPatch)
+                : new LinkedHashMap<>();
 
-        Map<String, Object> ns = (Map<String, Object>) strategyObj;
-        EvaluationDecisionOutput.NextQuestionStrategy strategy =
-                new EvaluationDecisionOutput.NextQuestionStrategy();
-        strategy.setNextDomainId(toLong(ns.get("nextDomainId")));
-        strategy.setNextDomainCode(toStr(ns.get("nextDomainCode")));
-        strategy.setNextDomainName(toStr(ns.get("nextDomainName")));
-        strategy.setQuestionType(toStr(ns.get("questionType")));
-        strategy.setTargetDepth(toStr(ns.get("targetDepth")));
-        strategy.setDifficulty(normalizeDifficulty(toStr(ns.get("difficulty")), toStr(ns.get("targetDepth"))));
-        strategy.setTargetSkill(resolveTargetSkill(toStr(ns.get("targetSkill")), toStr(ns.get("focusPoint"))));
-        strategy.setExpectedPoints(toStringList(ns.get("expectedPoints")));
-        strategy.setFocusPoint(toStr(ns.get("focusPoint")));
-        return strategy;
+        return NextQuestionPlan.builder()
+                .decision(firstNonBlank(decision, "broaden"))
+                .nextDomainId(toLong(evalJson.get("nextDomainId")))
+                .nextDomainCode(toStr(evalJson.get("nextDomainCode")))
+                .nextDomainName(toStr(evalJson.get("nextDomainName")))
+                .questionType(toStr(evalJson.get("questionType")))
+                .targetFocus(firstNonBlank(toStr(evalJson.get("targetFocus")), toStr(evalJson.get("focusPoint"))))
+                .focusPoint(firstNonBlank(toStr(evalJson.get("focusPoint")), toStr(evalJson.get("targetFocus"))))
+                .targetAngle(toStr(evalJson.get("targetAngle")))
+                .difficultyAdjustment(firstNonBlank(toStr(evalJson.get("difficultyAdjustment")), "same"))
+                .nextQuestionGoal(toStr(evalJson.get("nextQuestionGoal")))
+                .activeProjectId(firstNonBlank(
+                        toStr(statePatch.get("activeProjectId")),
+                        toStr(statePatch.get("active_project_id"))))
+                .currentFocus(firstNonBlank(
+                        toStr(statePatch.get("currentFocus")),
+                        toStr(statePatch.get("current_focus"))))
+                .targetDepth(normalizeDifficulty(toStr(evalJson.get("targetDepth")), "L2"))
+                .difficulty(normalizeDifficulty(toStr(evalJson.get("difficulty")), toStr(evalJson.get("targetDepth"))))
+                .retrievalIntent(RetrievalPlan.builder()
+                        .domainHint(toStr(retrieval.get("domainHint")))
+                        .focusQuery(firstNonBlank(toStr(retrieval.get("focusQuery")), toStr(evalJson.get("focusPoint"))))
+                        .questionTypeHint(toStr(retrieval.get("questionTypeHint")))
+                        .avoidRecentFamilies(toStringList(retrieval.get("avoidRecentFamilies")))
+                        .build())
+                .build();
     }
 
     /**
      * RAG 检索相关知识点，失败时返回空上下文不影响主流程。
      */
-    private RagContext safeRetrieveRag(InterviewSession session,
-                                        EvaluationDecisionOutput.NextQuestionStrategy strategy) {
+    private RagContext safeRetrieveRag(InterviewSession session, NextQuestionPlan plan) {
         try {
-            String retrievalFocus = resolveTargetSkill(strategy.getTargetSkill(), strategy.getFocusPoint());
+            String retrievalFocus = resolveTargetSkill(
+                    plan.getRetrievalIntent() != null ? plan.getRetrievalIntent().getFocusQuery() : null,
+                    plan.getFocusPoint());
             RagRetrievalRequest req = RagRetrievalRequest.builder()
-                    .domainCode(strategy.getNextDomainCode())
-                    .questionType(strategy.getQuestionType())
-                    .targetDepth(strategy.getTargetDepth())
+                    .domainCode(firstNonBlank(
+                            plan.getRetrievalIntent() != null ? plan.getRetrievalIntent().getDomainHint() : null,
+                            plan.getNextDomainCode()))
+                    .questionType(firstNonBlank(
+                            plan.getRetrievalIntent() != null ? plan.getRetrievalIntent().getQuestionTypeHint() : null,
+                            plan.getQuestionType()))
+                    .targetDepth(firstNonBlank(plan.getTargetDepth(), "L2"))
                     .focusPoint(retrievalFocus)
                     .positionCode(session.getTargetRole())
                     .build();
@@ -593,12 +625,21 @@ public class QuestionStreamService {
      */
     private QuestionGenerationInput buildGenInput(
             InterviewSession session,
-            EvaluationDecisionOutput.NextQuestionStrategy strategy,
+            NextQuestionPlan plan,
             List<InterviewQuestion> historyQuestions,
             RagContext ragContext) {
 
         List<QuestionGenerationInput.AskedQuestion> asked =
                 buildAskedQuestionsForPrompt(historyQuestions, ASKED_QUESTIONS_MAX_CHARS);
+
+        QuestionGenerationInput.RetrievalContext retrievalContext = QuestionGenerationInput.RetrievalContext.builder()
+                .query(plan.getRetrievalIntent() != null ? plan.getRetrievalIntent().getFocusQuery() : plan.getFocusPoint())
+                .domainHint(plan.getRetrievalIntent() != null ? plan.getRetrievalIntent().getDomainHint() : plan.getNextDomainCode())
+                .questionTypeHint(plan.getRetrievalIntent() != null ? plan.getRetrievalIntent().getQuestionTypeHint() : plan.getQuestionType())
+                .avoidRecentFamilies(plan.getRetrievalIntent() != null
+                        ? safeList(plan.getRetrievalIntent().getAvoidRecentFamilies())
+                        : List.of())
+                .build();
 
         QuestionGenerationInput input = QuestionGenerationInput.builder()
                 .interviewId(session.getId())
@@ -607,14 +648,45 @@ public class QuestionStreamService {
                 .positionCode(session.getTargetRole())
                 .mode(session.getMode())
                 .experienceLevel(session.getExperienceLevel())
-                .nextDomainId(strategy.getNextDomainId())
-                .nextDomainCode(strategy.getNextDomainCode())
-                .nextDomainName(strategy.getNextDomainName())
-                .nextQuestionType(strategy.getQuestionType())
-                .targetDepth(strategy.getTargetDepth())
-                .difficulty(normalizeDifficulty(strategy.getDifficulty(), strategy.getTargetDepth()))
-                .targetSkill(resolveTargetSkill(strategy.getTargetSkill(), strategy.getFocusPoint()))
-                .expectedPoints(safeList(strategy.getExpectedPoints()))
+                .roleContext(QuestionGenerationInput.RoleContext.builder()
+                        .candidateLevel(session.getExperienceLevel())
+                        .difficultyBand(List.of(firstNonBlank(plan.getTargetDepth(), "L2")))
+                        .style("natural_followup")
+                        .build())
+                .projectContext(QuestionGenerationInput.ProjectContext.builder()
+                        .activeProjectId(firstNonBlank(plan.getActiveProjectId(), extractLedgerString(session, "active_project_id")))
+                        .currentFocus(firstNonBlank(plan.getCurrentFocus(), extractLedgerString(session, "current_focus"), plan.getFocusPoint()))
+                        .build())
+                .recentContext(QuestionGenerationInput.RecentContext.builder()
+                        .recentTurnsSummary("")
+                        .lastAnswerHighlights(List.of())
+                        .build())
+                .nextQuestionGoal(QuestionGenerationInput.NextQuestionGoal.builder()
+                        .decision(plan.getDecision())
+                        .targetFocus(plan.getTargetFocus())
+                        .targetAngle(plan.getTargetAngle())
+                        .difficultyAdjustment(plan.getDifficultyAdjustment())
+                        .questionType(plan.getQuestionType())
+                        .focusPoint(plan.getFocusPoint())
+                        .nextQuestionGoal(plan.getNextQuestionGoal())
+                        .nextDomainId(plan.getNextDomainId())
+                        .nextDomainCode(plan.getNextDomainCode())
+                        .nextDomainName(plan.getNextDomainName())
+                        .build())
+                .retrievalContext(retrievalContext)
+                .constraints(QuestionGenerationInput.Constraints.builder()
+                        .avoidRepetitionFamilies(safeList(retrievalContext.getAvoidRecentFamilies()))
+                        .mustSoundNatural(true)
+                        .maxSentences(2)
+                        .build())
+                .nextDomainId(plan.getNextDomainId())
+                .nextDomainCode(plan.getNextDomainCode())
+                .nextDomainName(plan.getNextDomainName())
+                .nextQuestionType(plan.getQuestionType())
+                .targetDepth(firstNonBlank(plan.getTargetDepth(), "L2"))
+                .difficulty(normalizeDifficulty(plan.getDifficulty(), plan.getTargetDepth()))
+                .targetSkill(resolveTargetSkill(plan.getTargetFocus(), plan.getFocusPoint()))
+                .expectedPoints(List.of())
                 .askedQuestions(asked)
                 .syllabus(session.getSyllabusJson() != null ? session.getSyllabusJson() : new HashMap<>())
                 .build();
@@ -623,8 +695,10 @@ public class QuestionStreamService {
                 && ragContext.getContextText() != null
                 && !ragContext.getContextText().isBlank()) {
             input.setRagContext(ragContext.getContextText());
+            input.getRetrievalContext().setRagContext(ragContext.getContextText());
         } else {
             input.setRagContext(RAG_CONTEXT_FALLBACK);
+            input.getRetrievalContext().setRagContext(RAG_CONTEXT_FALLBACK);
         }
         return input;
     }
@@ -633,31 +707,35 @@ public class QuestionStreamService {
      * 将生成的题目文本持久化到数据库，并更新 session.currentQuestionNo。
      */
     private InterviewQuestion saveQuestion(InterviewSession session,
-                                            EvaluationDecisionOutput.NextQuestionStrategy strategy,
-                                            String stem) {
+                                           NextQuestionPlan plan,
+                                           String stem) {
         int nextQuestionNo = (session.getCurrentQuestionNo() != null
                 ? session.getCurrentQuestionNo() : 0) + 1;
 
         InterviewQuestion question = new InterviewQuestion();
         question.setSessionId(session.getId());
         question.setQuestionNo(nextQuestionNo);
-        question.setQuestionType(strategy.getQuestionType());
-        question.setDomainId(strategy.getNextDomainId());
+        question.setQuestionType(plan.getQuestionType());
+        question.setDomainId(plan.getNextDomainId());
         question.setStem(stem);
-        question.setTargetSkill(resolveTargetSkill(strategy.getTargetSkill(), strategy.getFocusPoint()));
-        question.setExpectedPoints(safeList(strategy.getExpectedPoints()));
-        question.setTargetDepth(strategy.getTargetDepth());
-        question.setDifficulty(normalizeDifficulty(strategy.getDifficulty(), strategy.getTargetDepth()));
+        question.setTargetSkill(resolveTargetSkill(plan.getTargetFocus(), plan.getFocusPoint()));
+        question.setExpectedPoints(List.of());
+        question.setTargetDepth(firstNonBlank(plan.getTargetDepth(), "L2"));
+        question.setDifficulty(normalizeDifficulty(plan.getDifficulty(), plan.getTargetDepth()));
         question.setStatus("asked");
 
         Map<String, Object> ctx = new LinkedHashMap<>();
-        ctx.put("domainCode", strategy.getNextDomainCode());
-        ctx.put("questionType", strategy.getQuestionType());
-        ctx.put("targetDepth", strategy.getTargetDepth());
-        ctx.put("focusPoint", strategy.getFocusPoint());
+        ctx.put("domainCode", plan.getNextDomainCode());
+        ctx.put("questionType", plan.getQuestionType());
+        ctx.put("targetDepth", plan.getTargetDepth());
+        ctx.put("focusPoint", plan.getFocusPoint());
         ctx.put("targetSkill", question.getTargetSkill());
         ctx.put("expectedPoints", question.getExpectedPoints());
         ctx.put("difficulty", question.getDifficulty());
+        ctx.put("activeProjectId", firstNonBlank(plan.getActiveProjectId(), extractLedgerString(session, "active_project_id")));
+        ctx.put("questionFamilyId", firstNonBlank(
+                plan.getRetrievalIntent() != null ? plan.getRetrievalIntent().getDomainHint() : null,
+                plan.getNextDomainCode()) + "." + plan.getFocusPoint());
         ctx.put("generatedByStream", true);
         question.setGenerationContextJson(ctx);
 
@@ -665,7 +743,6 @@ public class QuestionStreamService {
         question.setUpdatedAt(LocalDateTime.now());
         interviewQuestionMapper.insert(question);
 
-        // 同步更新 session 当前题号
         InterviewSession update = new InterviewSession();
         update.setId(session.getId());
         update.setCurrentQuestionNo(nextQuestionNo);
@@ -679,24 +756,32 @@ public class QuestionStreamService {
 
     private void logQuestionGenerationDebugInput(Long sessionId,
                                                  String attemptId,
-                                                 EvaluationDecisionOutput.NextQuestionStrategy strategy,
+                                                 NextQuestionPlan plan,
                                                  QuestionGenerationInput genInput) {
-        log.info("出题调试输入, sessionId={}, attemptId={}, nextStrategy={}, genInput={}",
-                sessionId,
-                attemptId,
-                toDebugJson(strategy),
-                toDebugJson(genInput));
+        if (!interviewDebugEnabled) {
+            return;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sessionId", sessionId);
+        payload.put("attemptId", attemptId);
+        payload.put("nextPlan", plan);
+        payload.put("genInput", genInput);
+        log.info("[INTERVIEW-DEBUG][stream.plan] {}", clipDebugText(toDebugJson(payload)));
     }
 
     private void logQuestionGenerationDebugOutput(Long sessionId,
                                                   String attemptId,
-                                                  EvaluationDecisionOutput.NextQuestionStrategy strategy,
+                                                  NextQuestionPlan plan,
                                                   String finalStem) {
-        log.info("出题调试输出, sessionId={}, attemptId={}, nextStrategy={}, finalStem={}",
-                sessionId,
-                attemptId,
-                toDebugJson(strategy),
-                finalStem == null ? "" : finalStem);
+        if (!interviewDebugEnabled) {
+            return;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sessionId", sessionId);
+        payload.put("attemptId", attemptId);
+        payload.put("nextPlan", plan);
+        payload.put("finalStem", finalStem == null ? "" : finalStem);
+        log.info("[INTERVIEW-DEBUG][stream.output] {}", clipDebugText(toDebugJson(payload)));
     }
 
     private String toDebugJson(Object value) {
@@ -705,6 +790,16 @@ public class QuestionStreamService {
         } catch (JsonProcessingException e) {
             return String.valueOf(value);
         }
+    }
+
+    private String clipDebugText(String text) {
+        if (text == null || text.isBlank()) {
+            return text;
+        }
+        if (interviewDebugMaxTextChars <= 0 || text.length() <= interviewDebugMaxTextChars) {
+            return text;
+        }
+        return text.substring(0, interviewDebugMaxTextChars) + "...(truncated)";
     }
 
     // ==================== SSE 事件构建 ====================
@@ -949,11 +1044,17 @@ public class QuestionStreamService {
         for (int i = 0; i < trimmedStems.size(); i++) {
             InterviewQuestion q = historyQuestions.get(offset + i);
             String stem = trimmedStems.get(i);
+            Map<String, Object> ctx = q.getGenerationContextJson() != null
+                    ? q.getGenerationContextJson()
+                    : Map.of();
             asked.add(QuestionGenerationInput.AskedQuestion.builder()
                     .questionId(q.getId())
                     .questionType(q.getQuestionType())
                     .domainCode(resolveDomainCode(q))
                     .stem(stem)
+                    .focusPoint(toStr(ctx.get("focusPoint")))
+                    .questionFamilyId(toStr(ctx.get("questionFamilyId")))
+                    .activeProjectId(toStr(ctx.get("activeProjectId")))
                     .build());
         }
         return asked;
@@ -964,6 +1065,14 @@ public class QuestionStreamService {
             return targetSkill;
         }
         return focusPoint != null ? focusPoint : "";
+    }
+
+    private String extractLedgerString(InterviewSession session, String key) {
+        if (session == null || session.getStateLedgerJson() == null) {
+            return "";
+        }
+        Object value = session.getStateLedgerJson().get(key);
+        return value instanceof String str ? str : "";
     }
 
     private List<String> safeList(List<String> values) {
@@ -1047,5 +1156,38 @@ public class QuestionStreamService {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    @lombok.Data
+    @lombok.Builder
+    @lombok.NoArgsConstructor
+    @lombok.AllArgsConstructor
+    static class RetrievalPlan {
+        private String domainHint;
+        private String focusQuery;
+        private String questionTypeHint;
+        private List<String> avoidRecentFamilies;
+    }
+
+    @lombok.Data
+    @lombok.Builder
+    @lombok.NoArgsConstructor
+    @lombok.AllArgsConstructor
+    static class NextQuestionPlan {
+        private String decision;
+        private Long nextDomainId;
+        private String nextDomainCode;
+        private String nextDomainName;
+        private String questionType;
+        private String targetFocus;
+        private String focusPoint;
+        private String targetAngle;
+        private String difficultyAdjustment;
+        private String nextQuestionGoal;
+        private String activeProjectId;
+        private String currentFocus;
+        private String targetDepth;
+        private String difficulty;
+        private RetrievalPlan retrievalIntent;
     }
 }

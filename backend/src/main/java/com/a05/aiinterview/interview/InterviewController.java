@@ -106,13 +106,13 @@ public class InterviewController {
     }
 
     /**
-     * 提交面试回答并获取下一步信号
+     * 提交面试回答并获取下一步决策
      * @param userId
      * @param sessionId
      * @param request
      * @return
      */
-    @Operation(summary = "Submit answer and get next-step signal")
+    @Operation(summary = "Submit answer and get next-step decision")
     @PostMapping("/{sessionId}/attempts")
     public ApiResponse<SubmitAttemptResponse> submitAttempt(
             @AuthenticationPrincipal Long userId,

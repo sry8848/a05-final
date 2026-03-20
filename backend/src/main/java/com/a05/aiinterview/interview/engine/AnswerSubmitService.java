@@ -17,6 +17,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -37,6 +38,15 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class AnswerSubmitService {
+
+    @Value("${interview.debug.enabled:false}")
+    private boolean interviewDebugEnabled = false;
+
+    @Value("${interview.debug.include-prompts:false}")
+    private boolean interviewDebugIncludePrompts = false;
+
+    @Value("${interview.debug.max-text-chars:1200}")
+    private int interviewDebugMaxTextChars = 1200;
 
     private final AiClient aiClient;
     private final InterviewSessionMapper interviewSessionMapper;
@@ -118,6 +128,7 @@ public class AnswerSubmitService {
             }
         }
 
+        evalOutput = harmonizeEvaluationOutput(evalOutput, currentQuestion, session);
         evalOutput = applyBusinessGuardrails(evalOutput, currentQuestion, session);
         logAiDecisionRewrite(session, currentQuestion, evalCallResult, rawEvalOutput, evalOutput);
         validateFinalDecision(evalOutput, currentQuestion, session);
@@ -125,30 +136,26 @@ public class AnswerSubmitService {
         AnswerSubmitPersistenceService.PersistedAttemptResult persisted =
                 answerSubmitPersistenceService.persist(sessionId, currentQuestion, request, evalOutput);
 
-        if ("END".equals(evalOutput.getSignal())) {
-            log.info("评估决策信号=END，触发结束面试并异步生成报告, sessionId={}", sessionId);
+        if ("wrapup".equalsIgnoreCase(evalOutput.getDecision())) {
+            log.info("评估决策=wrapup，触发结束面试并异步生成报告, sessionId={}", sessionId);
             reportGenerationService.generateAsync(sessionId);
             InterviewSession endSession = interviewSessionMapper.selectById(sessionId);
             return SubmitAttemptResponse.builder()
                     .attemptId(request.getAttemptId())
-                    .evaluationSignal("END")
+                    .decision("wrapup")
                     .streamAttemptId(null)
                     .sessionStatus("report_generating")
-                    .stateLedger(endSession.getStateLedgerJson())
-                    .aiInput(buildDebugAiInput(evalCallResult))
-                    .aiOutput(buildDebugAiOutput(evalCallResult, evalOutput))
+                    .debug(buildDebugPayload(endSession.getStateLedgerJson(), evalCallResult, evalOutput))
                     .build();
         }
 
         InterviewSession updatedSession = interviewSessionMapper.selectById(sessionId);
         return SubmitAttemptResponse.builder()
                 .attemptId(request.getAttemptId())
-                .evaluationSignal(evalOutput.getSignal())
+                .decision(evalOutput.getDecision())
                 .streamAttemptId(request.getAttemptId())
                 .sessionStatus("in_progress")
-                .stateLedger(updatedSession.getStateLedgerJson())
-                .aiInput(buildDebugAiInput(evalCallResult))
-                .aiOutput(buildDebugAiOutput(evalCallResult, evalOutput))
+                .debug(buildDebugPayload(updatedSession.getStateLedgerJson(), evalCallResult, evalOutput))
                 .build();
     }
 
@@ -157,27 +164,40 @@ public class AnswerSubmitService {
                                       AiCallResult<EvaluationDecisionOutput> evalCallResult,
                                       EvaluationDecisionOutput rawEvalOutput,
                                       EvaluationDecisionOutput rewrittenEvalOutput) {
-        if (evalCallResult == null) {
+        if (!interviewDebugEnabled || evalCallResult == null) {
             return;
         }
         Map<String, Object> rawMap = toDebugMap(rawEvalOutput);
         Map<String, Object> rewrittenMap = toDebugMap(rewrittenEvalOutput);
         List<String> changes = new ArrayList<>(collectDiffs("", rawMap, rewrittenMap));
         changes.sort(Comparator.naturalOrder());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sessionId", session.getId());
+        payload.put("questionId", currentQuestion != null ? currentQuestion.getId() : null);
+        payload.put("promptCode", evalCallResult.getPromptCode());
+        payload.put("promptVersion", evalCallResult.getPromptVersion());
+        payload.put("latencyMs", evalCallResult.getLatencyMs());
+        payload.put("decision", rewrittenEvalOutput != null ? rewrittenEvalOutput.getDecision() : null);
+        payload.put("targetFocus", rewrittenEvalOutput != null ? rewrittenEvalOutput.getTargetFocus() : null);
+        payload.put("questionType", rewrittenEvalOutput != null ? rewrittenEvalOutput.getQuestionType() : null);
+        payload.put("domainOutcome", rewrittenEvalOutput != null ? rewrittenEvalOutput.getDomainOutcome() : null);
+        payload.put("changes", changes);
+        payload.put("rawOutput", rawMap);
+        payload.put("rewrittenOutput", rewrittenMap);
+        log.info("[INTERVIEW-DEBUG][submit.eval] {}", clipDebugText(stringifyAsJson(payload)));
+    }
 
-        log.info("评估决策结果对比, sessionId={}, questionId={}, promptCode={}, version={}, latencyMs={}",
-                session.getId(),
-                currentQuestion != null ? currentQuestion.getId() : null,
-                evalCallResult.getPromptCode(),
-                evalCallResult.getPromptVersion(),
-                evalCallResult.getLatencyMs());
-        log.info("AI 原始结构化输出={}", stringifyAsJson(rawMap));
-        log.info("后端改写后输出={}", stringifyAsJson(rewrittenMap));
-        if (changes.isEmpty()) {
-            log.info("评估决策改写差异=未改写");
-        } else {
-            log.info("评估决策改写差异={}", changes);
+    private SubmitAttemptResponse.DebugPayload buildDebugPayload(Map<String, Object> stateLedger,
+                                                                AiCallResult<?> result,
+                                                                Object parsedOutput) {
+        if (!interviewDebugEnabled) {
+            return null;
         }
+        return SubmitAttemptResponse.DebugPayload.builder()
+                .stateLedger(stateLedger)
+                .aiInput(buildDebugAiInput(result))
+                .aiOutput(buildDebugAiOutput(result, parsedOutput))
+                .build();
     }
 
     private SubmitAttemptResponse.DebugAiInput buildDebugAiInput(AiCallResult<?> result) {
@@ -185,8 +205,8 @@ public class AnswerSubmitService {
             return null;
         }
         return SubmitAttemptResponse.DebugAiInput.builder()
-                .systemPrompt(result.getSystemPrompt())
-                .userPrompt(result.getUserPrompt())
+                .systemPrompt(interviewDebugIncludePrompts ? clipDebugText(result.getSystemPrompt()) : null)
+                .userPrompt(interviewDebugIncludePrompts ? clipDebugText(result.getUserPrompt()) : null)
                 .promptCode(result.getPromptCode())
                 .promptVersion(result.getPromptVersion())
                 .build();
@@ -211,11 +231,21 @@ public class AnswerSubmitService {
         }
 
         return SubmitAttemptResponse.DebugAiOutput.builder()
-                .rawResponse(result.getRawResponse())
+                .rawResponse(clipDebugText(result.getRawResponse()))
                 .parsedOutput(parsedMap)
                 .latencyMs(result.getLatencyMs())
                 .tokenUsage(tokenUsage)
                 .build();
+    }
+
+    private String clipDebugText(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        if (interviewDebugMaxTextChars <= 0 || value.length() <= interviewDebugMaxTextChars) {
+            return value;
+        }
+        return value.substring(0, interviewDebugMaxTextChars) + "...(truncated)";
     }
 
     private EvaluationDecisionOutput copyEvalOutput(EvaluationDecisionOutput source) {
@@ -317,9 +347,13 @@ public class AnswerSubmitService {
 
     private EvaluationDecisionOutput buildForcedEndDecision() {
         return EvaluationDecisionOutput.builder()
-                .passCurrentLevel(true)
-                .deepen(false)
-                .signal("END")
+                .answerAssessment("Reached max question limit")
+                .answerVerdict("PARTIAL")
+                .decision("wrapup")
+                .targetAngle("implementation")
+                .difficultyAdjustment("same")
+                .nextQuestionGoal("end interview after reaching max question limit")
+                .domainOutcome("covered")
                 .reasoning("Reached max_questions limit")
                 .build();
     }
@@ -348,50 +382,52 @@ public class AnswerSubmitService {
     private void validateFinalDecision(EvaluationDecisionOutput evalOutput,
                                        InterviewQuestion currentQuestion,
                                        InterviewSession session) {
-        if (evalOutput == null || evalOutput.getSignal() == null || evalOutput.getSignal().isBlank()) {
-            throw new IllegalArgumentException("评估决策结果缺少 signal");
+        if (evalOutput == null || safeString(evalOutput.getDecision()).isBlank()) {
+            throw new IllegalArgumentException("评估决策结果缺少 decision");
         }
-        String signal = evalOutput.getSignal();
-        if (!"END".equals(signal) && evalOutput.getNextStrategy() == null) {
-            throw new IllegalArgumentException("评估决策结果缺少 nextStrategy");
+
+        String decision = normalizeDecision(evalOutput.getDecision());
+        EvaluationDecisionOutput.NextQuestionStrategy strategy = resolveStrategy(evalOutput, currentQuestion, session);
+        if (!"wrapup".equals(decision) && strategy == null) {
+            throw new IllegalArgumentException("评估决策结果缺少下一题计划");
         }
-        if ("END".equals(signal) && evalOutput.getNextStrategy() != null) {
-            throw new IllegalArgumentException("END 信号不允许携带 nextStrategy");
+        if ("wrapup".equals(decision) && strategy != null) {
+            throw new IllegalArgumentException("wrapup 不允许携带下一题计划");
         }
-        if (evalOutput.getNextStrategy() == null) {
+        if (strategy == null) {
             return;
         }
 
         String currentDomainCode = resolveDomainCode(currentQuestion, session);
-        String nextDomainCode = evalOutput.getNextStrategy().getNextDomainCode();
+        String nextDomainCode = strategy.getNextDomainCode();
         String currentDepth = normalizeDepth(currentQuestion.getTargetDepth());
-        String nextDepth = normalizeDepth(evalOutput.getNextStrategy().getTargetDepth());
+        String nextDepth = normalizeDepth(strategy.getTargetDepth());
 
-        if ("DEEPEN".equals(signal)) {
+        if ("followup".equals(decision) || "probe".equals(decision)) {
             if (!Objects.equals(currentDomainCode, nextDomainCode)) {
-                throw new IllegalArgumentException("DEEPEN 信号必须在同一知识域继续追问");
+                throw new IllegalArgumentException("followup/probe 必须在同一知识域继续追问");
             }
             if (depthIndex(nextDepth) < depthIndex(currentDepth)) {
-                throw new IllegalArgumentException("DEEPEN 信号下下一题深度不允许降级");
+                throw new IllegalArgumentException("followup/probe 下下一题深度不允许降级");
             }
             if (depthIndex(nextDepth) > depthIndex(nextDepth(currentDepth))) {
-                throw new IllegalArgumentException("DEEPEN 信号下下一题深度最多提升一级");
+                throw new IllegalArgumentException("followup/probe 下下一题深度最多提升一级");
             }
         }
-        if ("RETRY_SAME_DOMAIN".equals(signal)) {
+        if ("rescue".equals(decision)) {
             if (!Objects.equals(currentDomainCode, nextDomainCode)) {
-                throw new IllegalArgumentException("RETRY_SAME_DOMAIN 必须保持同一知识域");
+                throw new IllegalArgumentException("rescue 必须保持同一知识域");
             }
-            if (!Objects.equals(currentDepth, nextDepth)) {
-                throw new IllegalArgumentException("RETRY_SAME_DOMAIN 不允许升降层");
+            if (depthIndex(nextDepth) > depthIndex(currentDepth)) {
+                throw new IllegalArgumentException("rescue 不允许升层");
             }
         }
-        if ("NEXT_DOMAIN".equals(signal)) {
+        if ("broaden".equals(decision)) {
             if (Objects.equals(currentDomainCode, nextDomainCode)) {
-                throw new IllegalArgumentException("NEXT_DOMAIN 不允许继续指向当前知识域");
+                throw new IllegalArgumentException("broaden 不允许继续指向当前知识域");
             }
             if (isCoveredDomain(session, nextDomainCode)) {
-                throw new IllegalArgumentException("NEXT_DOMAIN 不允许切回已关闭知识域");
+                throw new IllegalArgumentException("broaden 不允许切回已关闭知识域");
             }
         }
     }
@@ -429,20 +465,159 @@ public class AnswerSubmitService {
     }
 
     private SubmitAttemptResponse buildIdempotentResponse(InterviewAttempt existing) {
-        String signal = "NEXT_DOMAIN";
+        String decision = "broaden";
         if (existing.getEvaluationJson() != null) {
-            Object s = existing.getEvaluationJson().get("signal");
-            if (s instanceof String str) {
-                signal = str;
+            Object decisionObj = existing.getEvaluationJson().get("decision");
+            if (decisionObj instanceof String str && !str.isBlank()) {
+                decision = str;
             }
         }
-        boolean isEnd = "END".equals(signal);
+        boolean isEnd = "wrapup".equalsIgnoreCase(decision);
         return SubmitAttemptResponse.builder()
                 .attemptId(existing.getAttemptId())
-                .evaluationSignal(signal)
+                .decision(decision)
                 .streamAttemptId(isEnd ? null : existing.getAttemptId())
                 .sessionStatus(isEnd ? "report_generating" : "in_progress")
                 .build();
+    }
+
+    private EvaluationDecisionOutput harmonizeEvaluationOutput(EvaluationDecisionOutput evalOutput,
+                                                               InterviewQuestion currentQuestion,
+                                                               InterviewSession session) {
+        if (evalOutput == null) {
+            return null;
+        }
+        if (safeString(evalOutput.getDecision()).isBlank()) {
+            throw new IllegalArgumentException("评估决策结果缺少 decision");
+        }
+        if (safeString(evalOutput.getTargetAngle()).isBlank()) {
+            evalOutput.setTargetAngle("implementation");
+        }
+        if (safeString(evalOutput.getDifficultyAdjustment()).isBlank()) {
+            evalOutput.setDifficultyAdjustment("same");
+        }
+        if (safeString(evalOutput.getQuestionType()).isBlank() && !"wrapup".equals(normalizeDecision(evalOutput.getDecision()))) {
+            evalOutput.setQuestionType(resolveQuestionType(currentQuestion.getQuestionType()));
+        }
+        if (safeString(evalOutput.getFocusPoint()).isBlank()) {
+            evalOutput.setFocusPoint(firstNonBlank(safeString(evalOutput.getTargetFocus()), resolveDomainName(currentQuestion, session)));
+        }
+        if (safeString(evalOutput.getTargetFocus()).isBlank()) {
+            evalOutput.setTargetFocus(firstNonBlank(evalOutput.getFocusPoint(), resolveDomainName(currentQuestion, session)));
+        }
+        return evalOutput;
+    }
+
+    private EvaluationDecisionOutput.NextQuestionStrategy buildStrategyFromNew(EvaluationDecisionOutput evalOutput,
+                                                                               InterviewQuestion currentQuestion,
+                                                                               InterviewSession session) {
+        String decision = safeString(evalOutput.getDecision()).trim().toLowerCase(Locale.ROOT);
+        String currentDomainCode = resolveDomainCode(currentQuestion, session);
+        String nextDomainCode = firstNonBlank(
+                safeString(evalOutput.getNextDomainCode()),
+                "broaden".equals(decision) ? "" : currentDomainCode,
+                "INTRO".equalsIgnoreCase(currentQuestion.getQuestionType()) ? "intro" : ""
+        );
+        String nextDomainName = firstNonBlank(
+                safeString(evalOutput.getNextDomainName()),
+                "intro".equalsIgnoreCase(nextDomainCode) ? "intro" : resolveDomainName(currentQuestion, session)
+        );
+        String questionType = resolveQuestionType(firstNonBlank(
+                safeString(evalOutput.getQuestionType()),
+                "broaden".equals(decision) ? "PRINCIPLE" : currentQuestion.getQuestionType()
+        ));
+        String focus = firstNonBlank(
+                safeString(evalOutput.getFocusPoint()),
+                safeString(evalOutput.getTargetFocus()),
+                nextDomainName
+        );
+        String targetDepth = resolveTargetDepthFromNew(evalOutput, currentQuestion, session, nextDomainCode, decision);
+        return EvaluationDecisionOutput.NextQuestionStrategy.builder()
+                .nextDomainId(evalOutput.getNextDomainId())
+                .nextDomainCode(nextDomainCode)
+                .nextDomainName(nextDomainName)
+                .questionType(questionType)
+                .targetDepth(targetDepth)
+                .difficulty(targetDepth)
+                .targetSkill(focus)
+                .focusPoint(focus)
+                .expectedPoints(buildExpectedPointsForFocus(focus))
+                .build();
+    }
+
+    private String resolveTargetDepthFromNew(EvaluationDecisionOutput evalOutput,
+                                             InterviewQuestion currentQuestion,
+                                             InterviewSession session,
+                                             String nextDomainCode,
+                                             String decision) {
+        String currentDepth = normalizeDepth(currentQuestion.getTargetDepth());
+        String adjustment = safeString(evalOutput.getDifficultyAdjustment()).trim().toLowerCase(Locale.ROOT);
+        String candidate = switch (adjustment) {
+            case "up" -> nextDepth(currentDepth);
+            case "down" -> minDepth("L1", currentDepth).equals(currentDepth)
+                    ? currentDepth
+                    : "L" + Math.max(1, depthIndex(currentDepth) - 1);
+            default -> currentDepth;
+        };
+        if ("broaden".equals(decision)) {
+            String startingDepth = resolveStartingDepth(session.getExperienceLevel());
+            String targetDomainDepth = resolveDomainTargetDepth(session, nextDomainCode, startingDepth);
+            return minDepth(startingDepth, targetDomainDepth);
+        }
+        String domainTargetDepth = resolveDomainTargetDepth(session, nextDomainCode, candidate);
+        return minDepth(candidate, domainTargetDepth);
+    }
+
+
+    private String normalizeDecision(String decision) {
+        if (decision == null || decision.isBlank()) {
+            return "";
+        }
+        return decision.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private EvaluationDecisionOutput.NextQuestionStrategy resolveStrategy(EvaluationDecisionOutput evalOutput,
+                                                                          InterviewQuestion currentQuestion,
+                                                                          InterviewSession session) {
+        if ("wrapup".equals(normalizeDecision(evalOutput.getDecision()))) {
+            return null;
+        }
+        return buildStrategyFromNew(evalOutput, currentQuestion, session);
+    }
+
+    private void clearStrategyFromOutput(EvaluationDecisionOutput evalOutput) {
+        evalOutput.setNextDomainId(null);
+        evalOutput.setNextDomainCode(null);
+        evalOutput.setNextDomainName(null);
+        evalOutput.setQuestionType(null);
+        evalOutput.setFocusPoint(null);
+    }
+
+    private void applyStrategyToOutput(EvaluationDecisionOutput evalOutput,
+                                       EvaluationDecisionOutput.NextQuestionStrategy strategy) {
+        if (strategy == null) {
+            clearStrategyFromOutput(evalOutput);
+            return;
+        }
+        evalOutput.setNextDomainId(strategy.getNextDomainId());
+        evalOutput.setNextDomainCode(strategy.getNextDomainCode());
+        evalOutput.setNextDomainName(strategy.getNextDomainName());
+        evalOutput.setQuestionType(resolveQuestionType(strategy.getQuestionType()));
+        evalOutput.setFocusPoint(extractSingleFocus(strategy));
+        if (safeString(evalOutput.getTargetFocus()).isBlank()) {
+            evalOutput.setTargetFocus(firstNonBlank(evalOutput.getFocusPoint(), strategy.getNextDomainName()));
+        }
+    }
+
+    private String defaultNextQuestionGoal(EvaluationDecisionOutput evalOutput) {
+        String focus = firstNonBlank(safeString(evalOutput.getTargetFocus()), safeString(evalOutput.getFocusPoint()), "当前主题");
+        return switch (safeString(evalOutput.getDecision()).trim().toLowerCase(Locale.ROOT)) {
+            case "followup" -> "continue probing " + focus + " in the current thread";
+            case "probe" -> "probe a nearby point around " + focus;
+            case "rescue" -> "downgrade and verify the basics of " + focus;
+            case "wrapup" -> "wrap up the interview";
+            default -> "broaden to another skill area through " + focus;
+        };
     }
 
     private EvaluationDecisionOutput applyBusinessGuardrails(EvaluationDecisionOutput evalOutput,
@@ -451,14 +626,11 @@ public class AnswerSubmitService {
         if (evalOutput == null) {
             return null;
         }
-        if (evalOutput.getNextStrategy() != null) {
-            sanitizeSingleFocusStrategy(evalOutput.getNextStrategy());
-        }
         if ("INTRO".equalsIgnoreCase(currentQuestion.getQuestionType())) {
             applyIntroGuardrails(evalOutput, currentQuestion, session);
             return evalOutput;
         }
-        enforceSignalGuardrails(evalOutput, currentQuestion, session);
+        enforceDecisionGuardrails(evalOutput, currentQuestion, session);
         return evalOutput;
     }
 
@@ -467,34 +639,33 @@ public class AnswerSubmitService {
                                       InterviewSession session) {
         int introCount = getQuestionTypeCount(session, "INTRO");
         boolean secondIntroOrMore = introCount >= 1;
-        String signal = safeString(evalOutput.getSignal()).trim().toUpperCase(Locale.ROOT);
+        String decision = normalizeDecision(evalOutput.getDecision());
 
         if (secondIntroOrMore) {
-            if ("END".equals(signal) || "RETRY_SAME_DOMAIN".equals(signal) || "DEEPEN".equals(signal)) {
-                evalOutput.setSignal("NEXT_DOMAIN");
-                evalOutput.setDeepen(false);
+            if (!"broaden".equals(decision)) {
+                evalOutput.setDecision("broaden");
             }
-        } else if ("END".equals(signal) || "DEEPEN".equals(signal)) {
-            evalOutput.setSignal("RETRY_SAME_DOMAIN");
-            evalOutput.setPassCurrentLevel(false);
-            evalOutput.setDeepen(false);
+        } else if ("wrapup".equals(decision) || "followup".equals(decision) || "probe".equals(decision)) {
+            evalOutput.setDecision("rescue");
         }
 
-        signal = safeString(evalOutput.getSignal()).trim().toUpperCase(Locale.ROOT);
-        if ("RETRY_SAME_DOMAIN".equals(signal)) {
-            evalOutput.setPassCurrentLevel(false);
-            evalOutput.setDeepen(false);
-            evalOutput.setNextStrategy(buildIntroRetryStrategy(evalOutput.getNextStrategy(), secondIntroOrMore));
+        decision = normalizeDecision(evalOutput.getDecision());
+        if ("rescue".equals(decision)) {
+            if (hasReachedRescueLimit(session, resolveDomainCode(currentQuestion, session))) {
+                evalOutput.setDecision("broaden");
+                guardNextDomain(evalOutput, currentQuestion, session);
+                return;
+            }
+            applyStrategyToOutput(evalOutput,
+                    buildIntroRetryStrategy(resolveStrategy(evalOutput, currentQuestion, session), secondIntroOrMore));
             return;
         }
-        if ("NEXT_DOMAIN".equals(signal)) {
-            evalOutput.setDeepen(false);
+        if ("broaden".equals(decision)) {
             guardNextDomain(evalOutput, currentQuestion, session);
             return;
         }
-        if ("END".equals(signal)) {
-            evalOutput.setSignal("NEXT_DOMAIN");
-            evalOutput.setDeepen(false);
+        if ("wrapup".equals(decision)) {
+            evalOutput.setDecision("broaden");
             guardNextDomain(evalOutput, currentQuestion, session);
         }
     }
@@ -521,7 +692,7 @@ public class AnswerSubmitService {
             focus = "项目经历";
         }
         return EvaluationDecisionOutput.NextQuestionStrategy.builder()
-                .nextDomainId(null)
+                .nextDomainId(base != null ? base.getNextDomainId() : null)
                 .nextDomainCode("intro")
                 .nextDomainName("intro")
                 .questionType("INTRO")
@@ -533,87 +704,284 @@ public class AnswerSubmitService {
                 .build();
     }
 
-    private void enforceSignalGuardrails(EvaluationDecisionOutput evalOutput,
-                                         InterviewQuestion currentQuestion,
-                                         InterviewSession session) {
-        String signal = safeString(evalOutput.getSignal()).trim().toUpperCase(Locale.ROOT);
-        if ("END".equals(signal) || evalOutput.getNextStrategy() == null) {
+    private void enforceDecisionGuardrails(EvaluationDecisionOutput evalOutput,
+                                           InterviewQuestion currentQuestion,
+                                           InterviewSession session) {
+        String decision = normalizeDecision(evalOutput.getDecision());
+        if ("wrapup".equals(decision)) {
             return;
         }
-        if ("DEEPEN".equals(signal)) {
+        if ("followup".equals(decision) || "probe".equals(decision)) {
+            if (shouldStopSameFocusFollowup(session, evalOutput)) {
+                evalOutput.setDecision("broaden");
+                guardNextDomain(evalOutput, currentQuestion, session);
+                return;
+            }
             guardDeepen(evalOutput, currentQuestion, session);
             return;
         }
-        if ("RETRY_SAME_DOMAIN".equals(signal)) {
-            evalOutput.setPassCurrentLevel(false);
-            evalOutput.setDeepen(false);
-            evalOutput.setNextStrategy(buildRetrySameDomainStrategy(evalOutput.getNextStrategy(), currentQuestion, session));
+        if ("rescue".equals(decision)) {
+            if (hasReachedRescueLimit(session, resolveDomainCode(currentQuestion, session))) {
+                evalOutput.setDecision("broaden");
+                guardNextDomain(evalOutput, currentQuestion, session);
+                return;
+            }
+            evalOutput.setNextDomainId(currentQuestion.getDomainId());
+            evalOutput.setNextDomainCode(resolveDomainCode(currentQuestion, session));
+            evalOutput.setNextDomainName(resolveDomainName(currentQuestion, session));
+            if (safeString(evalOutput.getQuestionType()).isBlank()) {
+                evalOutput.setQuestionType(resolveQuestionType(currentQuestion.getQuestionType()));
+            } else {
+                evalOutput.setQuestionType(resolveQuestionType(evalOutput.getQuestionType()));
+            }
+            if (safeString(evalOutput.getFocusPoint()).isBlank()) {
+                evalOutput.setFocusPoint(firstNonBlank(
+                        safeString(evalOutput.getTargetFocus()),
+                        resolveDomainName(currentQuestion, session)
+                ));
+            }
+            if (safeString(evalOutput.getTargetFocus()).isBlank()) {
+                evalOutput.setTargetFocus(firstNonBlank(
+                        safeString(evalOutput.getFocusPoint()),
+                        resolveDomainName(currentQuestion, session)
+                ));
+            }
+            if ("up".equalsIgnoreCase(safeString(evalOutput.getDifficultyAdjustment()))) {
+                evalOutput.setDifficultyAdjustment("same");
+            }
             return;
         }
-        if ("NEXT_DOMAIN".equals(signal)) {
+        if ("broaden".equals(decision)) {
             guardNextDomain(evalOutput, currentQuestion, session);
         }
     }
 
+    /**
+     * 深度追问护栏。
+     * 当AI选择 followup 或 probe 时，检查是否应该继续深入：
+     * 1. 检查同一知识域的连续追问轮数是否超过限制（最多4轮）
+     * 2. 检查当前深度是否已达到目标深度
+     * 如果任一条件触发，强制切换到其他知识域。
+     */
     private void guardDeepen(EvaluationDecisionOutput evalOutput,
                              InterviewQuestion currentQuestion,
                              InterviewSession session) {
         String currentDomainCode = resolveDomainCode(currentQuestion, session);
         String currentDepth = normalizeDepth(currentQuestion.getTargetDepth());
         String domainTargetDepth = resolveDomainTargetDepth(session, currentDomainCode, currentDepth);
+        
+        // 新增：检查同一知识域的连续追问轮数
+        int domainFollowupCount = getDomainFollowupCount(session, currentDomainCode);
+        if (domainFollowupCount >= 4) {
+            log.info("同一知识域连续追问达到上限，强制切换, domainCode={}, followupCount={}", 
+                    currentDomainCode, domainFollowupCount);
+            evalOutput.setDecision("broaden");
+            guardNextDomain(evalOutput, currentQuestion, session);
+            return;
+        }
+        
+        // 原有逻辑：检查深度是否已达到目标
         if (depthIndex(currentDepth) >= depthIndex(domainTargetDepth)) {
-            evalOutput.setDeepen(false);
-            evalOutput.setSignal("NEXT_DOMAIN");
+            evalOutput.setDecision("broaden");
             guardNextDomain(evalOutput, currentQuestion, session);
             return;
         }
 
         String boundedDepth = minDepth(nextDepth(currentDepth), domainTargetDepth);
-        evalOutput.setPassCurrentLevel(true);
-        evalOutput.setDeepen(true);
-        evalOutput.setNextStrategy(buildSameDomainStrategy(
-                evalOutput.getNextStrategy(),
+        applyStrategyToOutput(evalOutput, buildSameDomainStrategy(
+                resolveStrategy(evalOutput, currentQuestion, session),
                 currentQuestion,
                 session,
                 boundedDepth,
-                resolveQuestionType(evalOutput.getNextStrategy().getQuestionType())
+                resolveQuestionType(firstNonBlank(
+                        safeString(evalOutput.getQuestionType()),
+                        currentQuestion.getQuestionType()))
         ));
+    }
+
+    /**
+     * 获取当前知识域的连续追问轮数。
+     */
+    private int getDomainFollowupCount(InterviewSession session, String domainCode) {
+        if (session.getStateLedgerJson() == null || domainCode == null || domainCode.isBlank()) {
+            return 0;
+        }
+        String currentDomainCode = safeString(session.getStateLedgerJson().get("current_domain_code"));
+        if (!domainCode.equals(currentDomainCode)) {
+            return 0;
+        }
+        return toInt(session.getStateLedgerJson().get("current_domain_followup_count"));
+    }
+
+    private int toInt(Object value) {
+        if (value instanceof Number n) {
+            return n.intValue();
+        }
+        if (value == null) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Exception ignored) {
+            return 0;
+        }
     }
 
     private void guardNextDomain(EvaluationDecisionOutput evalOutput,
                                  InterviewQuestion currentQuestion,
                                  InterviewSession session) {
         String currentDomainCode = resolveDomainCode(currentQuestion, session);
-        EvaluationDecisionOutput.NextQuestionStrategy base = evalOutput.getNextStrategy();
+        EvaluationDecisionOutput.NextQuestionStrategy base = resolveStrategy(evalOutput, currentQuestion, session);
         String requestedCode = base != null ? safeString(base.getNextDomainCode()) : "";
         boolean useFallback = !isValidNextDomain(session, currentDomainCode, requestedCode);
         String nextDomainCode = useFallback
                 ? selectNextDomainCode(session, currentDomainCode)
                 : requestedCode;
         if (nextDomainCode == null || nextDomainCode.isBlank()) {
-            evalOutput.setSignal("END");
-            evalOutput.setDeepen(false);
-            evalOutput.setNextStrategy(null);
+            evalOutput.setDecision("wrapup");
+            clearStrategyFromOutput(evalOutput);
             return;
         }
         if (useFallback) {
             log.info("评估决策 fallbackReason=invalid_next_domain, fallbackSelectedDomain={}, fallbackSelectorSource=syllabus_order",
                     nextDomainCode);
         }
-        evalOutput.setDeepen(false);
-        evalOutput.setNextStrategy(buildNextDomainStrategy(base, session, nextDomainCode));
+        evalOutput.setDecision("broaden");
+        applyStrategyToOutput(evalOutput, buildNextDomainStrategy(base, session, nextDomainCode));
+    }
+
+    private boolean hasReachedRescueLimit(InterviewSession session, String currentDomainCode) {
+        return rescueCountForDomain(session, currentDomainCode) >= 1 || sessionRescueCount(session) >= 3;
+    }
+
+    /**
+     * 判断是否应该停止对同一焦点的追问。
+     * 改进：使用相似度判断而非精确匹配，避免AI稍微变换表述就绕过限制。
+     * 
+     * @param session 面试会话
+     * @param evalOutput AI评估决策输出
+     * @return true 表示应该停止追问，强制切换到其他话题
+     */
+    private boolean shouldStopSameFocusFollowup(InterviewSession session, EvaluationDecisionOutput evalOutput) {
+        String focus = firstNonBlank(safeString(evalOutput.getFocusPoint()), safeString(evalOutput.getTargetFocus()));
+        if (focus.isBlank()) {
+            return false;
+        }
+        String lastFocus = extractLedgerString(session, "last_focus_point");
+        int streak = extractLedgerInt(session, "current_focus_streak");
+        
+        // 改进：使用相似度判断，避免精确匹配被绕过
+        // 条件1：完全相等
+        // 条件2：包含关系（如"MySQL索引"与"MySQL索引优化"）
+        // 条件3：核心关键词重叠（提取关键词判断）
+        boolean sameFocus = isSimilarFocus(focus, lastFocus);
+        
+        // 降低阈值到3轮，提升用户体验
+        return sameFocus && streak >= 3;
+    }
+
+    /**
+     * 判断两个焦点是否相似。
+     * 支持完全相等、包含关系、核心关键词重叠三种情况。
+     */
+    private boolean isSimilarFocus(String focus1, String focus2) {
+        if (focus1.isBlank() || focus2.isBlank()) {
+            return false;
+        }
+        
+        String f1 = focus1.trim().toLowerCase(Locale.ROOT);
+        String f2 = focus2.trim().toLowerCase(Locale.ROOT);
+        
+        // 条件1：完全相等
+        if (f1.equals(f2)) {
+            return true;
+        }
+        
+        // 条件2：包含关系（至少3个字符，避免短词误判）
+        if (f1.length() >= 3 && f2.length() >= 3) {
+            if (f1.contains(f2) || f2.contains(f1)) {
+                return true;
+            }
+        }
+        
+        // 条件3：核心关键词重叠
+        // 提取关键词：去除常见修饰词，保留核心技术名词
+        Set<String> keywords1 = extractCoreKeywords(f1);
+        Set<String> keywords2 = extractCoreKeywords(f2);
+        
+        // 如果有至少一个核心关键词重叠，认为是相似焦点
+        keywords1.retainAll(keywords2);
+        return !keywords1.isEmpty();
+    }
+
+    /**
+     * 从焦点描述中提取核心关键词。
+     * 去除常见修饰词，保留技术名词。
+     */
+    private Set<String> extractCoreKeywords(String focus) {
+        if (focus == null || focus.isBlank()) {
+            return Set.of();
+        }
+        
+        // 常见修饰词/连接词，不作为核心关键词
+        Set<String> stopWords = Set.of(
+                "的", "与", "和", "及", "或", "在", "中", "对", "于", "是",
+                "the", "of", "and", "or", "in", "on", "at", "to", "for",
+                "如何", "怎么", "什么", "为什么", "哪些", "怎样",
+                "实现", "原理", "机制", "方案", "方法", "方式", "策略",
+                "问题", "场景", "情况", "案例", "实例"
+        );
+        
+        // 分词：按空格、标点、中文字符边界分割
+        String[] tokens = focus.split("[\\s,，。、；;：:！!？?()（）\\[\\]【】\"'\"'《》<>]+");
+        
+        Set<String> keywords = new LinkedHashSet<>();
+        for (String token : tokens) {
+            String normalized = token.trim().toLowerCase(Locale.ROOT);
+            // 过滤短词和停用词
+            if (normalized.length() >= 2 && !stopWords.contains(normalized)) {
+                keywords.add(normalized);
+            }
+        }
+        
+        return keywords;
+    }
+
+    private String resolveRescueTargetDepth(EvaluationDecisionOutput evalOutput, InterviewQuestion currentQuestion) {
+        String currentDepth = normalizeDepth(currentQuestion.getTargetDepth());
+        String adjustment = safeString(evalOutput.getDifficultyAdjustment()).trim().toLowerCase(Locale.ROOT);
+        if ("down".equals(adjustment)) {
+            return previousDepth(currentDepth);
+        }
+        return currentDepth;
+    }
+
+    @SuppressWarnings("unchecked")
+    private int rescueCountForDomain(InterviewSession session, String domainCode) {
+        if (session.getStateLedgerJson() == null || domainCode == null || domainCode.isBlank()) {
+            return 0;
+        }
+        Object raw = session.getStateLedgerJson().get("rescue_counts_by_domain");
+        if (!(raw instanceof Map<?, ?> counts)) {
+            return 0;
+        }
+        return toInt(counts.get(domainCode));
+    }
+
+    private int sessionRescueCount(InterviewSession session) {
+        return extractLedgerInt(session, "rescue_total");
     }
 
     private EvaluationDecisionOutput.NextQuestionStrategy buildRetrySameDomainStrategy(
             EvaluationDecisionOutput.NextQuestionStrategy base,
             InterviewQuestion currentQuestion,
-            InterviewSession session) {
-        String currentDepth = normalizeDepth(currentQuestion.getTargetDepth());
+            InterviewSession session,
+            String targetDepth) {
         return buildSameDomainStrategy(
                 base,
                 currentQuestion,
                 session,
-                currentDepth,
+                targetDepth,
                 resolveQuestionType(currentQuestion.getQuestionType())
         );
     }
@@ -812,19 +1180,19 @@ public class AnswerSubmitService {
     private void sanitizeSingleFocusStrategy(EvaluationDecisionOutput.NextQuestionStrategy strategy) {
         String focus = extractSingleFocus(strategy);
         strategy.setFocusPoint(focus);
-        strategy.setTargetSkill(extractSingleFocus(EvaluationDecisionOutput.NextQuestionStrategy.builder()
-                .focusPoint(strategy.getTargetSkill())
-                .build()));
+        if (safeString(strategy.getTargetSkill()).isBlank()) {
+            strategy.setTargetSkill(focus);
+        } else {
+            strategy.setTargetSkill(strategy.getTargetSkill().trim());
+        }
         if (strategy.getExpectedPoints() == null || strategy.getExpectedPoints().isEmpty()) {
             return;
         }
-        Set<String> blockedTokens = new LinkedHashSet<>(List.of("Seata", "TCC", "Saga"));
         List<String> sanitized = strategy.getExpectedPoints().stream()
                 .filter(Objects::nonNull)
                 .map(String::trim)
                 .filter(point -> !point.isBlank())
-                .filter(point -> blockedTokens.stream().noneMatch(point::contains) || point.contains(focus))
-                .map(point -> point.contains(focus) ? point : "围绕" + focus + "说明：" + point)
+                .distinct()
                 .toList();
         if (!sanitized.isEmpty()) {
             strategy.setExpectedPoints(sanitized);
@@ -840,9 +1208,7 @@ public class AnswerSubmitService {
         if (candidate.isBlank()) {
             return "";
         }
-        String[] parts = candidate.split("(?i)\\band\\b|\\bor\\b|\\bvs\\b|与|和|及|以及|、|/|\\+|,|，|;|；|\\|");
-        String focus = parts.length > 0 ? parts[0].trim() : candidate.trim();
-        return focus.isBlank() ? candidate.trim() : focus;
+        return candidate.trim();
     }
 
     @SuppressWarnings("unchecked")
@@ -973,6 +1339,35 @@ public class AnswerSubmitService {
         }
     }
 
+    private String extractLedgerString(InterviewSession session, String key) {
+        if (session.getStateLedgerJson() == null || key == null || key.isBlank()) {
+            return "";
+        }
+        return safeString(session.getStateLedgerJson().get(key));
+    }
+
+    @SuppressWarnings("unchecked")
+    private int extractLedgerInt(InterviewSession session, String key) {
+        if (session.getStateLedgerJson() == null || key == null || key.isBlank()) {
+            return 0;
+        }
+        return toInt(session.getStateLedgerJson().get(key));
+    }
+
+    private int toInt(Object value) {
+        if (value instanceof Number n) {
+            return n.intValue();
+        }
+        if (value == null) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
     private String normalizeDepth(String depth) {
         if (depth == null || depth.isBlank()) {
             return "L2";
@@ -1007,6 +1402,11 @@ public class AnswerSubmitService {
     private String nextDepth(String depth) {
         int next = Math.min(depthIndex(depth) + 1, 5);
         return "L" + next;
+    }
+
+    private String previousDepth(String depth) {
+        int previous = Math.max(depthIndex(depth) - 1, 1);
+        return "L" + previous;
     }
 
     private String minDepth(String left, String right) {

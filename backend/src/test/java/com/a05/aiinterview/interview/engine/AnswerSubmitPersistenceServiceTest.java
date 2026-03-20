@@ -51,9 +51,17 @@ class AnswerSubmitPersistenceServiceTest {
         question.setQuestionType("PRINCIPLE");
 
         EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
-                .passCurrentLevel(true)
-                .deepen(false)
-                .signal("NEXT_DOMAIN")
+                .answerAssessment("回答基本可用，下一步补一个并发边界点。")
+                .answerVerdict("PARTIAL")
+                .decision("broaden")
+                .targetFocus("线程池参数")
+                .targetAngle("implementation")
+                .difficultyAdjustment("same")
+                .nextQuestionGoal("补一个并发基础点")
+                .questionType("PRINCIPLE")
+                .focusPoint("线程池参数")
+                .domainOutcome("continue")
+                .statePatch(Map.of())
                 .build();
 
         service.persist(1L, question, request, output);
@@ -87,9 +95,17 @@ class AnswerSubmitPersistenceServiceTest {
         question.setQuestionType("PRINCIPLE");
 
         EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
-                .passCurrentLevel(false)
-                .deepen(false)
-                .signal("NEXT_DOMAIN")
+                .answerAssessment("回答较弱，需要降阶补救。")
+                .answerVerdict("WEAK")
+                .decision("rescue")
+                .targetFocus("缓存击穿")
+                .targetAngle("implementation")
+                .difficultyAdjustment("down")
+                .nextQuestionGoal("继续同主题验证基础实现")
+                .questionType("PRINCIPLE")
+                .focusPoint("缓存击穿")
+                .domainOutcome("continue")
+                .statePatch(Map.of())
                 .build();
 
         service.persist(1L, question, request, output);
@@ -121,9 +137,17 @@ class AnswerSubmitPersistenceServiceTest {
         question.setQuestionType("PRINCIPLE");
 
         EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
-                .passCurrentLevel(false)
-                .deepen(false)
-                .signal("NEXT_DOMAIN")
+                .answerAssessment("当前题跳过，切到下一个更高价值域。")
+                .answerVerdict("WEAK")
+                .decision("broaden")
+                .targetFocus("事务边界")
+                .targetAngle("implementation")
+                .difficultyAdjustment("same")
+                .nextQuestionGoal("补一个 MySQL 事务边界基础题")
+                .questionType("PRINCIPLE")
+                .focusPoint("事务边界")
+                .domainOutcome("circuit_broken")
+                .statePatch(Map.of())
                 .build();
 
         service.persist(1L, question, request, output);
@@ -134,7 +158,7 @@ class AnswerSubmitPersistenceServiceTest {
     }
 
     @Test
-    void persist_shouldStoreAiDecisionAndReducerAuditSnapshot() {
+    void persist_shouldStoreNewDecisionSnapshotAndReducerAudit() {
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
@@ -147,8 +171,8 @@ class AnswerSubmitPersistenceServiceTest {
         when(attemptMapper.insert(any())).thenReturn(1);
         when(patchService.applyReduction(org.mockito.ArgumentMatchers.eq(1L), any(EvaluationDecisionOutput.class), any(InterviewQuestion.class), any(String.class), any(Long.class), any(String.class)))
                 .thenReturn(StateLedgerPatchService.ReductionAudit.builder()
-                        .newLedger(java.util.Map.of("asked_total", 1))
-                        .diff(java.util.Map.of("asked_total", 1, "last_attempt_id", "attempt-4"))
+                        .newLedger(Map.of("asked_total", 1))
+                        .diff(Map.of("asked_total", 1, "last_attempt_id", "attempt-4"))
                         .domainClosureReason("DEPTH_REACHED")
                         .build());
 
@@ -162,21 +186,29 @@ class AnswerSubmitPersistenceServiceTest {
         question.setQuestionType("INTRO");
 
         EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
-                .passCurrentLevel(true)
-                .deepen(false)
-                .signal("NEXT_DOMAIN")
-                .reasoning("intro passed")
-                .nextStrategy(EvaluationDecisionOutput.NextQuestionStrategy.builder()
-                        .nextDomainId(1L)
-                        .nextDomainCode("java_core")
-                        .nextDomainName("Java 核心基础")
-                        .questionType("PRINCIPLE")
-                        .targetDepth("L2")
-                        .difficulty("L2")
-                        .targetSkill("集合框架")
-                        .expectedPoints(List.of("说明 ArrayList 与 LinkedList 区别"))
-                        .focusPoint("集合框架")
+                .answerAssessment("开场回答有效，已形成项目锚点。")
+                .answerVerdict("STRONG")
+                .decision("probe")
+                .targetFocus("集合框架")
+                .targetAngle("implementation")
+                .difficultyAdjustment("same")
+                .nextQuestionGoal("从项目切到 Java 基础点验证")
+                .nextDomainId(1L)
+                .nextDomainCode("java_core")
+                .nextDomainName("Java 核心基础")
+                .questionType("PRINCIPLE")
+                .focusPoint("集合框架")
+                .domainOutcome("covered")
+                .retrievalIntent(EvaluationDecisionOutput.RetrievalIntent.builder()
+                        .domainHint("java_core")
+                        .focusQuery("集合框架 ArrayList LinkedList")
+                        .questionTypeHint("PRINCIPLE")
+                        .avoidRecentFamilies(List.of("intro.project.anchor"))
                         .build())
+                .statePatch(Map.of(
+                        "activeProjectId", "p_order",
+                        "coveredPointsAdd", List.of("intro:project_anchor")
+                ))
                 .build();
 
         service.persist(1L, question, request, output);
@@ -184,12 +216,14 @@ class AnswerSubmitPersistenceServiceTest {
         ArgumentCaptor<InterviewAttempt> attemptCaptor = ArgumentCaptor.forClass(InterviewAttempt.class);
         verify(attemptMapper).insert(attemptCaptor.capture());
         assertThat(attemptCaptor.getValue().getEvaluationJson())
-                .containsEntry("signal", "NEXT_DOMAIN")
-                .containsEntry("passCurrentLevel", true)
-                .containsEntry("deepen", false)
-                .containsEntry("domainClosureReason", "DEPTH_REACHED")
+                .containsEntry("decision", "probe")
+                .containsEntry("answerVerdict", "STRONG")
+                .containsEntry("domainOutcome", "covered")
+                .containsEntry("focusPoint", "集合框架")
                 .containsKey("ledgerDiff")
-                .containsKey("nextStrategy");
+                .containsKey("retrievalIntent")
+                .containsKey("statePatch")
+                .doesNotContainKey("nextStrategy");
     }
 
     @Test
@@ -221,9 +255,17 @@ class AnswerSubmitPersistenceServiceTest {
         question.setQuestionType("PRINCIPLE");
 
         EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
-                .passCurrentLevel(true)
-                .deepen(false)
-                .signal("NEXT_DOMAIN")
+                .answerAssessment("回答正常。")
+                .answerVerdict("STRONG")
+                .decision("broaden")
+                .targetFocus("事务边界")
+                .targetAngle("implementation")
+                .difficultyAdjustment("same")
+                .nextQuestionGoal("切到下一个基础域")
+                .questionType("PRINCIPLE")
+                .focusPoint("事务边界")
+                .domainOutcome("continue")
+                .statePatch(Map.of())
                 .build();
 
         service.persist(1L, question, request, output);

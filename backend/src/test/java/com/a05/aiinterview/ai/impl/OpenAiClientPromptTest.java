@@ -7,6 +7,7 @@ import com.a05.aiinterview.ai.config.PromptProperties;
 import com.a05.aiinterview.ai.contract.AiOutputContractValidator;
 import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.IntroRewriteInput;
+import com.a05.aiinterview.ai.dto.EvaluationDecisionInput;
 import com.a05.aiinterview.ai.dto.PlannerInput;
 import com.a05.aiinterview.ai.dto.PlannerOutput;
 import com.a05.aiinterview.ai.prompt.ClasspathPromptTemplateService;
@@ -23,6 +24,7 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -128,19 +130,27 @@ class OpenAiClientPromptTest {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse("""
                 {
-                  "passCurrentLevel": true,
-                  "deepen": false,
-                  "signal": "NEXT_DOMAIN",
-                  "reasoning": "ok",
-                  "nextStrategy": {
-                    "nextDomainCode": "java_core",
-                    "nextDomainName": "Java 核心",
-                    "questionType": "PRINCIPLE",
-                    "targetDepth": "L2",
-                    "difficulty": "L2",
-                    "targetSkill": "集合框架",
-                    "expectedPoints": ["说明 ArrayList 与 LinkedList 区别"],
-                    "focusPoint": "集合框架"
+                  "answerAssessment": "回答基本正确，但集合实现细节还可以继续验证。",
+                  "answerVerdict": "PARTIAL",
+                  "decision": "broaden",
+                  "targetFocus": "集合框架",
+                  "targetAngle": "implementation",
+                  "difficultyAdjustment": "same",
+                  "nextQuestionGoal": "切到 Java 核心基础继续验证集合实现理解",
+                  "nextDomainCode": "java_core",
+                  "nextDomainName": "Java 核心",
+                  "questionType": "PRINCIPLE",
+                  "focusPoint": "集合框架",
+                  "domainOutcome": "continue",
+                  "retrievalIntent": {
+                    "domainHint": "java_core",
+                    "focusQuery": "集合框架 ArrayList LinkedList 区别",
+                    "questionTypeHint": "PRINCIPLE",
+                    "avoidRecentFamilies": ["java_core.collection.definition"]
+                  },
+                  "statePatch": {
+                    "currentFocus": "集合框架",
+                    "weakSignalsAdd": ["集合底层实现不够具体"]
                   }
                 }
                 """));
@@ -178,6 +188,81 @@ class OpenAiClientPromptTest {
         assertThat(audit).contains("\"status\":\"success\"");
         assertThat(audit).contains("\"promptVersion\":\"v2\"");
         assertThat(audit).doesNotContain("这是用户完整回答，不应该出现在审计日志中");
+    }
+
+    @Test
+    @DisplayName("callEvaluationDecision should include rescue and focus constraints in prompt")
+    void callEvaluationDecision_shouldIncludeRescueAndFocusConstraintsInPrompt() {
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse("""
+                {
+                  "answerAssessment": "回答基本正确，但继续深挖收益一般。",
+                  "answerVerdict": "STRONG",
+                  "decision": "probe",
+                  "targetFocus": "缓存击穿",
+                  "targetAngle": "tradeoff",
+                  "difficultyAdjustment": "same",
+                  "nextQuestionGoal": "换一个角度验证缓存击穿取舍",
+                  "nextDomainCode": "redis",
+                  "nextDomainName": "Redis",
+                  "questionType": "PRINCIPLE",
+                  "focusPoint": "缓存击穿",
+                  "domainOutcome": "continue"
+                }
+                """));
+
+        OpenAiClient client = new OpenAiClient(
+                chatModel,
+                new ClasspathPromptTemplateService(new ObjectMapper()),
+                promptProperties(),
+                new ObjectMapper(),
+                new AiOutputContractValidator(new ObjectMapper())
+        );
+
+        EvaluationDecisionInput input = EvaluationDecisionInput.builder()
+                .interviewId(100L)
+                .currentQuestionId(200L)
+                .positionCode("JAVA_BACKEND")
+                .experienceLevel("FRESH_GRAD")
+                .mode("practice")
+                .currentQuestionType("PRINCIPLE")
+                .currentDomainCode("redis")
+                .currentDomainName("Redis")
+                .currentTargetDepth("L2")
+                .currentQuestionStem("你项目里缓存击穿怎么处理？")
+                .answerText("我会从布隆过滤器、互斥锁和永不过期几个方案来处理。")
+                .stateLedger(Map.of(
+                        "remaining_turn_budget", 6,
+                        "covered_domains", List.of("java_core"),
+                        "covered_points", List.of(),
+                        "weak_signals", List.of(),
+                        "recent_question_families", List.of("redis.breakdown.definition"),
+                        "rescue_total", 2,
+                        "rescue_counts_by_domain", Map.of("redis", 1),
+                        "last_focus_point", "缓存击穿",
+                        "current_focus_streak", 5
+                ))
+                .syllabusJson(Map.of(
+                        "domains", List.of(
+                                Map.of("domainCode", "redis"),
+                                Map.of("domainCode", "java_core")
+                        )
+                ))
+                .build();
+
+        client.callEvaluationDecision(input);
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel).call(captor.capture());
+        Prompt prompt = captor.getValue();
+        String userText = ((UserMessage) prompt.getUserMessage()).getText();
+        assertThat(userText).contains("domainRescueUsed");
+        assertThat(userText).contains("\"domainRescueUsed\":true");
+        assertThat(userText).contains("\"sessionRescueCount\":2");
+        assertThat(userText).contains("\"currentFocusFollowupStreak\":5");
+        assertThat(userText).contains("\"maxDomainRescueCount\":1");
+        assertThat(userText).contains("\"maxSessionRescueCount\":3");
+        assertThat(userText).contains("\"maxFocusFollowupStreak\":5");
     }
 
     @Test

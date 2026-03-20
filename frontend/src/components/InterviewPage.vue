@@ -677,6 +677,11 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { getJobDisplayName } from '../utils/interview'
 import {
+  DECISION_TEXT_MAP,
+  mapDecisionScore,
+  normalizeInterviewDecision
+} from '../utils/interviewDecision'
+import {
   getResumes,
   createInterviewSession,
   getInterviewSessionDetail,
@@ -1899,20 +1904,6 @@ export default {
       expert: 'SENIOR'
     }
 
-    const SIGNAL_SCORE_MAP = {
-      NEXT_DOMAIN: 78,
-      RETRY_SAME_DOMAIN: 72,
-      DEEPEN: 84,
-      END: 80
-    }
-
-    const SIGNAL_TEXT_MAP = {
-      NEXT_DOMAIN: '',
-      RETRY_SAME_DOMAIN: '',
-      DEEPEN: '',
-      END: '本轮问答已完成，正在生成你的面试报告。'
-    }
-
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
     const isAbortLikeError = (err) => {
@@ -1993,11 +1984,6 @@ export default {
         return globalThis.crypto.randomUUID()
       }
       return Date.now() + '-' + Math.random().toString(36).slice(2, 10)
-    }
-
-    const mapSignalScore = (signal, isSkip = false) => {
-      if (isSkip) return 0
-      return SIGNAL_SCORE_MAP[signal] || 70
     }
 
     const streamNextQuestion = async (streamAttemptId) => {
@@ -2370,24 +2356,24 @@ export default {
           audioUrl: null
         })
 
-        const signal = resp?.evaluationSignal || 'NEXT_DOMAIN'
+        const decision = normalizeInterviewDecision(resp)
         answers.value.push({
           questionId,
           question: question.question,
           answer,
-          score: mapSignalScore(signal, isSkip),
+          score: mapDecisionScore(decision, isSkip),
           keywords: question.keywords || []
         })
 
-        const signalText = SIGNAL_TEXT_MAP[signal]
-        if (signalText) {
+        const decisionText = DECISION_TEXT_MAP[decision]
+        if (decisionText) {
           messages.value.push({
             type: 'ai',
-            content: signalText
+            content: decisionText
           })
         }
 
-        if (signal === 'END' || !resp?.streamAttemptId) {
+        if (decision === 'wrapup' || !resp?.streamAttemptId) {
           await finishInterview({ manual: false })
         } else {
           await streamNextQuestion(resp.streamAttemptId)
@@ -2458,7 +2444,7 @@ export default {
         const attemptId = buildAttemptId()
         const resp = await skipInterviewQuestion(backendSessionId.value, questionId, attemptId)
 
-        const signal = resp?.evaluationSignal || 'NEXT_DOMAIN'
+        const decision = normalizeInterviewDecision(resp)
         answers.value.push({
           questionId,
           question: question.question,
@@ -2467,15 +2453,15 @@ export default {
           keywords: question.keywords || []
         })
 
-        const signalText = SIGNAL_TEXT_MAP[signal]
-        if (signalText) {
+        const decisionText = DECISION_TEXT_MAP[decision]
+        if (decisionText) {
           messages.value.push({
             type: 'ai',
-            content: signalText
+            content: decisionText
           })
         }
 
-        if (signal === 'END' || !resp?.streamAttemptId) {
+        if (decision === 'wrapup' || !resp?.streamAttemptId) {
           await finishInterview({ manual: false })
         } else {
           await streamNextQuestion(resp.streamAttemptId)

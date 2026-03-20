@@ -28,11 +28,11 @@ class ClasspathPromptTemplateServiceTest {
         vars.put("focusTopics", "并发,JVM");
         vars.put("domains", "- id=1, code=jvm, name=JVM 原理");
 
-        RenderedPrompt rendered = service.render("planner", "v1", vars);
+        RenderedPrompt rendered = service.render("planner", "v2", vars);
 
         assertThat(rendered).isNotNull();
         assertThat(rendered.getPromptCode()).isEqualTo("planner");
-        assertThat(rendered.getPromptVersion()).isEqualTo("v1");
+        assertThat(rendered.getPromptVersion()).isEqualTo("v2");
         assertThat(rendered.getSystemPrompt()).contains("你是一名经验丰富的技术面试官");
         assertThat(rendered.getUserPrompt()).contains("岗位：Java 后端开发（JAVA_BACKEND）");
         assertThat(rendered.getUserPrompt()).doesNotContain("{{position}}");
@@ -52,7 +52,7 @@ class ClasspathPromptTemplateServiceTest {
         vars.put("resumeText", "熟悉 JVM、并发、MySQL");
         vars.put("focusTopics", "并发,JVM");
 
-        assertThatThrownBy(() -> service.render("planner", "v1", vars))
+        assertThatThrownBy(() -> service.render("planner", "v2", vars))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("domains");
     }
@@ -76,7 +76,7 @@ class ClasspathPromptTemplateServiceTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("planner")
                 .hasMessageContaining("v999")
-                .hasMessageContaining("v1");
+                .hasMessageContaining("v2");
     }
 
     @Test

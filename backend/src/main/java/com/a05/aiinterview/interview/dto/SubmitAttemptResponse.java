@@ -22,25 +22,16 @@ public class SubmitAttemptResponse {
     @Schema(description = "本次提交的幂等键，与请求中 attemptId 一致", example = "550e8400-e29b-41d4-a716-446655440000")
     private String attemptId;
 
-    /**
-     * 评估决策信号。
-     * <ul>
-     *   <li>{@code NEXT_DOMAIN} - 进入下一个知识域</li>
-     *   <li>{@code RETRY_SAME_DOMAIN} - 当前知识域同层重试</li>
-     *   <li>{@code DEEPEN} - 继续追问当前知识域</li>
-     *   <li>{@code END} - 面试结束，nextQuestion 为 null</li>
-     * </ul>
-     */
-    @Schema(description = "评估决策信号：NEXT_DOMAIN / RETRY_SAME_DOMAIN / DEEPEN / END", example = "NEXT_DOMAIN")
-    private String evaluationSignal;
+    @Schema(description = "下一步决策：followup / probe / rescue / broaden / wrapup", example = "followup")
+    private String decision;
 
     /**
      * SSE 流式出题标识符。
-     * signal != END 时与 attemptId 相同，前端使用该值调用
+     * decision != wrapup 时与 attemptId 相同，前端使用该值调用
      * {@code GET /interviews/{sessionId}/questions/stream?attemptId={streamAttemptId}}
-     * 以获取实时题目流；signal=END 时为 null。
+     * 以获取实时题目流；decision=wrapup 时为 null。
      */
-    @Schema(description = "流式出题标识符，用于调用 SSE 端点（signal=END 时为 null）",
+    @Schema(description = "流式出题标识符，用于调用 SSE 端点（decision=wrapup 时为 null）",
             example = "550e8400-e29b-41d4-a716-446655440000")
     private String streamAttemptId;
 
@@ -51,28 +42,22 @@ public class SubmitAttemptResponse {
     @Schema(description = "当前会话状态", example = "in_progress")
     private String sessionStatus;
 
-    /**
-     * 当前状态账本（调试用）。
-     * 包含各知识域覆盖进度、题型配额消耗等。
-     */
-    @Schema(description = "当前状态账本（调试用）")
-    private Map<String, Object> stateLedger;
+    @Schema(description = "调试信息（仅在调试开关开启时返回）")
+    private DebugPayload debug;
 
-    // ==================== 调试字段 ====================
+    @Data
+    @Builder
+    @Schema(description = "响应调试载荷")
+    public static class DebugPayload {
+        @Schema(description = "当前状态账本（调试用）")
+        private Map<String, Object> stateLedger;
 
-    /**
-     * AI 模型输入（调试用）。
-     * 包含完整的 Prompt 内容，用于排查 AI 行为。
-     */
-    @Schema(description = "AI 模型输入（调试用）")
-    private DebugAiInput aiInput;
+        @Schema(description = "AI 模型输入（调试用）")
+        private DebugAiInput aiInput;
 
-    /**
-     * AI 模型返回值（调试用）。
-     * 包含 AI 的原始输出，用于排查解析问题。
-     */
-    @Schema(description = "AI 模型返回值（调试用）")
-    private DebugAiOutput aiOutput;
+        @Schema(description = "AI 模型返回值（调试用）")
+        private DebugAiOutput aiOutput;
+    }
 
     /**
      * AI 输入调试信息。
