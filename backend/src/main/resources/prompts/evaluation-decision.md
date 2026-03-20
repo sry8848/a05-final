@@ -291,14 +291,19 @@ Role
 - 岗位：{{positionCode}}
 - 年限：{{experienceLevel}}
 - 面试轮次：{{roundType}}
-- 模式：{{mode}}
 
-补充：
-- 对于有工作经验的候选人，可以更注重架构与权衡
-- 对于实习或应届生，理论知识和项目经验更重要
+说明：
+- 岗位：决定考察重心，例如 Java 后端、算法、测试开发等
+- 年限：决定深度、题型和权衡/架构问题的占比
+- 面试轮次：决定当前轮更偏基础筛查、主线深挖还是综合判断
+
+补充规则：
+- 对于有工作经验的候选人，可以更注重架构、权衡、边界和系统治理
+- 对于实习或应届生，理论知识、项目真实性、基础实现能力更重要
+
 
 【项目与实习信息】
-.。。。
+{{projectAndInternshipSummary}}
 
 【知识域及知识点状态】
 {{interviewGoalSummary}}
@@ -306,30 +311,56 @@ Role
 【已经考察的知识点】
 {{coveredKnowledgeSummary}}
 
-
 【追问策略限额】
 {{quotaSummary}}
 
+
 【当前题目】
 - 题干：{{currentQuestionStem}}
+- 当前题目类型：{{currentQuestionType}}
+- 当前知识域：{{currentDomainName}}（{{currentDomainId}}）
+- 当前知识点：{{currentFocus}}
 - 当前追问深度：{{currentTargetDepth}}
-- 当前题目类型
-- 当前策略类型
-- 理论题当前所在知识域
--
+
 
 【候选人回答】
 {{answerText}}
 
+说明：
+这里放原始回答，不做裁剪。
+
+
 【当前题理想回答要点】
 {{expectedPoints}}
 
+说明：
+这里放当前题的理想回答要点，用于帮助决策 AI 判断：
+- 候选人答到了多少关键点
+- 哪些缺失点还值得继续追
+- 是继续问当前点，还是切到别的点更合适
+
+建议 expectedPoints 保持精炼，不要过长，否则会把 AI 逼成“对答案机器”。
+
+
 【可能的未来方向（仅参考，不强制要求在其中选择）】
+{{possibleFutureDirections}}
 
-【rag检索资料（检索类型，检索目标，资料）】
+说明：
+这一块不是硬约束，而是弱提示。
+用于告诉决策 AI：当前继续推进时，可能有哪些自然方向。
+建议按“题类 + 方向”组织。
 
-【历史问题，回答概要，回答评价】
+
+【RAG 检索资料】
+{{retrievedMaterials}}
+
+
+【历史问题、回答概要、回答评价】
 {{recentInterviewMemory}}
+
+注意：
+这里最好保留最近 3~6 轮，不宜无限增长。
+
 
 【输出 Schema】
 {{outputSchema}}
