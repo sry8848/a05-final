@@ -386,11 +386,8 @@
             </div>
           </div>
           <p class="network-hint" :class="networkStatusClass">{{ networkStatusHint }}</p>
+          <p v-if="professionalVoiceBlockedReason" class="voice-requirement-hint">{{ professionalVoiceBlockedReason }}</p>
           <div class="summary-actions">
-            <button class="btn btn-secondary glass-btn" @click="skipDeviceTest">
-              <i class="fas fa-forward"></i>
-              跳过检测
-            </button>
             <button 
               class="btn btn-primary start-interview-btn" 
               @click="startInterviewAfterTest"
@@ -441,17 +438,6 @@
               操作
             </h4>
             <div class="action-buttons">
-              <button class="action-btn hint" @click="getHint" :disabled="hintUsed || isSubmittingAnswer || isWaitingNextQuestion || isFinishing">
-                <i class="fas fa-lightbulb"></i>
-                <span>获取提示</span>
-                <span v-if="hintUsed" class="used-badge">已使用</span>
-              </button>
-              
-              <button class="action-btn skip" @click="skipQuestion" :disabled="isSubmittingAnswer || isWaitingNextQuestion || isFinishing">
-                <i class="fas fa-forward"></i>
-                <span>跳过本题</span>
-              </button>
-              
               <button class="action-btn end" @click="endInterview">
                 <i class="fas fa-stop-circle"></i>
                 <span>结束面试</span>
@@ -459,7 +445,7 @@
             </div>
           </div>
           
-          <div class="input-mode-section">
+          <div v-if="showInputModeToggle" class="input-mode-section">
             <h4 class="section-title">
               <i class="fas fa-keyboard"></i>
               输入方式
@@ -513,7 +499,7 @@
           </div>
           
           <div class="chat-input-area">
-            <div class="input-row" v-if="inputMode === 'text'">
+            <div class="input-row" v-if="showTextInput">
               <div class="input-wrapper">
                 <textarea 
                   v-model="answerInput" 
@@ -544,13 +530,22 @@
                   {{ isAiSpeaking ? '面试官播报中...' : asrState === 'connecting' ? '连接中...' : asrState === 'stopping' ? '处理中...' : isListening ? '说完了' : '点击说话' }}
                 </span>
               </button>
-              <div v-if="!asrAvailable && inputMode === 'voice'" class="asr-fallback-hint">
-                <i class="fas fa-info-circle"></i>
-                <span>使用浏览器内置识别（无停顿分析）</span>
-              </div>
-              <div v-else-if="inputMode === 'voice' && (isListening || recognizedText)" class="asr-fallback-hint">
+              <div v-if="inputMode === 'voice' && (isListening || recognizedText)" class="asr-fallback-hint">
                 <i class="fas fa-wave-square"></i>
                 <span>系统将于回答结束后自动优化转写结果</span>
+              </div>
+              <div v-if="voiceFailureMessage" class="voice-error-panel">
+                <p class="voice-error-text">{{ voiceFailureMessage }}</p>
+                <div class="voice-error-actions">
+                  <button class="btn btn-primary" @click="retryVoiceRecognition" :disabled="isListening || isSubmittingAnswer || isWaitingNextQuestion || isFinishing">
+                    <i class="fas fa-redo"></i>
+                    重试语音
+                  </button>
+                  <button class="btn btn-secondary" @click="endInterview" :disabled="isFinishing">
+                    <i class="fas fa-stop-circle"></i>
+                    结束面试
+                  </button>
+                </div>
               </div>
               <div v-if="lastPauseStats && !isListening" class="pause-stats-hint">
                 <i class="fas fa-wave-square"></i>
@@ -629,47 +624,6 @@
       </div>
     </div>
 
-    <div v-if="showResultModal" class="modal-overlay">
-      <div class="modal-content glass-card">
-        <div class="result-header">
-          <h3>面试结束</h3>
-          <div class="result-score">
-            <span class="score-value">{{ result.score }}</span>
-            <span class="score-label">分</span>
-          </div>
-        </div>
-        
-        <div class="result-stats">
-          <div class="result-item">
-            <span class="result-label">正确率</span>
-            <span class="result-value correct">{{ result.correctCount }}/{{ result.totalQuestions }}</span>
-          </div>
-          <div class="result-item">
-            <span class="result-label">用时</span>
-            <span class="result-value">{{ result.duration }}</span>
-          </div>
-          <div class="result-item">
-            <span class="result-label">击败</span>
-            <span class="result-value">{{ result.beatPercent }}%</span>
-          </div>
-        </div>
-        
-        <div class="result-feedback">
-          <p>{{ result.feedback }}</p>
-        </div>
-        
-        <div class="result-actions">
-          <button class="btn btn-secondary glass-btn" @click="reviewAnswers">
-            <i class="fas fa-list"></i>
-            查看答案
-          </button>
-          <button class="btn btn-primary glass-btn" @click="closeModal">
-            <i class="fas fa-redo"></i>
-            再来一次
-          </button>
-        </div>
-      </div>
-    </div>
   </section>
 </template>
 
@@ -678,16 +632,28 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from
 import { getJobDisplayName } from '../utils/interview'
 import {
   DECISION_TEXT_MAP,
-  mapDecisionScore,
   normalizeInterviewDecision
 } from '../utils/interviewDecision'
+import {
+  normalizeAuthoritativeQuestion,
+  resolveAsrQuestionType,
+  resolveNextStreamQuestion
+} from '../utils/interviewCurrentQuestion'
+import {
+  buildProfessionalInterviewStartBlockedReason,
+  buildVoiceFailureMessage,
+  canStartProfessionalInterview,
+  normalizeInputMode,
+  shouldRenderTextInput,
+  shouldShowInputModeToggle
+} from '../utils/interviewInputMode'
+import { buildPendingInterviewResult } from '../utils/interviewResultState'
+import { buildInterviewCreatePayload } from '../utils/interviewSessionPayload'
 import {
   getResumes,
   createInterviewSession,
   getInterviewSessionDetail,
   submitInterviewAttempt,
-  getInterviewHint,
-  skipInterviewQuestion,
   finishInterviewSession,
   getSystemPing
 } from '../api/resume'
@@ -727,8 +693,6 @@ export default {
       selectedStages: ['technical', 'project'],
       knowledgePoints: []
     })
-    const singleQuestionMode = ref(false)
-    const singleQuestionPayload = ref(null)
 
     const resumeList = ref([])
     const newKnowledgePoint = ref('')
@@ -797,13 +761,12 @@ export default {
     const chatMessages = ref(null)
     const questions = ref([])
     const answers = ref([])
-    const showResultModal = ref(false)
-    const hintUsed = ref(false)
-    const inputMode = ref('text')
+    const inputMode = ref(normalizeInputMode(config.interviewMode, 'text'))
     const isListening = ref(false)
     const recognizedText = ref('')
     const lastRawAsrText = ref('')
     const lastAsrCorrectionChanges = ref([])
+    const voiceFailureMessage = ref('')
     const showInterviewer = ref(true)
     const cameraEnabled = ref(false)
     const isRecording = ref(false)
@@ -812,6 +775,7 @@ export default {
     const ttsMode = ref('auto') // auto | manual | mute
     // ASR 相关状态
     const asrAvailable = ref(false)
+    const asrCapabilityChecked = ref(false)
     const asrState = ref('idle')      // idle | connecting | running | stopping | stopped
     const lastPauseStats = ref(null)  // 最近一次语音作答的停顿统计
     const lastAsrSegments = ref([])   // 最近一次语音作答的 ASR 片段
@@ -833,15 +797,6 @@ export default {
       fluencyPercent: 75,
       latency: 120,
       latencyPercent: 12
-    })
-
-    const result = reactive({
-      score: 0,
-      correctCount: 0,
-      totalQuestions: 0,
-      beatPercent: 0,
-      feedback: '',
-      duration: ''
     })
 
     const jobOptions = [
@@ -1008,6 +963,21 @@ export default {
       return statusMap[interviewStatus.value]
     })
 
+    const showInputModeToggle = computed(() => shouldShowInputModeToggle(config.interviewMode))
+    const showTextInput = computed(() => shouldRenderTextInput(config.interviewMode, inputMode.value))
+    const professionalVoiceBlockedReason = computed(() => {
+      if (config.interviewMode !== 'professional') {
+        return ''
+      }
+      if (!asrCapabilityChecked.value) {
+        return '正在检测语音识别能力...'
+      }
+      return buildProfessionalInterviewStartBlockedReason({
+        microphoneReady: deviceTest.microphoneReady,
+        asrAvailable: asrAvailable.value
+      })
+    })
+
     const expressionStatus = computed(() => {
       const expressions = ['自然', '紧张', '放松', '专注']
       return expressions[Math.floor(Math.random() * expressions.length)]
@@ -1081,8 +1051,10 @@ export default {
       // 初始化 ASR：拉取停顿阈值配置，检测 ASR 是否可用
       asrService.init().then(async () => {
         asrAvailable.value = await asrService.isAvailable()
+        asrCapabilityChecked.value = true
       }).catch(() => {
         asrAvailable.value = false
+        asrCapabilityChecked.value = true
       })
       // 绑定 ASR 回调
       asrService.onInterim = (text) => {
@@ -1095,18 +1067,20 @@ export default {
         lastPauseStats.value = pauseStats
         lastAsrSegments.value = segments
         isListening.value = false
+        voiceFailureMessage.value = ''
         // 最终帧到达后自动提交
         if (text.trim()) {
           nextTick(() => submitAnswer())
         }
       }
       asrService.onError = (err) => {
-        console.error('[InterviewPage] ASR 错误，降级为文字输入:', err)
+        console.error('[InterviewPage] ASR 错误:', err)
         isListening.value = false
         asrState.value = 'stopped'
-        // 降级：切回文字模式
-        if (inputMode.value === 'voice') {
-          inputMode.value = 'text'
+        if (inputMode.value === 'voice' || config.interviewMode === 'professional') {
+          const message = buildVoiceFailureMessage(config.interviewMode)
+          voiceFailureMessage.value = message
+          alert(message)
         }
       }
       asrService.onStateChange = (state) => {
@@ -1164,43 +1138,19 @@ export default {
       config.interviewMode = mode === 'professional' ? 'professional' : 'practice'
     }
 
-    const startSingleQuestionInterview = (payload) => {
-      if (!payload?.question) return
-
-      singleQuestionMode.value = true
-      singleQuestionPayload.value = {
-        id: payload.id || Date.now(),
-        question: payload.question,
-        keywords: payload.keywords || [],
-        domainName: payload.domainName || '',
-        sourceItemId: payload.sourceItemId || null
-      }
-      config.jobType = payload.jobType || 'frontend'
-      config.interviewMode = 'practice'
-      config.mode = 'chat'
-      config.totalQuestions = 1
-      inputMode.value = 'text'
-      answerInput.value = ''
-      recognizedText.value = ''
-      isDeviceTesting.value = false
-      isLoading.value = false
-      startInterviewDirectly()
-    }
-
     const startInterview = () => {
-      singleQuestionMode.value = false
-      singleQuestionPayload.value = null
       config.totalQuestions = 10
       savePrepareConfig()
+      voiceFailureMessage.value = ''
 
       if (config.interviewMode === 'professional') {
         config.mode = 'voice'
-        inputMode.value = 'voice'
+        inputMode.value = normalizeInputMode(config.interviewMode, 'voice')
         isDeviceTesting.value = true
         startDeviceTest()
       } else {
         config.mode = 'chat'
-        inputMode.value = 'text'
+        inputMode.value = normalizeInputMode(config.interviewMode, 'text')
         startLoadingPhase()
       }
     }
@@ -1265,14 +1215,14 @@ export default {
     }
 
     const startInterviewDirectly = async () => {
-      totalQuestions.value = singleQuestionMode.value ? 1 : config.totalQuestions
+      totalQuestions.value = config.totalQuestions
       currentQuestion.value = 0
       answers.value = []
       messages.value = []
       elapsedTime.value = 0
-      hintUsed.value = false
       answerInput.value = ''
       recognizedText.value = ''
+      voiceFailureMessage.value = ''
       backendSessionId.value = null
       isSubmittingAnswer.value = false
       isWaitingNextQuestion.value = false
@@ -1284,19 +1234,8 @@ export default {
         streamAbortController = null
       }
 
-      if (singleQuestionMode.value && singleQuestionPayload.value) {
-        questions.value = [{
-          ...singleQuestionPayload.value,
-          questionId: singleQuestionPayload.value.id,
-          questionNo: 1,
-          questionType: 'PRINCIPLE',
-          question: singleQuestionPayload.value.question,
-          targetSkill: ''
-        }]
-      } else {
-        const firstQuestion = await createAndWaitFirstQuestion()
-        questions.value = [firstQuestion]
-      }
+      const firstQuestion = await createAndWaitFirstQuestion()
+      questions.value = [firstQuestion]
 
       isRunning.value = true
       if (isLoading.value) {
@@ -1307,7 +1246,10 @@ export default {
       emit('interviewStart')
     }
 
-    const allDevicesReady = computed(() => deviceTest.microphoneReady)
+    const allDevicesReady = computed(() => canStartProfessionalInterview({
+      microphoneReady: deviceTest.microphoneReady,
+      asrAvailable: asrCapabilityChecked.value && asrAvailable.value
+    }))
 
     const cameraStatusText = computed(() => {
       if (deviceTest.cameraStatus === 'failed') return '未通过'
@@ -1850,25 +1792,19 @@ export default {
       deviceTest.speakerReady = true
     }
 
-    const skipDeviceTest = async () => {
-      await ttsPlayerService.unlockByUserGesture()
-      if (!deviceTest.microphoneReady) {
-        alert('麦克风检测未通过，无法跳过')
-        return
-      }
-      stopDeviceTest()
-      isDeviceTesting.value = false
-      startLoadingPhase()
-    }
-
     const backToConfig = () => {
       stopDeviceTest()
       isDeviceTesting.value = false
       deviceTest.cameraStatus = 'idle'
       deviceTest.microphoneStatus = 'idle'
+      voiceFailureMessage.value = ''
     }
 
     const startInterviewAfterTest = async () => {
+      if (!allDevicesReady.value) {
+        alert(professionalVoiceBlockedReason.value || '专业模式仅支持语音输入，请完成语音能力检测后重试。')
+        return
+      }
       await ttsPlayerService.unlockByUserGesture()
       stopDeviceTest()
       isDeviceTesting.value = false
@@ -1904,38 +1840,42 @@ export default {
       return message.includes('aborted')
     }
 
-    const normalizeQuestion = (raw, fallbackNo = null, fallbackStem = '') => {
-      if (!raw) return null
-      const stem = raw.stem || fallbackStem || raw.question || ''
-      const questionNo = raw.questionNo ?? fallbackNo ?? currentQuestion.value + 1
-      return {
-        id: raw.questionId || raw.id || Date.now(),
-        questionId: raw.questionId || raw.id || null,
-        questionNo,
-        questionType: raw.questionType || 'PRINCIPLE',
-        domainName: raw.domainName || '',
-        question: stem,
-        stem,
-        targetSkill: raw.targetSkill || '',
-        hintAvailable: raw.hintAvailable !== false,
-        keywords: raw.keywords || []
+    const buildCreateInterviewPayloadForCurrentState = () => buildInterviewCreatePayload({
+      config,
+      roleMap: ROLE_MAP,
+      experienceMap: EXPERIENCE_MAP
+    })
+
+    const fetchAuthoritativeCurrentQuestion = async (fallbackStem = '') => {
+      if (!backendSessionId.value) {
+        throw new Error('缺少会话上下文，无法获取当前题')
+      }
+      const detail = await getInterviewSessionDetail(backendSessionId.value)
+      return resolveNextStreamQuestion({
+        sessionDetail: detail,
+        fallbackStem
+      })
+    }
+
+    const ensureCurrentQuestionForAsr = async () => {
+      const currentQ = questions.value[currentQuestion.value]
+      try {
+        resolveAsrQuestionType(currentQ)
+        return currentQ
+      } catch (error) {
+        const authoritativeQuestion = await fetchAuthoritativeCurrentQuestion()
+        if (currentQuestion.value >= 0 && currentQuestion.value < questions.value.length) {
+          questions.value.splice(currentQuestion.value, 1, authoritativeQuestion)
+        } else {
+          questions.value.push(authoritativeQuestion)
+          currentQuestion.value = questions.value.length - 1
+        }
+        return authoritativeQuestion
       }
     }
 
-    const buildCreateInterviewPayload = () => ({
-      targetRole: ROLE_MAP[config.jobType] || 'FRONTEND',
-      experienceLevel: EXPERIENCE_MAP[config.experience] || 'JUNIOR',
-      mode: config.interviewMode,
-      jobDescription: config.jobDescription || null,
-      resumeId: config.resumeId && config.resumeId !== 'default' ? Number(config.resumeId) : null,
-      focusTopics: config.knowledgePoints?.length ? config.knowledgePoints.join(',') : null,
-      rememberSettings: true,
-      thinkTimeLimitSeconds: config.interviewMode === 'professional' ? 30 : null,
-      answerTimeLimitSeconds: config.interviewMode === 'professional' ? 180 : null
-    })
-
     const createAndWaitFirstQuestion = async () => {
-      const createResp = await createInterviewSession(buildCreateInterviewPayload())
+      const createResp = await createInterviewSession(buildCreateInterviewPayloadForCurrentState())
       const sessionId = createResp?.sessionId
       if (!sessionId) {
         throw new Error('创建面试会话失败：缺少 sessionId')
@@ -1943,11 +1883,7 @@ export default {
       backendSessionId.value = sessionId
 
       const detail = await pollSessionUntilReady(sessionId)
-      const firstQuestion = normalizeQuestion(detail?.currentQuestion, 1)
-      if (!firstQuestion || !firstQuestion.question) {
-        throw new Error('首题尚未就绪，请稍后重试')
-      }
-      return firstQuestion
+      return normalizeAuthoritativeQuestion(detail?.currentQuestion)
     }
 
     const pollSessionUntilReady = async (sessionId, timeoutMs = 90000, intervalMs = 1500) => {
@@ -2042,21 +1978,24 @@ export default {
         }
 
         messages.value[streamMessageIndex].content = finalStem
-        const nextNo = (questions.value[currentQuestion.value]?.questionNo || currentQuestion.value + 1) + 1
-        const nextQuestionId = Number(donePayload?.questionId)
-        const hasValidQuestionId = Number.isInteger(nextQuestionId) && nextQuestionId > 0
-        if (!hasValidQuestionId) {
-          console.warn('[InterviewPage] done 事件缺少有效 questionId，后续提交将被拦截', donePayload)
+        let nextQuestion
+        try {
+          nextQuestion = resolveNextStreamQuestion({
+            donePayload,
+            fallbackStem: finalStem
+          })
+        } catch (firstError) {
+          console.warn('[InterviewPage] done 事件缺少权威题目快照，尝试回拉当前题', {
+            error: firstError?.message || firstError,
+            donePayload
+          })
+          nextQuestion = await fetchAuthoritativeCurrentQuestion(finalStem)
         }
-        const nextQuestion = normalizeQuestion({
-          questionId: hasValidQuestionId ? nextQuestionId : null,
-          questionNo: nextNo,
-          questionType: 'PRINCIPLE',
-          domainName: '',
-          stem: finalStem,
-          targetSkill: '',
-          hintAvailable: true
-        }, nextNo, finalStem)
+
+        const currentQuestionId = Number(questions.value[currentQuestion.value]?.questionId)
+        if (Number.isInteger(currentQuestionId) && currentQuestionId > 0 && nextQuestion.questionId === currentQuestionId) {
+          throw new Error('后端未返回新的当前题，请刷新页面后重试')
+        }
 
         questions.value.push(nextQuestion)
         currentQuestion.value = questions.value.length - 1
@@ -2109,48 +2048,13 @@ export default {
       scrollToBottom()
     }
 
-    const buildLocalHint = (question) => {
-      if (Array.isArray(question.keywords) && question.keywords.length) {
-        return '提示：可以优先覆盖这些要点：' + question.keywords.slice(0, 2).join('、')
-      }
-      if (question.targetSkill) {
-        return '提示：重点讲清你对「' + question.targetSkill + '」的理解和实践。'
-      }
-      return '提示：可按“定义 -> 原理 -> 实战场景”来组织回答。'
-    }
-
-    const getHint = async () => {
-      if (hintUsed.value || isSubmittingAnswer.value || isWaitingNextQuestion.value || isFinishing.value) return
-
-      const question = questions.value[currentQuestion.value]
-      if (!question) return
-      const questionId = Number(question.questionId)
-
-      let hint = ''
-      if (!singleQuestionMode.value && backendSessionId.value && Number.isInteger(questionId) && questionId > 0) {
-        try {
-          const resp = await getInterviewHint(backendSessionId.value, questionId)
-          hint = String(resp?.hintText || resp?.hint || '').trim()
-        } catch (err) {
-          console.error('[InterviewPage] failed to get backend hint', err)
-        }
-      }
-      if (!hint) {
-        hint = buildLocalHint(question)
-      }
-      messages.value.push({
-        type: 'ai',
-        content: hint
-      })
-      hintUsed.value = true
-      await scrollToBottom()
-    }
-
     const toggleVoiceInput = async () => {
       if (isAiSpeaking.value) {
         console.info('[InterviewPage] 已阻止语音输入：当前仍在播报题目')
         return
       }
+
+      inputMode.value = normalizeInputMode(config.interviewMode, 'voice')
 
       if (!isListening.value) {
         // ── 开始录音 ──
@@ -2159,90 +2063,70 @@ export default {
         lastAsrSegments.value = []
         lastRawAsrText.value = ''
         lastAsrCorrectionChanges.value = []
+        voiceFailureMessage.value = ''
 
-        if (asrAvailable.value) {
-          // 真实 ASR：获取当前题目类型用于停顿阈值
-          const currentQ = questions.value[currentQuestion.value]
-          const questionType = currentQ?.questionType || 'PRINCIPLE'
+        if (!asrAvailable.value) {
+          const message = buildVoiceFailureMessage(config.interviewMode)
+          voiceFailureMessage.value = message
+          alert(message)
+          return
+        }
+
+        let currentQ
+        try {
+          currentQ = await ensureCurrentQuestionForAsr()
+        } catch (error) {
+          const message = error?.message || '当前题目元数据缺失，无法启动语音识别。'
+          voiceFailureMessage.value = message
+          alert(message)
+          return
+        }
+        const questionType = resolveAsrQuestionType(currentQ)
+        try {
           isListening.value = true
           await asrService.start(questionType, {
             roleHint: config.jobType || '',
             questionText: currentQ?.question || currentQ?.stem || '',
             jobDescription: config.jobDescription || '',
           })
-        } else {
-          // 降级：Web Speech API（不支持停顿打标，仅保底兜底）
-          isListening.value = true
-          _startWebSpeechFallback()
+        } catch (error) {
+          console.error('[InterviewPage] 启动语音识别失败', error)
+          isListening.value = false
+          asrState.value = 'stopped'
+          const message = buildVoiceFailureMessage(config.interviewMode)
+          voiceFailureMessage.value = message
+          alert(message)
         }
       } else {
         // ── 停止录音 ──
-        if (asrAvailable.value) {
-          // ASR 的 onFinal 回调会自动触发 submitAnswer，这里只更新 UI 状态
-          isListening.value = false
+        isListening.value = false
+        try {
           await asrService.stop()
-        } else {
-          isListening.value = false
-          answerInput.value = recognizedText.value
-          if (recognizedText.value.trim()) {
-            nextTick(() => submitAnswer())
-          }
+        } catch (error) {
+          console.warn('[InterviewPage] 停止语音识别失败', error)
         }
       }
     }
 
     const setInputMode = (mode) => {
+      const nextMode = normalizeInputMode(config.interviewMode, mode)
+      if (config.interviewMode === 'professional' && nextMode !== mode) {
+        inputMode.value = nextMode
+        alert('专业模式仅支持语音输入。')
+        return
+      }
       if (mode === 'text' && isListening.value) {
         isListening.value = false
         asrService.stop().catch(() => {})
         answerInput.value = recognizedText.value
-        if (recognizedText.value.trim()) {
-          nextTick(() => submitAnswer())
-        }
       }
-      inputMode.value = mode
+      inputMode.value = nextMode
+      voiceFailureMessage.value = ''
     }
 
-    /** Web Speech API 降级方案（不支持停顿打标，仅保证基础可用） */
-    const _startWebSpeechFallback = () => {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-      if (!SpeechRecognition) {
-        console.warn('[InterviewPage] 浏览器不支持 Web Speech API，无法使用语音输入')
-        isListening.value = false
-        inputMode.value = 'text'
-        return
-      }
-      const recognition = new SpeechRecognition()
-      recognition.lang = 'zh-CN'
-      recognition.continuous = true
-      recognition.interimResults = true
-      recognition.onresult = (e) => {
-        let interim = ''
-        let final = ''
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          if (e.results[i].isFinal) {
-            final += e.results[i][0].transcript
-          } else {
-            interim += e.results[i][0].transcript
-          }
-        }
-        recognizedText.value = final || interim
-      }
-      recognition.onend = () => {
-        if (isListening.value) {
-          isListening.value = false
-          if (recognizedText.value.trim()) {
-            nextTick(() => submitAnswer())
-          }
-        }
-      }
-      recognition.onerror = () => {
-        isListening.value = false
-        inputMode.value = 'text'
-      }
-      recognition.start()
-      // 挂载到实例，以便 stop 时可以停止
-      toggleVoiceInput._recognition = recognition
+    const retryVoiceRecognition = async () => {
+      voiceFailureMessage.value = ''
+      await toggleVoiceInput()
     }
 
     const toggleCamera = async () => {
@@ -2269,7 +2153,16 @@ export default {
     }
 
     const submitAnswer = async () => {
-      const text = inputMode.value === 'voice' ? recognizedText.value : answerInput.value
+      const normalizedMode = normalizeInputMode(config.interviewMode, inputMode.value)
+      if (inputMode.value !== normalizedMode) {
+        inputMode.value = normalizedMode
+      }
+      if (config.interviewMode === 'professional' && normalizedMode !== 'voice') {
+        alert('专业模式仅支持语音输入，请使用语音作答。')
+        return
+      }
+
+      const text = normalizedMode === 'voice' ? recognizedText.value : answerInput.value
       const answer = text.trim()
       if (!answer || isSubmittingAnswer.value || isWaitingNextQuestion.value || isFinishing.value) {
         console.info('[InterviewPage] submit blocked', {
@@ -2285,10 +2178,10 @@ export default {
 
       // 用户主动提交时，立即打断当前题目播报，避免“旧题语音残留到下一题”。
       ttsPlayerService.skip()
-      await submitAnswerText(answer, false)
+      await submitAnswerText(answer)
     }
 
-    const submitAnswerText = async (answer, isSkip = false) => {
+    const submitAnswerText = async (answer) => {
       const question = questions.value[currentQuestion.value]
       if (!question) return
       const questionId = Number(question.questionId)
@@ -2304,7 +2197,7 @@ export default {
 
       messages.value.push({
         type: 'user',
-        content: isSkip ? '[skip]' : answer
+        content: answer
       })
       answerInput.value = ''
       recognizedText.value = ''
@@ -2312,22 +2205,10 @@ export default {
       lastAsrSegments.value = []
       lastRawAsrText.value = ''
       lastAsrCorrectionChanges.value = []
-      hintUsed.value = false
+      voiceFailureMessage.value = ''
 
       isSubmittingAnswer.value = true
       try {
-        if (singleQuestionMode.value) {
-          answers.value.push({
-            questionId,
-            question: question.question,
-            answer,
-            score: isSkip ? 0 : 80,
-            keywords: question.keywords || []
-          })
-          await finishInterview({ manual: false })
-          return
-        }
-
         if (!backendSessionId.value) {
           throw new Error('面试会话尚未初始化')
         }
@@ -2348,9 +2229,11 @@ export default {
         const decision = normalizeInterviewDecision(resp)
         answers.value.push({
           questionId,
+          questionNo: question.questionNo || null,
+          questionType: question.questionType || null,
           question: question.question,
           answer,
-          score: mapDecisionScore(decision, isSkip),
+          status: 'answered',
           keywords: question.keywords || []
         })
 
@@ -2396,78 +2279,6 @@ export default {
       ttsPlayerService.interrupt()
     }
 
-    const skipQuestion = async () => {
-      if (isSubmittingAnswer.value || isWaitingNextQuestion.value || isFinishing.value) return
-      const question = questions.value[currentQuestion.value]
-      if (!question) return
-
-      if (singleQuestionMode.value) {
-        ttsPlayerService.skip()
-        await submitAnswerText('[skip]', true)
-        return
-      }
-
-      if (!backendSessionId.value) {
-        alert('面试会话尚未初始化')
-        return
-      }
-      const questionId = Number(question.questionId)
-      if (!Number.isInteger(questionId) || questionId <= 0) {
-        alert('当前题目尚未完全就绪，请稍后重试。')
-        return
-      }
-
-      ttsPlayerService.skip()
-      messages.value.push({
-        type: 'user',
-        content: '[skip]'
-      })
-      answerInput.value = ''
-      recognizedText.value = ''
-      lastPauseStats.value = null
-      lastAsrSegments.value = []
-      hintUsed.value = false
-
-      isSubmittingAnswer.value = true
-      try {
-        const attemptId = buildAttemptId()
-        const resp = await skipInterviewQuestion(backendSessionId.value, questionId, attemptId)
-
-        const decision = normalizeInterviewDecision(resp)
-        answers.value.push({
-          questionId,
-          question: question.question,
-          answer: '[skip]',
-          score: 0,
-          keywords: question.keywords || []
-        })
-
-        const decisionText = DECISION_TEXT_MAP[decision]
-        if (decisionText) {
-          messages.value.push({
-            type: 'ai',
-            content: decisionText
-          })
-        }
-
-        if (decision === 'wrapup' || !resp?.streamAttemptId) {
-          await finishInterview({ manual: false })
-        } else {
-          await streamNextQuestion(resp.streamAttemptId)
-        }
-      } catch (err) {
-        if (isAbortLikeError(err)) {
-          console.info('[InterviewPage] skip flow aborted by user action')
-        } else {
-          console.error('[InterviewPage] failed to skip question', err)
-          alert(err?.message || '跳过本题失败，请重试。')
-        }
-      } finally {
-        isSubmittingAnswer.value = false
-        await scrollToBottom()
-      }
-    }
-
     const endInterview = async () => {
       if (isFinishing.value) return
       if (confirm('确认结束本场面试吗？')) {
@@ -2493,9 +2304,12 @@ export default {
           streamAbortController = null
         }
 
-        let resultData = calculateFinalResult()
+        const resultData = buildPendingInterviewResult({
+          answers: answers.value,
+          duration: formattedTime.value
+        })
 
-        if (!singleQuestionMode.value && backendSessionId.value) {
+        if (backendSessionId.value) {
           try {
             if (manual) {
               await finishInterviewSession(backendSessionId.value)
@@ -2505,14 +2319,14 @@ export default {
           }
           resultData.reportStatus = 'generating'
           resultData.reportStartedAt = new Date().toISOString()
-          resultData.feedback = '报告正在生成中，你可以先返回面试记录页。'
         } else {
-        resultData.reportStatus = 'ready'
-      }
+          resultData.reportStatus = 'failed'
+          resultData.reportFailedAt = new Date().toISOString()
+        }
 
-      resultData.answers = answers.value
-      resultData.jobName = jobDisplayName.value
-      resultData.companyName = config.companyName
+        resultData.answers = answers.value
+        resultData.jobName = jobDisplayName.value
+        resultData.companyName = config.companyName
         resultData.interviewRound = currentRound.value.label
         resultData.interviewMode = config.interviewMode
         resultData.sessionId = backendSessionId.value ?? null
@@ -2530,58 +2344,25 @@ export default {
       }
     }
 
-    const showInterviewResult = () => {
-      const resultData = calculateFinalResult()
-      Object.assign(result, resultData)
-      showResultModal.value = true
-      saveInterviewRecord(resultData)
-    }
-
-    const calculateFinalResult = () => {
-      const totalScore = answers.value.reduce((sum, a) => sum + a.score, 0)
-      const answeredCount = answers.value.length
-      const avgScore = answeredCount > 0 ? Math.round(totalScore / answeredCount) : 0
-      const correctCount = answers.value.filter(a => a.score >= 60).length
-      const beatPercent = Math.min(Math.round(avgScore * 0.9 + Math.random() * 10), 99)
-
-      let feedback = ''
-      if (avgScore >= 85) {
-        feedback = '表现优秀，你的回答完整且扎实。'
-      } else if (avgScore >= 70) {
-        feedback = '整体表现良好，建议继续强化薄弱点。'
-      } else if (avgScore >= 60) {
-        feedback = '基本达标，但在深度和结构化表达上还有提升空间。'
-      } else {
-        feedback = '表现有待提升，建议夯实基础并加强实战练习。'
-      }
-
-      return {
-        score: avgScore,
-        correctCount,
-        totalQuestions: answeredCount,
-        beatPercent,
-        feedback,
-        duration: formattedTime.value
-      }
-    }
-
     const saveInterviewRecord = (resultData) => {
       const hasSessionId = resultData?.sessionId != null && String(resultData.sessionId).trim() !== ''
       const nowIso = new Date().toISOString()
-      const reportStatus = hasSessionId
-        ? (['ready', 'failed', 'generating'].includes(resultData?.reportStatus) ? resultData.reportStatus : 'generating')
-        : 'ready'
+      const reportStatus = ['ready', 'failed', 'generating'].includes(resultData?.reportStatus)
+        ? resultData.reportStatus
+        : (hasSessionId ? 'generating' : 'failed')
       const record = {
         id: Date.now(),
         job: jobDisplayName.value,
         company: config.companyName,
         round: currentRound.value.label,
         date: new Date().toLocaleString('zh-CN'),
-        score: resultData.score,
+        score: resultData.score ?? null,
         duration: resultData.duration,
         questions: resultData.totalQuestions,
-        correct: resultData.correctCount,
-        answers: answers.value,
+        correct: resultData.correctCount ?? null,
+        beatPercent: resultData.beatPercent ?? null,
+        feedback: resultData.feedback ?? null,
+        answers: Array.isArray(resultData.answers) ? resultData.answers : answers.value,
         mode: config.interviewMode,
         sessionId: hasSessionId ? String(resultData.sessionId).trim() : null,
         reportStatus,
@@ -2589,7 +2370,7 @@ export default {
         reportReadyAt: reportStatus === 'ready' ? (resultData.reportReadyAt || nowIso) : null,
         reportFailedAt: reportStatus === 'failed' ? (resultData.reportFailedAt || nowIso) : null,
         report: reportStatus === 'ready' ? (resultData.report || null) : null,
-        syncStatus: hasSessionId ? (reportStatus === 'ready' ? 'synced' : 'report_generating') : 'local_fallback',
+        syncStatus: hasSessionId ? (reportStatus === 'ready' ? 'synced' : 'report_generating') : 'failed_missing_session',
         fallbackReason: hasSessionId ? null : 'missing_session_id'
       }
       
@@ -2603,11 +2384,6 @@ export default {
       return record
     }
 
-    const closeModal = () => {
-      showResultModal.value = false
-      resetInterview()
-    }
-
     const resetInterview = () => {
       isRunning.value = false
       currentQuestion.value = 0
@@ -2617,23 +2393,23 @@ export default {
       streamConnectionState.value = 'idle'
     }
 
-    const reviewAnswers = () => {
-      showResultModal.value = false
-      const resultData = calculateFinalResult()
-      resultData.answers = answers.value
-      resultData.jobName = jobDisplayName.value
-      const expLabel = experienceLevels.find(e => e.value === config.experience)
-      resultData.experienceLabel = expLabel ? expLabel.label : '未知'
-      resultData.sessionId = backendSessionId.value ?? null
-      emit('interviewEnd', resultData)
-    }
-
     const scrollToBottom = async () => {
       await nextTick()
       if (chatMessages.value) {
         chatMessages.value.scrollTop = chatMessages.value.scrollHeight
       }
     }
+
+    watch(() => config.interviewMode, (mode) => {
+      inputMode.value = normalizeInputMode(mode, inputMode.value)
+    }, { immediate: true })
+
+    watch(inputMode, (mode) => {
+      const normalized = normalizeInputMode(config.interviewMode, mode)
+      if (mode !== normalized) {
+        inputMode.value = normalized
+      }
+    })
 
     watch(recognizedText, () => {
       if (isListening.value) scrollToBottom()
@@ -2709,13 +2485,13 @@ export default {
       messages,
       answerInput,
       chatMessages,
-      showResultModal,
-      result,
-      hintUsed,
       inputMode,
+      showInputModeToggle,
+      showTextInput,
       setInputMode,
       isListening,
       recognizedText,
+      voiceFailureMessage,
       showInterviewer,
       cameraEnabled,
       isRecording,
@@ -2743,26 +2519,22 @@ export default {
       setJobType,
       setFocusTopic,
       setInterviewMode,
-      startSingleQuestionInterview,
       startInterview,
-      getHint,
+      professionalVoiceBlockedReason,
       toggleVoiceInput,
+      retryVoiceRecognition,
       toggleCamera,
       toggleRecording,
       submitAnswer,
-      skipQuestion,
       endInterview,
       handleManualPlayTts,
       handleSkipTts,
       handleInterruptTts,
-      closeModal,
-      reviewAnswers,
       testCamera,
       testMicrophone,
       retryMicrophoneTest,
       playTestAudio,
       confirmSpeaker,
-      skipDeviceTest,
       backToConfig,
       startInterviewAfterTest,
       getWaveformHeight,
@@ -3865,18 +3637,6 @@ export default {
   border-color: var(--primary-color);
 }
 
-.action-btn.hint:hover {
-  background: rgba(245, 158, 11, 0.1);
-  border-color: #f59e0b;
-  color: #f59e0b;
-}
-
-.action-btn.skip:hover {
-  background: rgba(59, 89, 152, 0.1);
-  border-color: var(--primary-color);
-  color: var(--primary-color);
-}
-
 .action-btn.end:hover {
   background: rgba(239, 68, 68, 0.1);
   border-color: #ef4444;
@@ -3886,16 +3646,6 @@ export default {
 .action-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.used-badge {
-  position: absolute;
-  right: 10px;
-  font-size: 10px;
-  padding: 2px 6px;
-  background: rgba(245, 158, 11, 0.2);
-  border-radius: 4px;
-  color: #f59e0b;
 }
 
 .input-mode-toggle {
@@ -4174,6 +3924,29 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.voice-error-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--radius-md);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.voice-error-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #dc2626;
+}
+
+.voice-error-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .voice-btn {
@@ -4510,79 +4283,6 @@ export default {
   z-index: 1000;
 }
 
-.modal-content {
-  width: 400px;
-  padding: 32px;
-  text-align: center;
-}
-
-.result-header h3 {
-  font-size: 20px;
-  margin-bottom: 16px;
-}
-
-.result-score {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 4px;
-  margin-bottom: 24px;
-}
-
-.score-value {
-  font-size: 48px;
-  font-weight: 700;
-  color: var(--primary-color);
-}
-
-.score-label {
-  font-size: 18px;
-  color: var(--text-secondary);
-}
-
-.result-stats {
-  display: flex;
-  justify-content: space-around;
-  margin-bottom: 24px;
-}
-
-.result-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.result-label {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.result-value {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.result-value.correct {
-  color: var(--success-color);
-}
-
-.result-feedback {
-  padding: 16px;
-  background: rgba(99, 102, 241, 0.1);
-  border-radius: var(--radius-md);
-  margin-bottom: 24px;
-}
-
-.result-feedback p {
-  font-size: 14px;
-  color: var(--text-primary);
-}
-
-.result-actions {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-}
 
 .interview-loading-page {
   position: fixed;
@@ -5363,6 +5063,13 @@ export default {
 
 .network-hint.network-fail {
   color: #f87171;
+}
+
+.voice-requirement-hint {
+  margin: 12px 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: #dc2626;
 }
 
 .summary-actions {

@@ -2,6 +2,7 @@ package com.a05.aiinterview.interview.service;
 
 import com.a05.aiinterview.ai.dto.QuestionDetailEvaluationOutput;
 import com.a05.aiinterview.interview.dto.InterviewQuestionReviewDto;
+import com.a05.aiinterview.interview.dto.QuestionDtoAssembler;
 import com.a05.aiinterview.interview.entity.InterviewAttempt;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
@@ -58,7 +59,7 @@ public class InterviewQuestionReviewService {
         dto.setQuestionNo(question.getQuestionNo());
         dto.setQuestionStem(question.getStem());
         dto.setQuestionType(question.getQuestionType());
-        dto.setDomainName(resolveDomainName(session, question));
+        dto.setDomainName(QuestionDtoAssembler.fromQuestion(question, session).getDomainName());
 
         InterviewAttempt latestFinalAttempt = interviewAttemptMapper.selectLatestFinalAttempt(sessionId, questionId);
         if (latestFinalAttempt == null) {
@@ -150,42 +151,4 @@ public class InterviewQuestionReviewService {
         return EVALUATION_PENDING;
     }
 
-    private String resolveDomainName(InterviewSession session, InterviewQuestion question) {
-        String domainCode = extractDomainCode(question.getGenerationContextJson());
-        if (session.getSyllabusJson() != null && domainCode != null) {
-            Object domainsObj = session.getSyllabusJson().get("domains");
-            if (domainsObj instanceof List<?> domains) {
-                for (Object domainObj : domains) {
-                    if (!(domainObj instanceof Map<?, ?> domainMap)) {
-                        continue;
-                    }
-                    if (!domainCode.equals(domainMap.get("domainCode"))) {
-                        continue;
-                    }
-                    Object domainName = domainMap.get("domainName");
-                    if (domainName instanceof String name && !name.isBlank()) {
-                        return name;
-                    }
-                }
-            }
-        }
-        if (domainCode != null && !domainCode.isBlank()) {
-            return domainCode;
-        }
-        if (question.getTargetSkill() != null && !question.getTargetSkill().isBlank()) {
-            return question.getTargetSkill();
-        }
-        return "unknown";
-    }
-
-    private String extractDomainCode(Map<String, Object> generationContextJson) {
-        if (generationContextJson == null) {
-            return null;
-        }
-        Object domainCode = generationContextJson.get("domainCode");
-        if (!(domainCode instanceof String code) || code.isBlank()) {
-            return null;
-        }
-        return code;
-    }
 }

@@ -33,5 +33,4 @@ public class LedgerMutation {
     private String interviewAction;
     private List<EvaluationDecisionOutput.CoveredDomain> newCoveredDomains;
     private List<String> newCoveredPoints;
-    private List<EvaluationDecisionOutput.CandidatePointsByDomain> newCandidatePointsByDomain;
 }

@@ -2,39 +2,50 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  DECISION_SCORE_MAP,
   DECISION_TEXT_MAP,
-  mapDecisionScore,
   normalizeInterviewDecision
 } from '../src/utils/interviewDecision.js'
 
 test('normalizeInterviewDecision should prefer new decision field', () => {
   assert.equal(
     normalizeInterviewDecision({
-      decision: 'followup',
+      decision: 'continue',
       evaluationSignal: 'END'
     }),
-    'followup'
+    'continue'
   )
 })
 
-test('normalizeInterviewDecision should map legacy evaluationSignal to new decision', () => {
-  assert.equal(normalizeInterviewDecision({ evaluationSignal: 'DEEPEN' }), 'followup')
-  assert.equal(normalizeInterviewDecision({ evaluationSignal: 'RETRY_SAME_DOMAIN' }), 'rescue')
-  assert.equal(normalizeInterviewDecision({ evaluationSignal: 'NEXT_DOMAIN' }), 'broaden')
-  assert.equal(normalizeInterviewDecision({ evaluationSignal: 'END' }), 'wrapup')
+test('normalizeInterviewDecision should accept only current decision contract values', () => {
+  assert.equal(normalizeInterviewDecision({ decision: 'continue' }), 'continue')
+  assert.equal(normalizeInterviewDecision({ decision: ' WRAPUP ' }), 'wrapup')
 })
 
-test('normalizeInterviewDecision should fallback to broaden for unknown payload', () => {
-  assert.equal(normalizeInterviewDecision(null), 'broaden')
-  assert.equal(normalizeInterviewDecision({}), 'broaden')
-  assert.equal(normalizeInterviewDecision({ evaluationSignal: 'WEIRD' }), 'broaden')
+test('normalizeInterviewDecision should ignore evaluationSignal when decision is present', () => {
+  assert.equal(
+    normalizeInterviewDecision({
+      decision: 'wrapup',
+      evaluationSignal: 'DEEPEN'
+    }),
+    'wrapup'
+  )
 })
 
-test('decision score and text maps should use new decision semantics', () => {
-  assert.equal(mapDecisionScore('followup'), DECISION_SCORE_MAP.followup)
-  assert.equal(mapDecisionScore('wrapup'), DECISION_SCORE_MAP.wrapup)
-  assert.equal(mapDecisionScore('rescue', true), 0)
+test('normalizeInterviewDecision should throw when response is null or decision is missing', () => {
+  assert.throws(() => normalizeInterviewDecision(null), /decision/i)
+  assert.throws(() => normalizeInterviewDecision({}), /decision/i)
+  assert.throws(() => normalizeInterviewDecision({ evaluationSignal: 'END' }), /decision/i)
+})
+
+test('normalizeInterviewDecision should throw when decision is blank or unsupported', () => {
+  assert.throws(() => normalizeInterviewDecision({ decision: '   ' }), /decision/i)
+  assert.throws(() => normalizeInterviewDecision({ decision: 'followup' }), /continue|wrapup/i)
+  assert.throws(
+    () => normalizeInterviewDecision({ decision: 'broaden', evaluationSignal: 'END' }),
+    /continue|wrapup/i
+  )
+})
+
+test('decision text map should only expose flow copy', () => {
   assert.equal(DECISION_TEXT_MAP.wrapup, '本轮问答已完成，正在生成你的面试报告。')
-  assert.equal(DECISION_TEXT_MAP.followup, '')
 })

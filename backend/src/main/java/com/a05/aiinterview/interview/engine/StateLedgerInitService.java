@@ -89,7 +89,6 @@ public class StateLedgerInitService {
         ledger.put("current_focus", null);
         ledger.put("covered_domains", new ArrayList<>());
         ledger.put("covered_points", new ArrayList<>());
-        ledger.put("candidate_points_by_domain", new ArrayList<>());
         ledger.put("recent_question_families", new ArrayList<>());
 
         List<Map<String, Object>> domainStates = new ArrayList<>();

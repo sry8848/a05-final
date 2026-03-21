@@ -34,7 +34,6 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
         mergeStringListField(ledger, "covered_points", mutation.getNewCoveredPoints());
         mergeQuestionFamily(ledger, mutation.getQuestionFamilyId());
         mergeCoveredDomains(ledger, mutation.getNewCoveredDomains());
-        mergeCandidatePoints(ledger, mutation.getNewCandidatePointsByDomain());
         updateDomainStates(ledger, mutation, evidenceQuestionId);
         return ledger;
     }
@@ -61,42 +60,6 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
             values.add(coveredDomain.getDomainName().trim());
         }
         ledger.put("covered_domains", new ArrayList<>(values));
-    }
-
-    @SuppressWarnings("unchecked")
-    private void mergeCandidatePoints(Map<String, Object> ledger,
-                                      List<com.a05.aiinterview.ai.dto.EvaluationDecisionOutput.CandidatePointsByDomain> candidatePoints) {
-        List<Map<String, Object>> existing = ledger.get("candidate_points_by_domain") instanceof List<?> raw
-                ? new ArrayList<>((List<Map<String, Object>>) raw)
-                : new ArrayList<>();
-        if (candidatePoints == null || candidatePoints.isEmpty()) {
-            ledger.put("candidate_points_by_domain", existing);
-            return;
-        }
-
-        for (com.a05.aiinterview.ai.dto.EvaluationDecisionOutput.CandidatePointsByDomain item : candidatePoints) {
-            if (item == null || item.getDomainId() == null || item.getDomainName() == null || item.getDomainName().isBlank()) {
-                continue;
-            }
-            Map<String, Object> matched = null;
-            for (Map<String, Object> existingItem : existing) {
-                if (Objects.equals(item.getDomainId(), toLong(existingItem.get("domainId")))) {
-                    matched = existingItem;
-                    break;
-                }
-            }
-            if (matched == null) {
-                matched = new LinkedHashMap<>();
-                matched.put("domainId", item.getDomainId());
-                matched.put("domainName", item.getDomainName());
-                matched.put("points", new ArrayList<String>());
-                existing.add(matched);
-            }
-            LinkedHashSet<String> points = new LinkedHashSet<>(toStringList(matched.get("points")));
-            points.addAll(item.getPoints() == null ? List.of() : item.getPoints());
-            matched.put("points", new ArrayList<>(points));
-        }
-        ledger.put("candidate_points_by_domain", existing);
     }
 
     @SuppressWarnings("unchecked")
@@ -167,18 +130,6 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
         copy.put("covered_domains", new ArrayList<>(toStringList(copy.get("covered_domains"))));
         copy.put("covered_points", new ArrayList<>(toStringList(copy.get("covered_points"))));
         copy.put("recent_question_families", new ArrayList<>(toStringList(copy.get("recent_question_families"))));
-        Object candidatePoints = copy.get("candidate_points_by_domain");
-        if (candidatePoints instanceof List<?> rawCandidatePoints) {
-            List<Map<String, Object>> cloned = new ArrayList<>();
-            for (Object item : rawCandidatePoints) {
-                if (item instanceof Map<?, ?> map) {
-                    cloned.add(new LinkedHashMap<>((Map<String, Object>) map));
-                }
-            }
-            copy.put("candidate_points_by_domain", cloned);
-        } else {
-            copy.put("candidate_points_by_domain", new ArrayList<>());
-        }
         Object domainStates = copy.get("domain_states");
         if (domainStates instanceof List<?> rawDomainStates) {
             List<Map<String, Object>> cloned = new ArrayList<>();

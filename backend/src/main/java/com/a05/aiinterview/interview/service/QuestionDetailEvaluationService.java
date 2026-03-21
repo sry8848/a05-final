@@ -20,7 +20,6 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -105,23 +104,12 @@ public class QuestionDetailEvaluationService {
 
     private QuestionDetailEvaluationInput buildInput(
             InterviewSession session, InterviewQuestion question, InterviewAttempt attempt) {
-        String domainCode = extractDomainCode(question.getGenerationContextJson());
-        String domainName = resolveDomainName(session.getSyllabusJson(), domainCode);
-
-        return QuestionDetailEvaluationInput.builder()
-                .interviewId(session.getId())
-                .questionId(question.getId())
-                .positionCode(session.getTargetRole())
-                .experienceLevel(session.getExperienceLevel())
-                .mode(session.getMode())
-                .questionStem(question.getStem())
-                .questionType(question.getQuestionType())
-                .domainCode(domainCode)
-                .domainName(domainName)
-                .answerText(attempt.getAnswerText())
-                .expectedPoints(question.getExpectedPoints())
-                .recentContext(buildRecentContext(session.getId(), session.getContextWindowSize()))
-                .build();
+        return QuestionDetailEvaluationInputFactory.fromInterviewAttempt(
+                session,
+                question,
+                attempt,
+                buildRecentContext(session.getId(), session.getContextWindowSize())
+        );
     }
 
     private List<QuestionDetailEvaluationInput.QaContext> buildRecentContext(Long sessionId, Integer windowSize) {
@@ -152,7 +140,7 @@ public class QuestionDetailEvaluationService {
                     .stem(q.getStem())
                     .answer(matched != null ? matched.getAnswerText() : null)
                     .questionType(q.getQuestionType())
-                    .domainCode(extractDomainCode(q.getGenerationContextJson()))
+                    .domainCode(QuestionDetailEvaluationInputFactory.extractDomainCode(q.getGenerationContextJson()))
                     .build());
         }
         return contexts;
@@ -180,32 +168,5 @@ public class QuestionDetailEvaluationService {
             return STATUS_PENDING;
         }
         return status.trim().toLowerCase();
-    }
-
-    private String extractDomainCode(Map<String, Object> generationContextJson) {
-        if (generationContextJson == null) {
-            return "";
-        }
-        Object domainCode = generationContextJson.get("domainCode");
-        return domainCode instanceof String code ? code : "";
-    }
-
-    private String resolveDomainName(Map<String, Object> syllabusJson, String domainCode) {
-        if (syllabusJson == null || domainCode == null || domainCode.isBlank()) {
-            return domainCode;
-        }
-        Object domainsObj = syllabusJson.get("domains");
-        if (!(domainsObj instanceof List<?> domains)) {
-            return domainCode;
-        }
-        Optional<String> name = domains.stream()
-                .filter(Map.class::isInstance)
-                .map(Map.class::cast)
-                .filter(map -> domainCode.equals(String.valueOf(map.get("domainCode"))))
-                .map(map -> map.get("domainName"))
-                .filter(String.class::isInstance)
-                .map(String.class::cast)
-                .findFirst();
-        return name.orElse(domainCode);
     }
 }

@@ -74,14 +74,26 @@ class PromptTemplateCoverageTest {
                 Map.entry("interviewGoalSummary", "{\"domains\":[{\"domainId\":1,\"domainCode\":\"concurrency\",\"domainName\":\"并发编程\",\"focusPoints\":[\"线程池参数\"],\"status\":\"UNASKED\"}]}"),
                 Map.entry("coveredKnowledgeSummary", "[\"Java / 锁升级\"]"),
                 Map.entry("quotaSummary", "{\"samePointContinue\":{\"count\":1,\"maxCount\":20},\"sameDomainContinue\":{\"count\":1,\"maxCount\":20},\"sameProjectPointContinue\":{\"count\":0,\"maxCount\":20},\"sameProjectContinue\":{\"count\":0,\"maxCount\":20},\"sameTypeTotal\":{\"count\":1,\"maxCount\":20}}"),
-                Map.entry("possibleFutureDirections", "[\"THEORY: 线程池拒绝策略\",\"PROJECT: 回到订单系统线程池调优\"]"),
+                Map.entry("possibleFutureDirections", "[\"PRINCIPLE: 线程池拒绝策略\",\"PROJECT_DEEP_DIVE: 回到订单系统线程池调优\"]"),
                 Map.entry("retrievedMaterials", "[]"),
                 Map.entry("recentInterviewMemory", "[]"),
                 Map.entry("outputSchema", "{\"type\":\"object\"}")
         ));
 
         assertThat(rendered.getPromptCode()).isEqualTo("evaluation_decision");
-        assertThat(rendered.getUserPrompt()).contains("请先做一个简短的自我介绍。").contains("历史问题、回答概要、回答评价");
+        assertThat(rendered.getUserPrompt())
+                .contains("请先做一个简短的自我介绍。")
+                .contains("历史问题、回答概要、回答评价")
+                .contains("开放项目题、设计题、系统脆弱点题，不强制绑定单一知识域")
+                .contains("nextFocus 必须是单一焦点短语")
+                .contains("不能写成完整问句")
+                .contains("只写本轮已经形成判断的事实")
+                .contains("不要把下一题准备问的点提前写进")
+                .doesNotContain("\"possibleNextMoves\"")
+                .doesNotContain("\"newCandidatePointsByDomain\"")
+                .doesNotContain("possibleNextMoves=[]")
+                .doesNotContain("`possibleNextMoves`")
+                .doesNotContain("`newCandidatePointsByDomain`");
     }
 
     @Test

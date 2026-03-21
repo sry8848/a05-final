@@ -272,13 +272,13 @@ public class AnswerSubmitService {
 
     private List<String> buildPossibleFutureDirections(InterviewSession session) {
         List<String> directions = new ArrayList<>();
-        directions.add("THEORY: 平移到同知识域的另一个可判分知识点");
-        directions.add("THEORY: 切到尚未覆盖的知识域");
+        directions.add("PRINCIPLE: 平移到同知识域的另一个可判分知识点");
+        directions.add("PRINCIPLE: 切到尚未覆盖的知识域");
         if (!buildProjectAndInternshipSummary(session).isEmpty()) {
-            directions.add("PROJECT: 回到真实项目中的一个具体实现细节");
+            directions.add("PROJECT_DEEP_DIVE: 回到真实项目中的一个具体实现细节");
         }
         directions.add("SCENARIO: 基于当前技术点给一个真实线上场景");
-        directions.add("SOFT_SKILL: 追问真实协作事件和复盘");
+        directions.add("BEHAVIORAL: 追问真实协作事件和复盘");
         return directions;
     }
 
@@ -341,10 +341,8 @@ public class AnswerSubmitService {
                 .nextQuestionType("")
                 .nextFocus("")
                 .expectedAnswerPoints(List.of())
-                .possibleNextMoves(List.of())
                 .newCoveredDomains(List.of())
                 .newCoveredPoints(List.of())
-                .newCandidatePointsByDomain(List.of())
                 .retrievalPlans(List.of())
                 .build();
     }
@@ -363,17 +361,11 @@ public class AnswerSubmitService {
         if (output.getExpectedAnswerPoints() == null) {
             output.setExpectedAnswerPoints(List.of());
         }
-        if (output.getPossibleNextMoves() == null) {
-            output.setPossibleNextMoves(List.of());
-        }
         if (output.getNewCoveredDomains() == null) {
             output.setNewCoveredDomains(List.of());
         }
         if (output.getNewCoveredPoints() == null) {
             output.setNewCoveredPoints(List.of());
-        }
-        if (output.getNewCandidatePointsByDomain() == null) {
-            output.setNewCandidatePointsByDomain(List.of());
         }
         if (output.getRetrievalPlans() == null) {
             output.setRetrievalPlans(List.of());

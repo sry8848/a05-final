@@ -4,13 +4,12 @@ import com.a05.aiinterview.common.ApiResponse;
 import com.a05.aiinterview.interview.dto.InterviewQuestionReviewDto;
 import com.a05.aiinterview.interview.engine.AnswerSubmitService;
 import com.a05.aiinterview.interview.service.InterviewHistoryService;
-import com.a05.aiinterview.interview.service.InterviewHintService;
 import com.a05.aiinterview.interview.service.InterviewQuestionReviewService;
 import com.a05.aiinterview.interview.service.InterviewManagementService;
 import com.a05.aiinterview.interview.service.InterviewReportService;
-import com.a05.aiinterview.interview.service.InterviewSkipService;
 import com.a05.aiinterview.interview.service.InterviewService;
 import com.a05.aiinterview.interview.service.LearningRecommendationService;
+import com.a05.aiinterview.interview.service.QuestionRedoService;
 import com.a05.aiinterview.interview.service.QuestionStreamService;
 import org.junit.jupiter.api.Test;
 
@@ -21,31 +20,24 @@ import static org.mockito.Mockito.when;
 
 class InterviewControllerQuestionDetailTest {
 
+    private InterviewController newController(InterviewQuestionReviewService reviewService) {
+        return new InterviewController(
+                mock(InterviewService.class),
+                mock(InterviewHistoryService.class),
+                mock(AnswerSubmitService.class),
+                reviewService,
+                mock(InterviewReportService.class),
+                mock(InterviewManagementService.class),
+                mock(LearningRecommendationService.class),
+                mock(QuestionStreamService.class),
+                mock(QuestionRedoService.class)
+        );
+    }
+
     @Test
     void getQuestionReview_shouldReturnApiResponseOk() {
-        InterviewService interviewService = mock(InterviewService.class);
-        InterviewHistoryService historyService = mock(InterviewHistoryService.class);
-        AnswerSubmitService answerSubmitService = mock(AnswerSubmitService.class);
-        InterviewHintService hintService = mock(InterviewHintService.class);
-        InterviewSkipService skipService = mock(InterviewSkipService.class);
         InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
-        InterviewReportService reportService = mock(InterviewReportService.class);
-        InterviewManagementService managementService = mock(InterviewManagementService.class);
-        LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
-        QuestionStreamService streamService = mock(QuestionStreamService.class);
-
-        InterviewController controller = new InterviewController(
-                interviewService,
-                historyService,
-                answerSubmitService,
-                hintService,
-                skipService,
-                reviewService,
-                reportService,
-                managementService,
-                recommendationService,
-                streamService
-        );
+        InterviewController controller = newController(reviewService);
 
         InterviewQuestionReviewDto dto = new InterviewQuestionReviewDto();
         dto.setQuestionId(10L);
@@ -58,29 +50,8 @@ class InterviewControllerQuestionDetailTest {
 
     @Test
     void getQuestionReview_shouldPropagateBusinessException() {
-        InterviewService interviewService = mock(InterviewService.class);
-        InterviewHistoryService historyService = mock(InterviewHistoryService.class);
-        AnswerSubmitService answerSubmitService = mock(AnswerSubmitService.class);
-        InterviewHintService hintService = mock(InterviewHintService.class);
-        InterviewSkipService skipService = mock(InterviewSkipService.class);
         InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
-        InterviewReportService reportService = mock(InterviewReportService.class);
-        InterviewManagementService managementService = mock(InterviewManagementService.class);
-        LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
-        QuestionStreamService streamService = mock(QuestionStreamService.class);
-
-        InterviewController controller = new InterviewController(
-                interviewService,
-                historyService,
-                answerSubmitService,
-                hintService,
-                skipService,
-                reviewService,
-                reportService,
-                managementService,
-                recommendationService,
-                streamService
-        );
+        InterviewController controller = newController(reviewService);
 
         when(reviewService.getQuestionReview(1L, 10L, 9L))
                 .thenThrow(new IllegalArgumentException("无权访问该面试会话"));

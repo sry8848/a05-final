@@ -116,7 +116,6 @@ public class StateLedgerPatchService {
                 .interviewAction(evalOutput.getInterviewAction())
                 .newCoveredDomains(evalOutput.getNewCoveredDomains())
                 .newCoveredPoints(evalOutput.getNewCoveredPoints())
-                .newCandidatePointsByDomain(evalOutput.getNewCandidatePointsByDomain())
                 .build();
     }
 

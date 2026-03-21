@@ -4,6 +4,8 @@ import com.a05.aiinterview.ai.AiClient;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
 import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
+import com.a05.aiinterview.interview.dto.QuestionDto;
+import com.a05.aiinterview.interview.dto.QuestionDtoAssembler;
 import com.a05.aiinterview.interview.dto.SseDeltaEvent;
 import com.a05.aiinterview.interview.dto.SseDoneEvent;
 import com.a05.aiinterview.interview.dto.SseErrorEvent;
@@ -55,7 +57,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <pre>
  * event: start  开始事件，包含 generationId 和 sessionId
  * event: delta  每个 token 生成事件，id 为 chunk 索引，data 为文本片段
- * event: done   流式结束事件，包含 questionId
+ * event: done   流式结束事件，包含权威题目快照
  * event: error  错误事件
  * </pre>
  */
@@ -302,7 +304,7 @@ public class QuestionStreamService {
                     session.getId(), question.getId(), finalStem);
             waitForSegmentTasks(segmentTtsTasks, attemptId);
             ServerSentEvent<String> doneEvent = buildDoneEvent(
-                    attemptId, session.getId(), question.getId(), totalTokens, ttsReady);
+                    attemptId, session, question, totalTokens, ttsReady);
             cacheDonePayload(attemptId, doneEvent.data());
             redisTemplate.opsForValue().set(statusKey, STATUS_DONE, cacheTtlSeconds, TimeUnit.SECONDS);
         } catch (Exception e) {
@@ -340,8 +342,9 @@ public class QuestionStreamService {
             String attemptId,
             String statusKey) {
         ResolvedDomain resolvedDomain = resolveRelatedDomain(session, plan.getNextFocus());
+        String questionType = firstNonBlank(plan.getNextQuestionType(), "PRINCIPLE");
         String fallbackStem = buildFallbackQuestionStem(
-                mapQuestionTypeForStorage(plan.getNextQuestionType()),
+                questionType,
                 resolvedDomain.domainName(),
                 firstNonBlank(plan.getNextFocus(), resolvedDomain.domainName(), "核心技术能力"),
                 session.getTargetRole());
@@ -354,7 +357,7 @@ public class QuestionStreamService {
         redisTemplate.opsForValue().set(questionIdKey, String.valueOf(question.getId()),
                 cacheTtlSeconds, TimeUnit.SECONDS);
         boolean ttsReady = ttsService.triggerQuestionAudioAsync(session.getId(), question.getId(), fallbackStem);
-        ServerSentEvent<String> doneEvent = buildDoneEvent(attemptId, session.getId(), question.getId(), 1, ttsReady);
+        ServerSentEvent<String> doneEvent = buildDoneEvent(attemptId, session, question, 1, ttsReady);
         cacheDonePayload(attemptId, doneEvent.data());
         redisTemplate.opsForValue().set(statusKey, STATUS_DONE, cacheTtlSeconds, TimeUnit.SECONDS);
         log.warn("AI 出题失败，已降级为程序兜底题, sessionId={}, attemptId={}, questionId={}",
@@ -506,7 +509,9 @@ public class QuestionStreamService {
         }
         String chunksKey = String.format(KEY_CHUNKS, attemptId);
         Long chunkCount = redisTemplate.opsForList().size(chunksKey);
-        return buildDoneEvent(attemptId, null, questionId, chunkCount != null ? chunkCount.intValue() : 0, false);
+        InterviewQuestion question = questionId != null ? interviewQuestionMapper.selectById(questionId) : null;
+        InterviewSession session = question != null ? interviewSessionMapper.selectById(question.getSessionId()) : null;
+        return buildDoneEvent(attemptId, session, question, questionId, chunkCount != null ? chunkCount.intValue() : 0, false);
     }
 
     private ServerSentEvent<String> buildErrorEventFromCache(String attemptId) {
@@ -627,7 +632,7 @@ public class QuestionStreamService {
                         .lastAnswerHighlights(List.of())
                         .build())
                 .nextQuestionGoal(QuestionGenerationInput.NextQuestionGoal.builder()
-                        .questionType(mapQuestionTypeForStorage(plan.getNextQuestionType()))
+                        .questionType(firstNonBlank(plan.getNextQuestionType(), "PRINCIPLE"))
                         .nextFocus(plan.getNextFocus())
                         .goalSummary("围绕「" + firstNonBlank(plan.getNextFocus(), "当前主题") + "」继续形成判断。")
                         .relatedDomainId(resolvedDomain.domainId)
@@ -660,7 +665,7 @@ public class QuestionStreamService {
                 ? session.getCurrentQuestionNo() : 0) + 1;
         ResolvedDomain resolvedDomain = resolveRelatedDomain(session, plan.getNextFocus());
         ResolvedItem resolvedItem = resolveActiveItem(session);
-        String questionType = mapQuestionTypeForStorage(plan.getNextQuestionType());
+        String questionType = firstNonBlank(plan.getNextQuestionType(), "PRINCIPLE");
 
         InterviewQuestion question = new InterviewQuestion();
         question.setSessionId(session.getId());
@@ -674,6 +679,7 @@ public class QuestionStreamService {
 
         Map<String, Object> ctx = new LinkedHashMap<>();
         ctx.put("domainCode", resolvedDomain.domainCode);
+        ctx.put("domainName", resolvedDomain.domainName);
         ctx.put("questionType", questionType);
         ctx.put("focusPoint", plan.getNextFocus());
         ctx.put("targetSkill", question.getTargetSkill());
@@ -769,15 +775,25 @@ public class QuestionStreamService {
     }
 
     private ServerSentEvent<String> buildDoneEvent(
-            String attemptId, Long sessionId, Long questionId, int totalTokens, boolean ttsReady) {
+            String attemptId, InterviewSession session, InterviewQuestion question, int totalTokens, boolean ttsReady) {
+        Long questionId = question != null ? question.getId() : null;
+        return buildDoneEvent(attemptId, session, question, questionId, totalTokens, ttsReady);
+    }
+
+    private ServerSentEvent<String> buildDoneEvent(
+            String attemptId, InterviewSession session, InterviewQuestion question, Long fallbackQuestionId, int totalTokens, boolean ttsReady) {
+        Long sessionId = session != null ? session.getId() : null;
+        Long questionId = question != null ? question.getId() : fallbackQuestionId;
         String audioStatusUrl = (ttsReady && sessionId != null && questionId != null)
                 ? String.format("/api/v1/interviews/%d/questions/%d/audio", sessionId, questionId)
                 : null;
+        QuestionDto questionDto = question != null ? QuestionDtoAssembler.fromQuestion(question, session) : null;
         return ServerSentEvent.<String>builder()
                 .event("done")
                 .data(toJson(SseDoneEvent.builder()
                         .generationId(attemptId)
                         .questionId(questionId)
+                        .question(questionDto)
                         .totalTokens(totalTokens)
                         .ttsReady(ttsReady)
                         .audioStatusUrl(audioStatusUrl)
@@ -1082,15 +1098,11 @@ public class QuestionStreamService {
             return new ResolvedDomain(null, "", "");
         }
         String normalizedFocus = nextFocus == null ? "" : nextFocus.trim().toLowerCase(Locale.ROOT);
-        Map<String, Object> fallback = null;
         for (Object domainObj : domains) {
             if (!(domainObj instanceof Map<?, ?> domain)) {
                 continue;
             }
             Map<String, Object> copied = new LinkedHashMap<>((Map<String, Object>) domain);
-            if (fallback == null) {
-                fallback = copied;
-            }
             String domainName = toStr(copied.get("domainName"));
             if (domainName != null && !normalizedFocus.isBlank()
                     && normalizedFocus.contains(domainName.toLowerCase(Locale.ROOT))) {
@@ -1107,10 +1119,7 @@ public class QuestionStreamService {
                 }
             }
         }
-        if (fallback == null) {
-            return new ResolvedDomain(null, "", "");
-        }
-        return new ResolvedDomain(toLong(fallback.get("domainId")), toStr(fallback.get("domainCode")), toStr(fallback.get("domainName")));
+        return new ResolvedDomain(null, "", "");
     }
 
     private ResolvedItem resolveActiveItem(InterviewSession session) {
@@ -1122,18 +1131,6 @@ public class QuestionStreamService {
 
     private String buildQuestionFamilyId(String questionType, String focusPoint) {
         return firstNonBlank(questionType, "UNKNOWN") + "." + firstNonBlank(focusPoint, "focus");
-    }
-
-    private String mapQuestionTypeForStorage(String nextQuestionType) {
-        if (nextQuestionType == null || nextQuestionType.isBlank()) {
-            return "PRINCIPLE";
-        }
-        return switch (nextQuestionType.trim().toUpperCase(Locale.ROOT)) {
-            case "PROJECT" -> "PROJECT_DEEP_DIVE";
-            case "SCENARIO" -> "SCENARIO";
-            case "SOFT_SKILL" -> "BEHAVIORAL";
-            default -> "PRINCIPLE";
-        };
     }
 
     @lombok.Data

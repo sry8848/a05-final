@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.a05.aiinterview.interview.mapper.QuestionRedoAttemptMapper">
+
+    <resultMap id="QuestionRedoAttemptResultMap" type="com.a05.aiinterview.interview.entity.QuestionRedoAttempt">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="source_session_id" property="sourceSessionId"/>
+        <result column="source_question_id" property="sourceQuestionId"/>
+        <result column="source_snapshot_json"
+                property="sourceSnapshotJson"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="answer_text" property="answerText"/>
+        <result column="evaluation_status" property="evaluationStatus"/>
+        <result column="evaluation_json"
+                property="evaluationJson"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="selectLatestBySource" resultMap="QuestionRedoAttemptResultMap">
+        SELECT *
+        FROM question_redo_attempts
+        WHERE user_id = #{userId}
+          AND source_session_id = #{sourceSessionId}
+          AND source_question_id = #{sourceQuestionId}
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+    </select>
+</mapper>

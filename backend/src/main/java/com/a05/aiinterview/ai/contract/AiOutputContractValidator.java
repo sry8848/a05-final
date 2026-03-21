@@ -22,7 +22,11 @@ import java.util.Locale;
 public class AiOutputContractValidator {
 
     private static final List<String> ALLOWED_INTERVIEW_ACTIONS = List.of("CONTINUE", "WRAPUP");
-    private static final List<String> ALLOWED_NEXT_QUESTION_TYPES = List.of("THEORY", "PROJECT", "SCENARIO", "SOFT_SKILL");
+    private static final List<String> ALLOWED_NEXT_QUESTION_TYPES = List.of(
+            "PRINCIPLE",
+            "PROJECT_DEEP_DIVE",
+            "SCENARIO",
+            "BEHAVIORAL");
     private static final String DEFAULT_PLANNING_REASONING = "按岗位、简历与真实经历规划本次考纲。";
 
     private final ObjectMapper objectMapper;
@@ -91,10 +95,8 @@ public class AiOutputContractValidator {
         output.setNextQuestionType(normalizeNextQuestionType(output.getNextQuestionType()));
         output.setNextFocus(defaultString(output.getNextFocus(), ""));
         output.setExpectedAnswerPoints(sanitizeStringList(output.getExpectedAnswerPoints()));
-        output.setPossibleNextMoves(sanitizeStringList(output.getPossibleNextMoves()));
         output.setNewCoveredDomains(sanitizeCoveredDomains(output.getNewCoveredDomains()));
         output.setNewCoveredPoints(sanitizeStringList(output.getNewCoveredPoints()));
-        output.setNewCandidatePointsByDomain(sanitizeCandidatePoints(output.getNewCandidatePointsByDomain()));
         output.setRetrievalPlans(sanitizeRetrievalPlans(output.getRetrievalPlans()));
 
         String normalizedInterviewAction = normalizeInterviewAction(output.getInterviewAction());
@@ -124,7 +126,6 @@ public class AiOutputContractValidator {
             output.setNextQuestionType("");
             output.setNextFocus("");
             output.setExpectedAnswerPoints(new ArrayList<>());
-            output.setPossibleNextMoves(new ArrayList<>());
             output.setRetrievalPlans(new ArrayList<>());
             return output;
         }
@@ -139,9 +140,6 @@ public class AiOutputContractValidator {
         }
         if (output.getExpectedAnswerPoints() == null) {
             output.setExpectedAnswerPoints(new ArrayList<>());
-        }
-        if (output.getPossibleNextMoves() == null) {
-            output.setPossibleNextMoves(new ArrayList<>());
         }
         return output;
     }
@@ -214,10 +212,8 @@ public class AiOutputContractValidator {
                 .nextQuestionType("")
                 .nextFocus("")
                 .expectedAnswerPoints(new ArrayList<>())
-                .possibleNextMoves(new ArrayList<>())
                 .newCoveredDomains(new ArrayList<>())
                 .newCoveredPoints(new ArrayList<>())
-                .newCandidatePointsByDomain(new ArrayList<>())
                 .retrievalPlans(new ArrayList<>())
                 .build();
     }
@@ -255,21 +251,6 @@ public class AiOutputContractValidator {
                 .map(item -> EvaluationDecisionOutput.CoveredDomain.builder()
                         .domainId(item.getDomainId())
                         .domainName(item.getDomainName().trim())
-                        .build())
-                .toList();
-    }
-
-    private List<EvaluationDecisionOutput.CandidatePointsByDomain> sanitizeCandidatePoints(
-            List<EvaluationDecisionOutput.CandidatePointsByDomain> values) {
-        if (values == null) {
-            return new ArrayList<>();
-        }
-        return values.stream()
-                .filter(item -> item != null && item.getDomainId() != null && !isBlank(item.getDomainName()))
-                .map(item -> EvaluationDecisionOutput.CandidatePointsByDomain.builder()
-                        .domainId(item.getDomainId())
-                        .domainName(item.getDomainName().trim())
-                        .points(sanitizeStringList(item.getPoints()))
                         .build())
                 .toList();
     }
@@ -313,7 +294,6 @@ public class AiOutputContractValidator {
         boolean hasNoNextPlan = isBlank(output.getNextQuestionType())
                 && isBlank(output.getNextFocus())
                 && (output.getExpectedAnswerPoints() == null || output.getExpectedAnswerPoints().isEmpty())
-                && (output.getPossibleNextMoves() == null || output.getPossibleNextMoves().isEmpty())
                 && (output.getRetrievalPlans() == null || output.getRetrievalPlans().isEmpty());
         if (hasNoNextPlan) {
             return "WRAPUP";

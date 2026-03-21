@@ -40,7 +40,7 @@ class StateLedgerPatchServiceUpdatedLedgerTest {
     }
 
     @Test
-    void reduce_shouldMergeCoveredDomainsCoveredPointsAndCandidatePoints() {
+    void reduce_shouldMergeCoveredDomainsAndCoveredPoints() {
         Map<String, Object> oldLedger = baseLedger();
 
         LedgerMutation mutation = LedgerMutation.builder()
@@ -56,25 +56,12 @@ class StateLedgerPatchServiceUpdatedLedgerTest {
                                 .build()
                 ))
                 .newCoveredPoints(List.of("Redis / 缓存击穿基础方案"))
-                .newCandidatePointsByDomain(List.of(
-                        EvaluationDecisionOutput.CandidatePointsByDomain.builder()
-                                .domainId(6L)
-                                .domainName("Redis")
-                                .points(List.of("热点 key", "缓存雪崩"))
-                                .build()
-                ))
                 .build();
 
         Map<String, Object> newLedger = reducer.reduce(oldLedger, mutation, "attempt-redis-1", 22L);
 
         assertThat(newLedger.get("covered_domains")).isEqualTo(List.of("Redis"));
         assertThat(newLedger.get("covered_points")).isEqualTo(List.of("Redis / 缓存击穿基础方案"));
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> candidatePoints = (List<Map<String, Object>>) newLedger.get("candidate_points_by_domain");
-        assertThat(candidatePoints).hasSize(1);
-        assertThat(candidatePoints.getFirst()).containsEntry("domainId", 6L);
-        assertThat(candidatePoints.getFirst()).containsEntry("domainName", "Redis");
-        assertThat(candidatePoints.getFirst().get("points")).isEqualTo(List.of("热点 key", "缓存雪崩"));
 
         @SuppressWarnings("unchecked")
         Map<String, Object> redisState = (Map<String, Object>) ((List<?>) newLedger.get("domain_states")).getFirst();
@@ -115,7 +102,6 @@ class StateLedgerPatchServiceUpdatedLedgerTest {
         ledger.put("current_focus", null);
         ledger.put("covered_domains", List.of());
         ledger.put("covered_points", List.of());
-        ledger.put("candidate_points_by_domain", List.of());
         ledger.put("recent_question_families", List.of());
         ledger.put("domain_states", List.of(
                 new LinkedHashMap<>(Map.of(

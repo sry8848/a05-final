@@ -160,22 +160,6 @@ export function submitInterviewAttempt(sessionId, payload) {
   })
 }
 
-/** Get hint for current question */
-export function getInterviewHint(sessionId, questionId) {
-  return request('/interviews/' + sessionId + '/hint', {
-    method: 'POST',
-    body: { questionId }
-  })
-}
-
-/** Skip current question and continue by SSE */
-export function skipInterviewQuestion(sessionId, questionId, attemptId) {
-  return request('/interviews/' + sessionId + '/questions/' + questionId + '/skip-and-next', {
-    method: 'POST',
-    body: { attemptId }
-  })
-}
-
 /** Finish interview session */
 export function finishInterviewSession(sessionId) {
   return request('/interviews/' + sessionId + '/finish', { method: 'POST' })
@@ -194,6 +178,21 @@ export function deleteInterviewSession(sessionId) {
 /** Get interview question detail */
 export function getInterviewQuestionDetail(sessionId, questionId) {
   return request('/interviews/' + sessionId + '/questions/' + questionId, { method: 'GET' })
+}
+
+/** Create a question redo attempt */
+export function createQuestionRedoAttempt(sessionId, questionId, payload) {
+  return request('/interviews/' + sessionId + '/questions/' + questionId + '/redo-attempts', {
+    method: 'POST',
+    body: payload
+  })
+}
+
+/** Get latest question redo attempt */
+export function getLatestQuestionRedoAttempt(sessionId, questionId) {
+  return request('/interviews/' + sessionId + '/questions/' + questionId + '/redo-attempts/latest', {
+    method: 'GET'
+  })
 }
 
 /** Get learning recommendations for interview report */

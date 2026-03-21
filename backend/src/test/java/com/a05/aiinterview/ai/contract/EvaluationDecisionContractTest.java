@@ -29,15 +29,11 @@ class EvaluationDecisionContractTest {
                   "decisionReason": "继续追问仍有信息增益。",
                   "candidateStrategies": ["继续围绕当前知识点追问", "切换到项目案例验证"],
                   "finalDecision": "继续围绕当前知识点追问",
-                  "nextQuestionType": "THEORY",
+                  "nextQuestionType": "PRINCIPLE",
                   "nextFocus": "缓存击穿在高并发场景下的取舍",
                   "expectedAnswerPoints": ["互斥锁", "逻辑过期", "热点 key 隔离"],
-                  "possibleNextMoves": ["继续理论追问", "切到项目案例"],
                   "newCoveredDomains": [{"domainId": 6, "domainName": "Redis"}],
                   "newCoveredPoints": ["Redis / 缓存击穿基础方案"],
-                  "newCandidatePointsByDomain": [
-                    {"domainId": 6, "domainName": "Redis", "points": ["缓存雪崩", "热点 key"]}
-                  ],
                   "retrievalPlans": [
                     {
                       "retrievalNeed": true,
@@ -55,7 +51,7 @@ class EvaluationDecisionContractTest {
         EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
 
         assertThat(output.getInterviewAction()).isEqualTo("CONTINUE");
-        assertThat(output.getNextQuestionType()).isEqualTo("THEORY");
+        assertThat(output.getNextQuestionType()).isEqualTo("PRINCIPLE");
         assertThat(output.getNextFocus()).isEqualTo("缓存击穿在高并发场景下的取舍");
         assertThat(output.getExpectedAnswerPoints()).containsExactly("互斥锁", "逻辑过期", "热点 key 隔离");
         assertThat(output.getCandidateStrategies()).containsExactly("继续围绕当前知识点追问", "切换到项目案例验证");
@@ -76,13 +72,11 @@ class EvaluationDecisionContractTest {
                   "decisionReason": "继续追问收益很低。",
                   "candidateStrategies": ["结束面试"],
                   "finalDecision": "结束面试",
-                  "nextQuestionType": "PROJECT",
+                  "nextQuestionType": "PROJECT_DEEP_DIVE",
                   "nextFocus": "订单超时关闭",
                   "expectedAnswerPoints": ["任务调度"],
-                  "possibleNextMoves": ["继续追问"],
                   "newCoveredDomains": [],
                   "newCoveredPoints": [],
-                  "newCandidatePointsByDomain": [],
                   "retrievalPlans": [
                     {
                       "retrievalNeed": true,
@@ -103,7 +97,6 @@ class EvaluationDecisionContractTest {
         assertThat(output.getNextQuestionType()).isEmpty();
         assertThat(output.getNextFocus()).isEmpty();
         assertThat(output.getExpectedAnswerPoints()).isEmpty();
-        assertThat(output.getPossibleNextMoves()).isEmpty();
         assertThat(output.getRetrievalPlans()).isEmpty();
     }
 
@@ -121,10 +114,8 @@ class EvaluationDecisionContractTest {
                   "nextQuestionType": "INTRO",
                   "nextFocus": "自我介绍补充",
                   "expectedAnswerPoints": [],
-                  "possibleNextMoves": [],
                   "newCoveredDomains": [],
                   "newCoveredPoints": [],
-                  "newCandidatePointsByDomain": [],
                   "retrievalPlans": []
                 }
                 """);
@@ -143,13 +134,11 @@ class EvaluationDecisionContractTest {
                   "answerSummary": "只给了摘要",
                   "candidateStrategies": ["继续提问"],
                   "finalDecision": "继续提问",
-                  "nextQuestionType": "THEORY",
+                  "nextQuestionType": "PRINCIPLE",
                   "nextFocus": "集合框架",
                   "expectedAnswerPoints": [],
-                  "possibleNextMoves": [],
                   "newCoveredDomains": [],
                   "newCoveredPoints": [],
-                  "newCandidatePointsByDomain": [],
                   "retrievalPlans": []
                 }
                 """);
@@ -171,19 +160,17 @@ class EvaluationDecisionContractTest {
                   "decisionReason": "应继续追问项目真实性。",
                   "candidateStrategies": ["PROJECT: 引导还原", "PROJECT: 责任定位"],
                   "finalDecision": "PROJECT: 引导还原",
-                  "nextQuestionType": "PROJECT",
+                  "nextQuestionType": "PROJECT_DEEP_DIVE",
                   "nextFocus": "Redisson 分布式锁在秒杀里的具体实现",
                   "expectedAnswerPoints": ["锁 key 设计", "异常释放", "压测验证"],
-                  "possibleNextMoves": ["继续项目追问"],
                   "newCoveredDomains": [],
                   "newCoveredPoints": [],
-                  "newCandidatePointsByDomain": [],
                   "retrievalPlans": []
                 }
                 """);
 
         assertThat(output.getInterviewAction()).isEqualTo("CONTINUE");
-        assertThat(output.getNextQuestionType()).isEqualTo("PROJECT");
+        assertThat(output.getNextQuestionType()).isEqualTo("PROJECT_DEEP_DIVE");
         assertThat(output.getNextFocus()).isEqualTo("Redisson 分布式锁在秒杀里的具体实现");
         assertThat(output.getExpectedAnswerPoints()).containsExactly("锁 key 设计", "异常释放", "压测验证");
     }

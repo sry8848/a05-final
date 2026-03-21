@@ -4,8 +4,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
-import java.util.List;
-
 /**
  * Request payload for creating an interview session.
  */
@@ -42,20 +40,4 @@ public class CreateInterviewRequest {
 
     @Schema(description = "Answer time limit in seconds", example = "180")
     private Integer answerTimeLimitSeconds;
-
-    @Schema(description = "Single-question mode max questions override (optional)", example = "1")
-    private Integer maxQuestions;
-
-    @Schema(description = "Single-question mode seed question stem (optional)")
-    private String singleQuestionStem;
-
-    @Schema(description = "Single-question mode question type (optional)", example = "PRINCIPLE")
-    private String singleQuestionType;
-
-    @Schema(description = "Single-question mode domain name (optional)", example = "前端基础")
-    private String singleQuestionDomainName;
-
-    @Schema(description = "Single-question mode expected key points (optional)")
-    private List<String> singleQuestionExpectedPoints;
-
 }

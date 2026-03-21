@@ -26,7 +26,6 @@ public class StateLedgerDiffService {
         copyIfChanged(diff, "current_focus", oldLedger, newLedger);
         copyIfChanged(diff, "covered_domains", oldLedger, newLedger);
         copyIfChanged(diff, "covered_points", oldLedger, newLedger);
-        copyIfChanged(diff, "candidate_points_by_domain", oldLedger, newLedger);
         copyIfChanged(diff, "recent_question_families", oldLedger, newLedger);
 
         List<Map<String, Object>> beforeStates = extractDomainStates(oldLedger.get("domain_states"));

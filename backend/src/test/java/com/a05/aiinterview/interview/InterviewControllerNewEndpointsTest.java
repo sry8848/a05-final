@@ -1,54 +1,49 @@
 package com.a05.aiinterview.interview;
 
 import com.a05.aiinterview.common.ApiResponse;
-import com.a05.aiinterview.interview.dto.InterviewHintRequest;
-import com.a05.aiinterview.interview.dto.InterviewHintResponse;
 import com.a05.aiinterview.interview.dto.InterviewHistoryPageDto;
-import com.a05.aiinterview.interview.dto.SkipAndNextRequest;
-import com.a05.aiinterview.interview.dto.SubmitAttemptResponse;
+import com.a05.aiinterview.interview.dto.QuestionRedoAttemptDto;
+import com.a05.aiinterview.interview.dto.QuestionRedoAttemptRequest;
 import com.a05.aiinterview.interview.engine.AnswerSubmitService;
-import com.a05.aiinterview.interview.service.InterviewHintService;
 import com.a05.aiinterview.interview.service.InterviewHistoryService;
 import com.a05.aiinterview.interview.service.InterviewManagementService;
 import com.a05.aiinterview.interview.service.InterviewQuestionReviewService;
 import com.a05.aiinterview.interview.service.InterviewReportService;
 import com.a05.aiinterview.interview.service.InterviewService;
-import com.a05.aiinterview.interview.service.InterviewSkipService;
 import com.a05.aiinterview.interview.service.LearningRecommendationService;
+import com.a05.aiinterview.interview.service.QuestionRedoService;
 import com.a05.aiinterview.interview.service.QuestionStreamService;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class InterviewControllerNewEndpointsTest {
 
+    private InterviewController newController(InterviewHistoryService historyService,
+                                             InterviewManagementService managementService,
+                                             QuestionRedoService questionRedoService) {
+        return new InterviewController(
+                mock(InterviewService.class),
+                historyService,
+                mock(AnswerSubmitService.class),
+                mock(InterviewQuestionReviewService.class),
+                mock(InterviewReportService.class),
+                managementService,
+                mock(LearningRecommendationService.class),
+                mock(QuestionStreamService.class),
+                questionRedoService
+        );
+    }
+
     @Test
     void getInterviews_shouldReturnApiResponse() {
-        InterviewService interviewService = mock(InterviewService.class);
         InterviewHistoryService historyService = mock(InterviewHistoryService.class);
-        AnswerSubmitService answerSubmitService = mock(AnswerSubmitService.class);
-        InterviewHintService hintService = mock(InterviewHintService.class);
-        InterviewSkipService skipService = mock(InterviewSkipService.class);
-        InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
-        InterviewReportService reportService = mock(InterviewReportService.class);
-        InterviewManagementService managementService = mock(InterviewManagementService.class);
-        LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
-        QuestionStreamService streamService = mock(QuestionStreamService.class);
-
-        InterviewController controller = new InterviewController(
-                interviewService,
+        InterviewController controller = newController(
                 historyService,
-                answerSubmitService,
-                hintService,
-                skipService,
-                reviewService,
-                reportService,
-                managementService,
-                recommendationService,
-                streamService
+                mock(InterviewManagementService.class),
+                mock(QuestionRedoService.class)
         );
 
         InterviewHistoryPageDto page = new InterviewHistoryPageDto();
@@ -63,107 +58,60 @@ class InterviewControllerNewEndpointsTest {
     }
 
     @Test
-    void getHint_shouldPropagateBusinessException() {
-        InterviewService interviewService = mock(InterviewService.class);
-        InterviewHistoryService historyService = mock(InterviewHistoryService.class);
-        AnswerSubmitService answerSubmitService = mock(AnswerSubmitService.class);
-        InterviewHintService hintService = mock(InterviewHintService.class);
-        InterviewSkipService skipService = mock(InterviewSkipService.class);
-        InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
-        InterviewReportService reportService = mock(InterviewReportService.class);
-        InterviewManagementService managementService = mock(InterviewManagementService.class);
-        LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
-        QuestionStreamService streamService = mock(QuestionStreamService.class);
-
-        InterviewController controller = new InterviewController(
-                interviewService,
-                historyService,
-                answerSubmitService,
-                hintService,
-                skipService,
-                reviewService,
-                reportService,
-                managementService,
-                recommendationService,
-                streamService
-        );
-
-        InterviewHintRequest req = new InterviewHintRequest();
-        req.setQuestionId(20L);
-        when(hintService.getHint(1L, 20L, 9L)).thenThrow(new IllegalArgumentException("题目不存在"));
-
-        assertThrows(IllegalArgumentException.class, () -> controller.getHint(9L, 1L, req));
-    }
-
-    @Test
-    void skipAndNext_shouldReturnWrappedResponse() {
-        InterviewService interviewService = mock(InterviewService.class);
-        InterviewHistoryService historyService = mock(InterviewHistoryService.class);
-        AnswerSubmitService answerSubmitService = mock(AnswerSubmitService.class);
-        InterviewHintService hintService = mock(InterviewHintService.class);
-        InterviewSkipService skipService = mock(InterviewSkipService.class);
-        InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
-        InterviewReportService reportService = mock(InterviewReportService.class);
-        InterviewManagementService managementService = mock(InterviewManagementService.class);
-        LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
-        QuestionStreamService streamService = mock(QuestionStreamService.class);
-
-        InterviewController controller = new InterviewController(
-                interviewService,
-                historyService,
-                answerSubmitService,
-                hintService,
-                skipService,
-                reviewService,
-                reportService,
-                managementService,
-                recommendationService,
-                streamService
-        );
-
-        SkipAndNextRequest req = new SkipAndNextRequest();
-        req.setAttemptId("a-1");
-        SubmitAttemptResponse skipResp = SubmitAttemptResponse.builder()
-                .attemptId("a-1")
-                .decision("continue")
-                .streamAttemptId("a-1")
-                .sessionStatus("in_progress")
-                .build();
-        when(skipService.skipAndNext(1L, 2L, 9L, req)).thenReturn(skipResp);
-
-        ApiResponse<SubmitAttemptResponse> response = controller.skipAndNext(9L, 1L, 2L, req);
-        assertEquals(0, response.getCode());
-        assertEquals("continue", response.getData().getDecision());
-    }
-
-    @Test
     void deleteInterview_shouldReturnWrappedResponse() {
-        InterviewService interviewService = mock(InterviewService.class);
-        InterviewHistoryService historyService = mock(InterviewHistoryService.class);
-        AnswerSubmitService answerSubmitService = mock(AnswerSubmitService.class);
-        InterviewHintService hintService = mock(InterviewHintService.class);
-        InterviewSkipService skipService = mock(InterviewSkipService.class);
-        InterviewQuestionReviewService reviewService = mock(InterviewQuestionReviewService.class);
-        InterviewReportService reportService = mock(InterviewReportService.class);
         InterviewManagementService managementService = mock(InterviewManagementService.class);
-        LearningRecommendationService recommendationService = mock(LearningRecommendationService.class);
-        QuestionStreamService streamService = mock(QuestionStreamService.class);
-
-        InterviewController controller = new InterviewController(
-                interviewService,
-                historyService,
-                answerSubmitService,
-                hintService,
-                skipService,
-                reviewService,
-                reportService,
+        InterviewController controller = newController(
+                mock(InterviewHistoryService.class),
                 managementService,
-                recommendationService,
-                streamService
+                mock(QuestionRedoService.class)
         );
 
         ApiResponse<Void> response = controller.deleteInterview(9L, 101L);
 
         assertEquals(0, response.getCode());
+    }
+
+    @Test
+    void createQuestionRedoAttempt_shouldReturnWrappedResponse() {
+        QuestionRedoService questionRedoService = mock(QuestionRedoService.class);
+        InterviewController controller = newController(
+                mock(InterviewHistoryService.class),
+                mock(InterviewManagementService.class),
+                questionRedoService
+        );
+
+        QuestionRedoAttemptRequest request = new QuestionRedoAttemptRequest();
+        request.setAnswerText("这是重答内容");
+        QuestionRedoAttemptDto dto = new QuestionRedoAttemptDto();
+        dto.setRedoAttemptId(7001L);
+        dto.setEvaluationStatus("pending");
+        when(questionRedoService.createRedoAttempt(1L, 2L, 9L, request)).thenReturn(dto);
+
+        ApiResponse<QuestionRedoAttemptDto> response = controller.createQuestionRedoAttempt(9L, 1L, 2L, request);
+
+        assertEquals(0, response.getCode());
+        assertEquals(7001L, response.getData().getRedoAttemptId());
+        assertEquals("pending", response.getData().getEvaluationStatus());
+    }
+
+    @Test
+    void getLatestQuestionRedoAttempt_shouldReturnWrappedResponse() {
+        QuestionRedoService questionRedoService = mock(QuestionRedoService.class);
+        InterviewController controller = newController(
+                mock(InterviewHistoryService.class),
+                mock(InterviewManagementService.class),
+                questionRedoService
+        );
+
+        QuestionRedoAttemptDto dto = new QuestionRedoAttemptDto();
+        dto.setRedoAttemptId(7002L);
+        dto.setEvaluationStatus("ready");
+        when(questionRedoService.getLatestRedoAttempt(1L, 2L, 9L)).thenReturn(dto);
+
+        ApiResponse<QuestionRedoAttemptDto> response = controller.getLatestQuestionRedoAttempt(9L, 1L, 2L);
+
+        assertEquals(0, response.getCode());
+        assertEquals(7002L, response.getData().getRedoAttemptId());
+        assertEquals("ready", response.getData().getEvaluationStatus());
     }
 }

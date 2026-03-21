@@ -115,7 +115,25 @@ CREATE TABLE IF NOT EXISTS interview_attempts (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='候选人回答尝试表（幂等键为 attempt_id）';
 
 -- ============================================================
--- 6. 面试报告表：面试结束后异步生成，每场会话一条记录
+-- 6. 单题重答表：围绕原题快照提交独立重答，不污染整场面试会话
+-- ============================================================
+CREATE TABLE IF NOT EXISTS question_redo_attempts (
+    id                  BIGINT       AUTO_INCREMENT PRIMARY KEY,
+    user_id             BIGINT       NOT NULL         COMMENT '用户 ID',
+    source_session_id   BIGINT       NOT NULL         COMMENT '原会话 ID',
+    source_question_id  BIGINT       NOT NULL         COMMENT '原题目 ID',
+    source_snapshot_json JSON        NULL             COMMENT '冻结原题快照',
+    answer_text         LONGTEXT     NULL             COMMENT '重答内容',
+    evaluation_status   VARCHAR(32)  NOT NULL DEFAULT 'pending' COMMENT '单题重答评估状态：pending/generating/ready/failed',
+    evaluation_json     JSON         NULL             COMMENT '单题重答评估结构化结果',
+    created_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_qra_user_source (user_id, source_session_id, source_question_id),
+    INDEX idx_qra_source_question (source_question_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='单题重答记录表';
+
+-- ============================================================
+-- 7. 面试报告表：面试结束后异步生成，每场会话一条记录
 -- ============================================================
 CREATE TABLE IF NOT EXISTS interview_reports (
     id                          BIGINT         AUTO_INCREMENT PRIMARY KEY,
@@ -135,7 +153,7 @@ CREATE TABLE IF NOT EXISTS interview_reports (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试报告表（每场会话一条）';
 
 -- ============================================================
--- 7. AI 调用审计日志表：记录每次大模型调用的元数据
+-- 8. AI 调用审计日志表：记录每次大模型调用的元数据
 -- ============================================================
 CREATE TABLE IF NOT EXISTS ai_invocation_logs (
     id                      BIGINT       AUTO_INCREMENT PRIMARY KEY,

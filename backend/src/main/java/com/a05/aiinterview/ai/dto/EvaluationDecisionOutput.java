@@ -24,14 +24,12 @@ public class EvaluationDecisionOutput {
     private String decisionReason;
     private List<String> candidateStrategies;
     private String finalDecision;
-    /** THEORY / PROJECT / SCENARIO / SOFT_SKILL */
+    /** PRINCIPLE / PROJECT_DEEP_DIVE / SCENARIO / BEHAVIORAL */
     private String nextQuestionType;
     private String nextFocus;
     private List<String> expectedAnswerPoints;
-    private List<String> possibleNextMoves;
     private List<CoveredDomain> newCoveredDomains;
     private List<String> newCoveredPoints;
-    private List<CandidatePointsByDomain> newCandidatePointsByDomain;
     private List<RetrievalPlan> retrievalPlans;
 
     @Data
@@ -41,16 +39,6 @@ public class EvaluationDecisionOutput {
     public static class CoveredDomain {
         private Long domainId;
         private String domainName;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class CandidatePointsByDomain {
-        private Long domainId;
-        private String domainName;
-        private List<String> points;
     }
 
     @Data

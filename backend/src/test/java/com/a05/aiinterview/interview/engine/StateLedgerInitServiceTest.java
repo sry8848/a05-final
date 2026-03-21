@@ -54,7 +54,6 @@ class StateLedgerInitServiceTest {
         assertThat(ledger.get("current_focus")).isNull();
         assertThat(ledger.get("covered_domains")).isEqualTo(List.of());
         assertThat(ledger.get("covered_points")).isEqualTo(List.of());
-        assertThat(ledger.get("candidate_points_by_domain")).isEqualTo(List.of());
         assertThat(ledger.get("recent_question_families")).isEqualTo(List.of());
         assertThat(ledger.get("domain_states")).isEqualTo(List.of(Map.of(
                 "domainId", 1L,

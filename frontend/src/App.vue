@@ -144,6 +144,8 @@ import {
   normalizeDisplayReportStatus,
   upsertReadyInterviewRecord
 } from './utils/growthHistoryState'
+import { mergeInterviewResultWithReport as mergeResultWithReport } from './utils/interviewResultState'
+import { withQuestionRedoState } from './utils/questionRedoState'
 
 export default {
   name: 'App',
@@ -294,113 +296,6 @@ export default {
       return 'answered'
     }
 
-    const buildResultAnswersFromReport = (reportQuestions = [], localAnswers = []) => {
-      const reportList = Array.isArray(reportQuestions) ? reportQuestions : []
-      const localList = Array.isArray(localAnswers) ? localAnswers : []
-      if (!reportList.length) return []
-
-      const localByQuestionId = new Map()
-      const localByQuestionNo = new Map()
-      const duplicatedQuestionNo = new Set()
-
-      localList.forEach((item) => {
-        if (!item || typeof item !== 'object') return
-        const localQuestionId = normalizeQuestionId(item.questionId)
-        if (localQuestionId && !localByQuestionId.has(localQuestionId)) {
-          localByQuestionId.set(localQuestionId, item)
-        }
-
-        // questionNo 仅作为 questionId 缺失时的降级匹配键，且要求唯一。
-        if (localQuestionId) return
-        const localQuestionNo = normalizeQuestionNo(item.questionNo)
-        if (localQuestionNo == null) return
-        const key = String(localQuestionNo)
-        if (duplicatedQuestionNo.has(key)) return
-        if (localByQuestionNo.has(key)) {
-          localByQuestionNo.delete(key)
-          duplicatedQuestionNo.add(key)
-          return
-        }
-        localByQuestionNo.set(key, item)
-      })
-
-      const normalized = []
-      reportList.forEach((raw) => {
-        if (!raw || typeof raw !== 'object') return
-        const reportQuestionId = normalizeQuestionId(raw.questionId)
-        const reportQuestionNo = normalizeQuestionNo(raw.questionNo)
-        if (!reportQuestionId && reportQuestionNo == null) return
-
-        let matchedLocal = null
-        if (reportQuestionId && localByQuestionId.has(reportQuestionId)) {
-          matchedLocal = localByQuestionId.get(reportQuestionId)
-        } else if (!reportQuestionId && reportQuestionNo != null) {
-          const key = String(reportQuestionNo)
-          matchedLocal = localByQuestionNo.get(key) || null
-        }
-
-        const status = hasOwn(raw, 'status')
-          ? normalizeQuestionStatus(raw.status)
-          : deriveLocalAnswerStatus(matchedLocal)
-        const score = hasOwn(raw, 'score') ? normalizeNullableScore(raw.score) : null
-        const questionStem = String(raw.questionStem ?? '').trim()
-
-        // 后端核心字段权威；本地仅补齐非核心字段。
-        const localNonCore = {}
-        if (matchedLocal && typeof matchedLocal === 'object') {
-          Object.keys(matchedLocal).forEach((key) => {
-            if (['questionId', 'questionNo', 'questionStem', 'question', 'status', 'score'].includes(key)) return
-            localNonCore[key] = matchedLocal[key]
-          })
-        }
-
-        normalized.push({
-          ...localNonCore,
-          questionId: reportQuestionId,
-          questionNo: reportQuestionNo,
-          questionStem,
-          question: questionStem,
-          status,
-          score,
-          commentary: hasOwn(raw, 'commentary') ? raw.commentary : null
-        })
-      })
-
-      return normalized
-    }
-
-    const mergeResultWithReport = (baseResult = {}, report = {}) => {
-      const merged = {
-        ...(baseResult || {})
-      }
-      const scoreNum = Number(report?.overallScore)
-      const score = Number.isFinite(scoreNum) ? Math.round(scoreNum) : (Number(merged.score) || 0)
-      const reportQuestions = Array.isArray(report?.questions) ? report.questions : []
-      const mergedAnswersFromReport = buildResultAnswersFromReport(reportQuestions, merged.answers)
-      const useReportQuestionSource = reportQuestions.length > 0 && mergedAnswersFromReport.length > 0
-      const totalQuestions = useReportQuestionSource
-        ? mergedAnswersFromReport.length
-        : (Number(merged.totalQuestions) || (Array.isArray(merged.answers) ? merged.answers.length : 0))
-      const correctCount = useReportQuestionSource
-        ? mergedAnswersFromReport.filter((item) => Number(item?.score) >= 60).length
-        : Number(merged.correctCount) || 0
-
-      merged.score = score
-      merged.correctCount = correctCount
-      merged.totalQuestions = totalQuestions
-      merged.feedback = report?.summary || merged.feedback || '报告已生成，请查看详细分析。'
-      merged.reportStatus = 'ready'
-      merged.report = report
-      if (useReportQuestionSource) {
-        merged.answers = mergedAnswersFromReport
-      }
-      merged.sessionId = normalizeSessionId(merged.sessionId) || normalizeSessionId(report?.sessionId)
-      if (!Number.isFinite(Number(merged.beatPercent)) && Number.isFinite(scoreNum)) {
-        merged.beatPercent = Math.min(Math.round(score * 0.9 + Math.random() * 8), 99)
-      }
-      return merged
-    }
-
     const applyReadyReportToRecord = (record, report) =>
       applyReadyReportToInterviewRecord(record, report)
 
@@ -536,64 +431,6 @@ export default {
       return index === 0 ? '开场题' : '综合题'
     }
 
-    const buildHighlightedSegments = (answerText = '', keywords = [], score = 0) => {
-      if (!answerText || answerText === '[跳过]') return []
-
-      const normalized = answerText.trim()
-      const lowerText = normalized.toLowerCase()
-      const matches = keywords
-        .map((keyword) => {
-          const start = lowerText.indexOf(String(keyword).toLowerCase())
-          return start >= 0 ? { keyword, start, end: start + keyword.length } : null
-        })
-        .filter(Boolean)
-        .sort((a, b) => a.start - b.start)
-        .filter((match, index, array) => {
-          if (index === 0) return true
-          return match.start >= array[index - 1].end
-        })
-
-      if (matches.length === 0) {
-        return [
-          {
-            text: normalized,
-            type: score >= 60 ? 'normal' : 'weakness',
-            note: score >= 60 ? '' : '可以补充更多关键概念和业务细节。'
-          }
-        ]
-      }
-
-      const segments = []
-      let cursor = 0
-
-      matches.forEach((match) => {
-        if (match.start > cursor) {
-          segments.push({
-            text: normalized.slice(cursor, match.start),
-            type: 'normal'
-          })
-        }
-
-        segments.push({
-          text: normalized.slice(match.start, match.end),
-          type: 'strength',
-          note: `命中了关键词「${match.keyword}」`
-        })
-
-        cursor = match.end
-      })
-
-      if (cursor < normalized.length) {
-        segments.push({
-          text: normalized.slice(cursor),
-          type: score < 60 ? 'weakness' : 'normal',
-          note: score < 60 ? '这一段还可以补充推导过程或案例。' : ''
-        })
-      }
-
-      return segments
-    }
-
     const buildAnswerOutline = (questionText = '', keywords = []) => {
       const focusKeyword = keywords[0] || '核心原理'
       return [
@@ -609,40 +446,21 @@ export default {
       return `如果我重新回答这题，我会先明确题目考察的是${domainName}，再围绕${keyPhrase}分点展开。随后我会结合真实项目说明这些知识点在业务中的使用方式、收益和边界，最后补充常见误区与优化思路，让回答既有原理也有实践。`
     }
 
-    const buildCommentary = (answer, domainName) => {
-      if (answer.score >= 85) return `你对${domainName}的核心知识掌握较好，回答结构完整，已经具备较强复盘价值。`
-      if (answer.score >= 70) return `你已经覆盖了${domainName}的主要内容，但还可以继续补充原理深度和项目细节。`
-      if (answer.score >= 60) return `回答方向基本正确，但在${domainName}上的表达还不够充分，建议加强结构化输出。`
-      return `当前回答没有充分体现${domainName}的关键考点，建议优先补强核心概念、流程和应用场景。`
+    const hasFormalQuestionEvaluation = (value) => {
+      if (!value || typeof value !== 'object') return false
+      if (normalizeNullableScore(value.score) != null) return true
+      const commentary = String(value.commentary ?? value.analysis ?? '').trim()
+      if (commentary) return true
+      return ['strengthPoints', 'weakPoints', 'evaluatedDomains', 'highlightedSegments'].some((key) => (
+        Array.isArray(value[key]) && value[key].length > 0
+      ))
     }
 
-    const buildStrengthPoints = (answer, keywords = []) => {
-      const points = []
-      if (answer.score >= 80) points.push('回答整体结构清晰，具备较好的复盘基础。')
-      if (answer.answer && answer.answer !== '[跳过]' && answer.answer.length >= 40) {
-        points.push('回答信息量较足，没有停留在一句话式作答。')
-      }
-      if (keywords.length > 0) {
-        points.push(`命中了关键词：${keywords.slice(0, 2).join('、')}。`)
-      }
-      return points.slice(0, 3)
-    }
-
-    const buildWeakPoints = (answer, keywords = []) => {
-      const points = []
-      if (!answer.answer || answer.answer === '[跳过]') {
-        points.push('本题未作答，建议优先补齐基础答题框架。')
-      }
-      if (answer.score < 80) {
-        const missingKeywords = keywords.filter((keyword) => !String(answer.answer || '').toLowerCase().includes(String(keyword).toLowerCase()))
-        if (missingKeywords.length > 0) {
-          points.push(`可继续补充：${missingKeywords.slice(0, 2).join('、')}。`)
-        }
-      }
-      if (answer.score < 60) {
-        points.push('建议加强答题结构，先定义概念，再讲原理，最后结合场景。')
-      }
-      return points.slice(0, 3)
+    const normalizeStringArray = (value) => {
+      if (!Array.isArray(value)) return []
+      return value
+        .map((item) => String(item ?? '').trim())
+        .filter(Boolean)
     }
 
     const normalizeSessionId = (value) => {
@@ -686,7 +504,9 @@ export default {
     const mergeQuestionDetailFromBackend = (fallbackDetail, backendDetail) => {
       const merged = { ...(fallbackDetail || {}) }
       const source = (backendDetail && typeof backendDetail === 'object') ? backendDetail : null
-      if (!source) return merged
+      if (!source) {
+        return withQuestionRedoState(merged, { requested: Boolean(merged.redoRequested) })
+      }
 
       // 核心字段以后端为准（包括 null），避免本地同名字段回写覆盖。
       if (hasOwn(source, 'questionId')) merged.questionId = normalizeQuestionId(source.questionId)
@@ -717,7 +537,7 @@ export default {
         merged.backfillFromLocalAllowed = source.backfillFromLocalAllowed
       }
 
-      return merged
+      return withQuestionRedoState(merged, { requested: Boolean(merged.redoRequested) })
     }
 
     const hydrateQuestionDetailFromBackend = async (baseDetail) => {
@@ -770,14 +590,7 @@ export default {
       const questionStem = answer.questionStem || answer.question || ''
       const answerText = answer.userAnswer ?? answer.answer ?? ''
       const answerScore = hasOwn(answer, 'score') ? normalizeNullableScore(answer.score) : null
-      const normalizedAnswer = {
-        ...answer,
-        question: questionStem,
-        answer: answerText,
-        score: Number(answerScore) || 0
-      }
       const domainName = inferDomainName(questionStem, answer.keywords || [], jobName)
-      const weakPoints = buildWeakPoints(normalizedAnswer, answer.keywords || [])
       const resolvedSessionId = normalizeSessionId(sessionId)
         || normalizeSessionId(result?.sessionId)
         || normalizeSessionId(result?.report?.sessionId)
@@ -786,8 +599,9 @@ export default {
       const localQuestionKey = explicitQuestionId || `${recordId}-${questionIndex}`
       const isLocalFallback = !resolvedSessionId || !explicitQuestionId
       const answerStatus = deriveLocalAnswerStatus(answer)
+      const hasFormalEvaluation = hasFormalQuestionEvaluation(answer)
 
-      return {
+      return withQuestionRedoState({
         source,
         recordId,
         sessionId: resolvedSessionId,
@@ -801,20 +615,14 @@ export default {
         domainName,
         questionType: answer.questionType || inferQuestionType(questionStem, questionIndex),
         answerStatus,
-        evaluationStatus: isLocalFallback ? 'ready' : 'pending',
+        evaluationStatus: hasFormalEvaluation ? 'ready' : 'pending',
         userAnswer: answerText,
-        highlightedSegments: buildHighlightedSegments(answerText, answer.keywords || [], Number(answerScore) || 0),
-        score: answerScore,
-        commentary: hasOwn(answer, 'commentary') ? answer.commentary : buildCommentary(normalizedAnswer, domainName),
-        strengthPoints: buildStrengthPoints(normalizedAnswer, answer.keywords || []),
-        weakPoints,
-        evaluatedDomains: [
-          {
-            domainName,
-            score: answerScore,
-            note: weakPoints[0] || '本题主要考察基础理解和表达完整度。'
-          }
-        ],
+        highlightedSegments: hasFormalEvaluation ? mapBackendHighlightedSegments(answer.highlightedSegments) : [],
+        score: hasFormalEvaluation ? answerScore : null,
+        commentary: String(answer.commentary ?? '').trim() || null,
+        strengthPoints: normalizeStringArray(answer.strengthPoints),
+        weakPoints: normalizeStringArray(answer.weakPoints),
+        evaluatedDomains: Array.isArray(answer.evaluatedDomains) ? answer.evaluatedDomains : [],
         idealAnswerOutline: buildAnswerOutline(questionStem, answer.keywords || []),
         rewrittenAnswer: hasOwn(answer, 'rewrittenAnswer')
           ? answer.rewrittenAnswer
@@ -827,7 +635,7 @@ export default {
         hasPrev: questionIndex > 0,
         hasNext: questionIndex < questionList.length - 1,
         backfillFromLocalAllowed: true
-      }
+      })
     }
 
     const handleLoginSuccess = (userData) => {
@@ -978,6 +786,7 @@ export default {
       const localQuestionKey = normalizeQuestionId(item.localQuestionKey) || explicitQuestionId || normalizeQuestionId(item.id) || `question-bank-${index}`
       const isLocalFallback = !resolvedSessionId || !explicitQuestionId
       const bankScore = normalizeNullableScore(item.score)
+      const hasFormalEvaluation = hasFormalQuestionEvaluation(item)
 
       const detail = {
         source: 'questionBank',
@@ -993,20 +802,14 @@ export default {
         domainName: item.domainName || inferDomainName(item.questionStem || item.question, item.keywords || [], item.jobName || item.job || ''),
         questionType: item.questionType || inferQuestionType(item.questionStem || item.question, index),
         answerStatus: !(item.userAnswer || item.answer) ? 'skipped' : 'answered',
-        evaluationStatus: isLocalFallback ? 'ready' : 'pending',
+        evaluationStatus: hasFormalEvaluation ? 'ready' : 'pending',
         userAnswer: item.userAnswer || item.answer || '',
-        highlightedSegments: buildHighlightedSegments(item.userAnswer || item.answer || '', item.keywords || [], bankScore ?? 0),
-        score: bankScore,
-        commentary: item.analysis || buildCommentary({ score: bankScore ?? 0, answer: item.userAnswer || item.answer || '' }, item.domainName || '通用技术能力'),
-        strengthPoints: buildStrengthPoints({ score: bankScore ?? 0, answer: item.userAnswer || item.answer || '' }, item.keywords || []),
-        weakPoints: buildWeakPoints({ score: bankScore ?? 0, answer: item.userAnswer || item.answer || '' }, item.keywords || []),
-        evaluatedDomains: [
-          {
-            domainName: item.domainName || inferDomainName(item.questionStem || item.question, item.keywords || [], item.jobName || item.job || ''),
-            score: bankScore,
-            note: item.analysis || '建议围绕核心概念、原理和实际场景继续补强。'
-          }
-        ],
+        highlightedSegments: hasFormalEvaluation ? mapBackendHighlightedSegments(item.highlightedSegments) : [],
+        score: hasFormalEvaluation ? bankScore : null,
+        commentary: String(item.analysis ?? item.commentary ?? '').trim() || null,
+        strengthPoints: normalizeStringArray(item.strengthPoints),
+        weakPoints: normalizeStringArray(item.weakPoints),
+        evaluatedDomains: Array.isArray(item.evaluatedDomains) ? item.evaluatedDomains : [],
         idealAnswerOutline: item.idealAnswerOutline || buildAnswerOutline(item.questionStem || item.question || '', item.keywords || []),
         rewrittenAnswer: item.rewrittenAnswer || item.standardAnswer || buildRewrittenAnswer(item.questionStem || item.question || '', item.keywords || [], item.domainName || '通用技术能力'),
         isCollected: true,
@@ -1020,7 +823,7 @@ export default {
         backfillFromLocalAllowed: true
       }
 
-      return detail
+      return withQuestionRedoState(detail)
     }
 
     const handleShowQuestionDetailFromBank = (bankItem) => {
@@ -1036,19 +839,19 @@ export default {
     }
 
     const handleRedoQuestionFromBank = (bankItem) => {
-      currentPage.value = 'interview'
-      setTimeout(() => {
-        if (!interviewPage.value?.startSingleQuestionInterview) return
-        interviewPage.value.startSingleQuestionInterview({
-          id: bankItem.questionId || bankItem.id,
-          question: bankItem.questionStem || bankItem.question,
-          keywords: bankItem.keywords || [],
-          jobType: bankItem.jobType || mapJobType(bankItem.jobName || bankItem.job || ''),
-          jobName: bankItem.jobName || bankItem.job || '前端开发工程师',
-          domainName: bankItem.domainName || inferDomainName(bankItem.questionStem || bankItem.question, bankItem.keywords || [], bankItem.jobName || bankItem.job || ''),
-          sourceItemId: bankItem.id
-        })
-      }, 100)
+      const bank = readQuestionBank()
+      const index = bank.findIndex((item) => item.id === bankItem.id)
+      const context = {
+        source: 'questionBank',
+        itemId: bankItem.id,
+        questionIndex: index >= 0 ? index : 0
+      }
+      const baseDetail = buildQuestionDetailFromBankItem(bankItem, index >= 0 ? index : 0, bank)
+      const detail = withQuestionRedoState(baseDetail, { requested: true })
+      if (!detail.canRedo) {
+        showNotification(detail.redoDisabledReason, 'info')
+      }
+      openQuestionDetail(detail, context)
     }
 
     const toggleDarkMode = () => {
@@ -1160,10 +963,10 @@ export default {
           job: recordOrItem.job || recordOrItem.title || '模拟面试',
           jobName: recordOrItem.job || recordOrItem.title || '模拟面试',
           date: recordOrItem.date || new Date().toLocaleString('zh-CN'),
-          score: Number(recordOrItem.score) || 0,
+          score: Number.isFinite(Number(recordOrItem.score)) ? Number(recordOrItem.score) : null,
           duration: recordOrItem.duration || '--',
           questions: Number(recordOrItem.questions) || 0,
-          correct: Number(recordOrItem.correct) || 0,
+          correct: Number.isFinite(Number(recordOrItem.correct)) ? Number(recordOrItem.correct) : null,
           answers: [],
           mode: recordOrItem.mode || 'practice',
           reportStatus: recordOrItem.reportStatus || 'generating'

@@ -7,6 +7,7 @@ import com.a05.aiinterview.interview.dto.CreateInterviewRequest;
 import com.a05.aiinterview.interview.dto.CreateInterviewResponse;
 import com.a05.aiinterview.interview.dto.InterviewDetailDto;
 import com.a05.aiinterview.interview.dto.InterviewSyllabus;
+import com.a05.aiinterview.interview.dto.QuestionDtoAssembler;
 import com.a05.aiinterview.interview.dto.QuestionDto;
 import com.a05.aiinterview.interview.dto.SyllabusSummaryDto;
 import com.a05.aiinterview.interview.engine.PlannerOrchestrationService;
@@ -17,15 +18,17 @@ import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.a05.aiinterview.resume.entity.Resume;
 import com.a05.aiinterview.resume.mapper.ResumeMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -91,20 +94,14 @@ public class InterviewService {
         }
 
         // 5. 异步触发 Planner 编排（考纲生成 + 状态初始化 + 首题生成）
-        if (isSingleQuestionRequest(request)) {
-            initializeSingleQuestionSession(session, request);
-            log.info("?????????, sessionId={}, status=in_progress", session.getId());
-            return new CreateInterviewResponse(session.getId(), "in_progress");
-        }
-
         plannerOrchestrationService.runAsync(session.getId());
-        log.info("Planner ???????, sessionId={}", session.getId());
+        log.info("Planner 异步任务已触发, sessionId={}", session.getId());
         return new CreateInterviewResponse(session.getId(), session.getStatus());
     }
 
     /**
      * 获取面试会话详情，供加载页轮询使用。
-     * 当 status=in_progress 时，响应中内嵌首题（currentQuestion 字段）。
+     * 当 status=in_progress 时，响应中内嵌当前题（currentQuestion 字段）。
      *
      * @param sessionId 会话 ID
      * @param userId    当前登录用户 ID（用于归属校验）
@@ -134,9 +131,8 @@ public class InterviewService {
         //TODO  Loading 页不展示
         dto.setSyllabusSummary(buildSyllabusSummary(session));
 
-        // 若已进入 in_progress，内嵌首题
-        if ("in_progress".equals(session.getStatus()) && session.getFirstQuestionJson() != null) {
-            dto.setCurrentQuestion(mapToQuestionDto(session.getFirstQuestionJson()));
+        if ("in_progress".equals(session.getStatus())) {
+            dto.setCurrentQuestion(loadCurrentQuestion(session));
         }
 
         log.info("查询面试会话详情完成, sessionId={}, status={}", sessionId, session.getStatus());
@@ -144,117 +140,6 @@ public class InterviewService {
     }
 
     // ==================== 私有方法 ====================
-
-
-
-    private boolean isSingleQuestionRequest(CreateInterviewRequest request) {
-        return StringUtils.hasText(request.getSingleQuestionStem());
-    }
-
-    private void initializeSingleQuestionSession(InterviewSession session, CreateInterviewRequest request) {
-        String domainCode = resolveSingleDomainCode(request.getSingleQuestionDomainName());
-        String domainName = StringUtils.hasText(request.getSingleQuestionDomainName())
-                ? request.getSingleQuestionDomainName().trim()
-                : "????";
-        String questionType = StringUtils.hasText(request.getSingleQuestionType())
-                ? request.getSingleQuestionType().trim()
-                : "PRINCIPLE";
-        int maxQuestions = request.getMaxQuestions() != null && request.getMaxQuestions() > 0
-                ? request.getMaxQuestions() : 1;
-
-        InterviewQuestion question = new InterviewQuestion();
-        question.setSessionId(session.getId());
-        question.setQuestionNo(1);
-        question.setQuestionType(questionType);
-        question.setDomainId(null);
-        question.setStem(request.getSingleQuestionStem().trim());
-        question.setTargetSkill(domainName);
-        question.setExpectedPoints(request.getSingleQuestionExpectedPoints() != null
-                ? request.getSingleQuestionExpectedPoints() : List.of());
-        question.setStatus("asked");
-
-        Map<String, Object> generationCtx = new LinkedHashMap<>();
-        generationCtx.put("domainCode", domainCode);
-        generationCtx.put("questionType", questionType);
-        generationCtx.put("focusPoint", domainName);
-        generationCtx.put("generatedBySingleQuestion", true);
-        question.setGenerationContextJson(generationCtx);
-
-        question.setCreatedAt(LocalDateTime.now());
-        question.setUpdatedAt(LocalDateTime.now());
-        interviewQuestionMapper.insert(question);
-
-        InterviewSyllabus syllabus = InterviewSyllabus.builder()
-                .planningReasoning("单题模式，直接围绕指定题目进入面试。")
-                .domains(List.of(InterviewSyllabus.SyllabusDomain.builder()
-                        .domainId(null)
-                        .domainCode(domainCode)
-                        .domainName(domainName)
-                        .focusPoints(question.getExpectedPoints())
-                        .build()))
-                .experienceItems(List.of())
-                .build();
-
-        Map<String, Object> ledger = new LinkedHashMap<>();
-        ledger.put("overall_status", "in_progress");
-        ledger.put("asked_total", 0);
-        ledger.put("last_attempt_id", null);
-        ledger.put("max_questions", maxQuestions);
-        ledger.put("single_question_mode", true);
-        ledger.put("active_item_key", null);
-        ledger.put("active_item_type", null);
-        ledger.put("active_item_name", null);
-        ledger.put("current_focus", domainName);
-        ledger.put("covered_domains", new ArrayList<>());
-        ledger.put("covered_points", new ArrayList<>());
-        ledger.put("candidate_points_by_domain", new ArrayList<>());
-        ledger.put("recent_question_families", new ArrayList<>());
-        Map<String, Object> singleDomainState = new LinkedHashMap<>();
-        singleDomainState.put("domainId", null);
-        singleDomainState.put("domainCode", domainCode);
-        singleDomainState.put("domainName", domainName);
-        singleDomainState.put("status", "UNASKED");
-        singleDomainState.put("saturated", false);
-        singleDomainState.put("evidenceRefs", new ArrayList<>());
-        ledger.put("domain_states", List.of(singleDomainState));
-
-        Map<String, Object> firstQuestionSnapshot = new LinkedHashMap<>();
-        firstQuestionSnapshot.put("questionId", question.getId());
-        firstQuestionSnapshot.put("questionNo", 1);
-        firstQuestionSnapshot.put("questionType", questionType);
-        firstQuestionSnapshot.put("domainId", null);
-        firstQuestionSnapshot.put("domainName", domainName);
-        firstQuestionSnapshot.put("stem", question.getStem());
-        firstQuestionSnapshot.put("targetSkill", question.getTargetSkill());
-        firstQuestionSnapshot.put("aiResultStatus", "success");
-        firstQuestionSnapshot.put("hintAvailable", true);
-
-        InterviewSession update = new InterviewSession();
-        update.setId(session.getId());
-        update.setSyllabusJson(new LinkedHashMap<>(Map.of(
-                "planningReasoning", syllabus.getPlanningReasoning(),
-                "domains", syllabus.getDomains(),
-                "experienceItems", syllabus.getExperienceItems()
-        )));
-        update.setStateLedgerJson(ledger);
-        update.setFirstQuestionJson(firstQuestionSnapshot);
-        update.setCurrentQuestionNo(1);
-        update.setStatus("in_progress");
-        update.setStartedAt(LocalDateTime.now());
-        update.setUpdatedAt(LocalDateTime.now());
-        interviewSessionMapper.updateById(update);
-    }
-
-    private String resolveSingleDomainCode(String domainName) {
-        if (!StringUtils.hasText(domainName)) {
-            return "single_question";
-        }
-        String normalized = domainName.trim().toLowerCase(Locale.ROOT)
-                .replaceAll("[^a-z0-9]+", "_")
-                .replaceAll("^_+|_+$", "");
-        return normalized.isBlank() ? "single_question" : "single_" + normalized;
-    }
-
     private void validateEnums(CreateInterviewRequest request) {
         try {
             TargetRole.valueOf(request.getTargetRole());
@@ -330,36 +215,55 @@ public class InterviewService {
         return new SyllabusSummaryDto(List.of());
     }
 
-    @SuppressWarnings("unchecked")
-    private QuestionDto mapToQuestionDto(Map<String, Object> snapshot) {
-        QuestionDto dto = new QuestionDto();
-        dto.setQuestionId(toLong(snapshot.get("questionId")));
-        dto.setQuestionNo(toInt(snapshot.get("questionNo")));
-        dto.setQuestionType((String) snapshot.get("questionType"));
-        dto.setDomainId(toLong(snapshot.get("domainId")));
-        dto.setDomainName((String) snapshot.get("domainName"));
-        dto.setStem((String) snapshot.get("stem"));
-        dto.setTargetSkill((String) snapshot.get("targetSkill"));
-        Object aiResultStatus = snapshot.get("aiResultStatus");
-        dto.setAiResultStatus(aiResultStatus instanceof String ? (String) aiResultStatus : null);
-        Object hintAvailable = snapshot.get("hintAvailable");
-        dto.setHintAvailable(hintAvailable instanceof Boolean ? (Boolean) hintAvailable : true);
-        return dto;
+    private QuestionDto loadCurrentQuestion(InterviewSession session) {
+        Integer currentQuestionNo = session.getCurrentQuestionNo();
+        if (currentQuestionNo != null && currentQuestionNo > 0) {
+            InterviewQuestion currentQuestion = findQuestionByNo(session.getId(), currentQuestionNo);
+            if (currentQuestion != null) {
+                return QuestionDtoAssembler.fromQuestion(currentQuestion, session);
+            }
+            if (currentQuestionNo == 1 && session.getFirstQuestionJson() != null) {
+                return QuestionDtoAssembler.fromSnapshot(session.getFirstQuestionJson());
+            }
+        }
+
+        InterviewQuestion latestQuestion = findLatestQuestion(session.getId());
+        if (latestQuestion != null) {
+            log.warn("当前题记录缺失，回退最新题, sessionId={}, currentQuestionNo={}, fallbackQuestionNo={}",
+                    session.getId(), currentQuestionNo, latestQuestion.getQuestionNo());
+            return QuestionDtoAssembler.fromQuestion(latestQuestion, session);
+        }
+
+        if (currentQuestionNo != null && currentQuestionNo == 1 && session.getFirstQuestionJson() != null) {
+            return QuestionDtoAssembler.fromSnapshot(session.getFirstQuestionJson());
+        }
+
+        log.error("当前题快照缺失, sessionId={}, currentQuestionNo={}", session.getId(), currentQuestionNo);
+        return null;
     }
 
-    private Long toLong(Object val) {
-        if (val == null) return null;
-        if (val instanceof Long l) return l;
-        if (val instanceof Integer i) return i.longValue();
-        if (val instanceof Number n) return n.longValue();
-        try { return Long.parseLong(val.toString()); } catch (Exception e) { return null; }
+    private InterviewQuestion findQuestionByNo(Long sessionId, Integer questionNo) {
+        if (sessionId == null || questionNo == null || questionNo <= 0) {
+            return null;
+        }
+        return interviewQuestionMapper.selectOne(
+                new LambdaQueryWrapper<InterviewQuestion>()
+                        .eq(InterviewQuestion::getSessionId, sessionId)
+                        .eq(InterviewQuestion::getQuestionNo, questionNo)
+                        .last("LIMIT 1")
+        );
     }
 
-    private Integer toInt(Object val) {
-        if (val == null) return null;
-        if (val instanceof Integer i) return i;
-        if (val instanceof Number n) return n.intValue();
-        try { return Integer.parseInt(val.toString()); } catch (Exception e) { return null; }
+    private InterviewQuestion findLatestQuestion(Long sessionId) {
+        if (sessionId == null) {
+            return null;
+        }
+        return interviewQuestionMapper.selectOne(
+                new LambdaQueryWrapper<InterviewQuestion>()
+                        .eq(InterviewQuestion::getSessionId, sessionId)
+                        .orderByDesc(InterviewQuestion::getQuestionNo)
+                        .last("LIMIT 1")
+        );
     }
 
     private String resolvePositionName(String targetRole) {

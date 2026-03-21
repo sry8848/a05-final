@@ -4,7 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 /**
- * 题目信息 DTO，用于 GET /interviews/{id} 内嵌首题时返回。
+ * 题目信息 DTO，用于会话详情与流式 done 事件返回权威题目快照。
  */
 @Data
 @Schema(description = "题目信息")

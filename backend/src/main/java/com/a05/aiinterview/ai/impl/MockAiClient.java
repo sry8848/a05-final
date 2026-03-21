@@ -57,11 +57,11 @@ public class MockAiClient implements AiClient {
     @Override
     public Flux<String> callQuestionGenerationStream(QuestionGenerationInput input) {
         String focus = input.getNextQuestionGoal() != null ? input.getNextQuestionGoal().getNextFocus() : "当前主题";
-        String questionType = input.getNextQuestionGoal() != null ? input.getNextQuestionGoal().getQuestionType() : "THEORY";
+        String questionType = input.getNextQuestionGoal() != null ? input.getNextQuestionGoal().getQuestionType() : "PRINCIPLE";
         String stem = switch ((questionType == null ? "" : questionType).toUpperCase()) {
-            case "PROJECT" -> "结合你做过的真实项目，详细讲讲「" + focus + "」这块你当时是怎么设计和落地的？";
+            case "PROJECT_DEEP_DIVE" -> "结合你做过的真实项目，详细讲讲「" + focus + "」这块你当时是怎么设计和落地的？";
             case "SCENARIO" -> "如果线上在「" + focus + "」这里出现异常，你会怎么判断、排查和处理？";
-            case "SOFT_SKILL" -> "请分享一次你围绕「" + focus + "」推进协作或解决分歧的真实经历。";
+            case "BEHAVIORAL" -> "请分享一次你围绕「" + focus + "」推进协作或解决分歧的真实经历。";
             default -> "请你系统讲讲「" + focus + "」的原理、常见方案和使用边界。";
         };
         return Flux.fromArray(stem.split("")).delayElements(Duration.ofMillis(20));
@@ -87,13 +87,11 @@ public class MockAiClient implements AiClient {
                 .decisionReason("当前继续提问仍有信息增益，因此保持面试继续推进。")
                 .candidateStrategies(List.of("继续提问"))
                 .finalDecision("继续提问")
-                .nextQuestionType("THEORY")
+                .nextQuestionType("PRINCIPLE")
                 .nextFocus(nextFocus)
                 .expectedAnswerPoints(List.of("说明核心概念", "解释使用边界"))
-                .possibleNextMoves(List.of("若回答扎实，可切到场景题", "若回答较弱，可平移到同域基础点"))
                 .newCoveredDomains(List.of())
                 .newCoveredPoints(List.of())
-                .newCandidatePointsByDomain(List.of())
                 .retrievalPlans(List.of())
                 .build();
         return mockResult(output, startMs, "evaluation_decision");

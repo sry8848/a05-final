@@ -22,7 +22,8 @@
 增量迁移：
 
 1. `alter-interview-attempts-add-detail-evaluation.sql`
-2. `alter-interview-remove-legacy-columns.sql`
+2. `alter-question-redo-attempts.sql`
+3. `alter-interview-remove-legacy-columns.sql`
 
 ## 迁移说明
 

@@ -7,7 +7,9 @@ import com.a05.aiinterview.ai.AiClient;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
 import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
+import com.a05.aiinterview.interview.dto.SseDoneEvent;
 import com.a05.aiinterview.interview.entity.InterviewAttempt;
+import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
@@ -47,7 +49,7 @@ class QuestionStreamServiceBuildInputTest {
         attempt.setAttemptId("attempt-continue");
         attempt.setEvaluationJson(new LinkedHashMap<>(Map.of(
                 "interviewAction", "CONTINUE",
-                "nextQuestionType", "PROJECT",
+                "nextQuestionType", "PROJECT_DEEP_DIVE",
                 "nextFocus", "订单超时关闭链路的幂等与并发控制",
                 "expectedAnswerPoints", List.of("任务调度", "幂等", "并发冲突"),
                 "answerSummary", "候选人解释了延迟消息方案。",
@@ -71,7 +73,7 @@ class QuestionStreamServiceBuildInputTest {
 
         assertThat(plan).isNotNull();
         assertThat(plan.getInterviewAction()).isEqualTo("CONTINUE");
-        assertThat(plan.getNextQuestionType()).isEqualTo("PROJECT");
+        assertThat(plan.getNextQuestionType()).isEqualTo("PROJECT_DEEP_DIVE");
         assertThat(plan.getNextFocus()).contains("订单超时关闭");
         assertThat(plan.getExpectedAnswerPoints()).containsExactly("任务调度", "幂等", "并发冲突");
         assertThat(plan.getRetrievalPlans()).hasSize(1);
@@ -105,7 +107,7 @@ class QuestionStreamServiceBuildInputTest {
 
         QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
                 .interviewAction("CONTINUE")
-                .nextQuestionType("THEORY")
+                .nextQuestionType("PRINCIPLE")
                 .nextFocus("缓存击穿")
                 .expectedAnswerPoints(List.of("互斥锁", "逻辑过期"))
                 .answerSummary("候选人给出了基础方案。")
@@ -154,6 +156,60 @@ class QuestionStreamServiceBuildInputTest {
     }
 
     @Test
+    void buildGenInput_shouldLeaveRelatedDomainEmptyWhenFocusDoesNotMatchSyllabus() throws Exception {
+        QuestionStreamService service = newService();
+
+        InterviewSession session = new InterviewSession();
+        session.setId(101L);
+        session.setTargetRole("JAVA_BACKEND");
+        session.setMode("practice");
+        session.setExperienceLevel("JUNIOR");
+        session.setSyllabusJson(Map.of(
+                "domains", List.of(
+                        Map.of("domainId", 6L, "domainCode", "redis", "domainName", "Redis", "focusPoints", List.of("缓存击穿")),
+                        Map.of("domainId", 7L, "domainCode", "mq", "domainName", "消息队列", "focusPoints", List.of("削峰填谷"))
+                )
+        ));
+        session.setStateLedgerJson(Map.of());
+
+        InterviewAttempt attempt = new InterviewAttempt();
+        attempt.setAttemptId("attempt-no-domain");
+
+        QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
+                .interviewAction("CONTINUE")
+                .nextQuestionType("SCENARIO")
+                .nextFocus("线程模型与调度策略")
+                .expectedAnswerPoints(List.of("调度", "线程切换"))
+                .retrievalPlans(List.of())
+                .answerSummary("候选人回答较泛。")
+                .answerAssessment("需要切到更明确的场景。")
+                .build();
+
+        Method method = QuestionStreamService.class.getDeclaredMethod(
+                "buildGenInput",
+                InterviewSession.class,
+                QuestionStreamService.NextQuestionPlan.class,
+                List.class,
+                InterviewAttempt.class,
+                RagContext.class
+        );
+        method.setAccessible(true);
+
+        QuestionGenerationInput input = (QuestionGenerationInput) method.invoke(
+                service,
+                session,
+                plan,
+                List.of(),
+                attempt,
+                RagContext.empty()
+        );
+
+        assertThat(input.getNextQuestionGoal().getRelatedDomainId()).isNull();
+        assertThat(input.getNextQuestionGoal().getRelatedDomainCode()).isEmpty();
+        assertThat(input.getNextQuestionGoal().getRelatedDomainName()).isEmpty();
+    }
+
+    @Test
     void questionGenerationDebugLogs_shouldContainNewPlanFields() throws Exception {
         InterviewDebugTraceService debugTraceService = newDebugTraceService(true);
         QuestionStreamService service = newService(debugTraceService);
@@ -180,7 +236,7 @@ class QuestionStreamServiceBuildInputTest {
 
         QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
                 .interviewAction("CONTINUE")
-                .nextQuestionType("THEORY")
+                .nextQuestionType("PRINCIPLE")
                 .nextFocus("缓存击穿")
                 .expectedAnswerPoints(List.of())
                 .retrievalPlans(List.of())
@@ -235,9 +291,62 @@ class QuestionStreamServiceBuildInputTest {
         assertThat(root.path("stages").has("nextQuestionPlan")).isTrue();
         assertThat(root.path("stages").has("questionGenerationInput")).isTrue();
         assertThat(root.path("stages").has("questionGenerationOutput")).isTrue();
-        assertThat(root.path("stages").path("nextQuestionPlan").path("nextQuestionType").asText()).isEqualTo("THEORY");
+        assertThat(root.path("stages").path("nextQuestionPlan").path("nextQuestionType").asText()).isEqualTo("PRINCIPLE");
         assertThat(root.path("stages").path("questionGenerationOutput").path("finalStem").asText())
                 .contains("Redis 缓存击穿一般怎么处理");
+    }
+
+    @Test
+    void buildDoneEvent_shouldIncludeAuthoritativeQuestionSnapshot() throws Exception {
+        QuestionStreamService service = newService();
+
+        InterviewSession session = new InterviewSession();
+        session.setId(300L);
+        session.setSyllabusJson(Map.of(
+                "domains", List.of(
+                        Map.of("domainId", 8L, "domainCode", "behavior", "domainName", "协作沟通")
+                )
+        ));
+
+        InterviewQuestion question = new InterviewQuestion();
+        question.setId(501L);
+        question.setSessionId(300L);
+        question.setQuestionNo(4);
+        question.setQuestionType("BEHAVIORAL");
+        question.setDomainId(8L);
+        question.setStem("请分享一次跨团队推动方案落地的经历。");
+        question.setTargetSkill("跨团队协作");
+
+        Method method = QuestionStreamService.class.getDeclaredMethod(
+                "buildDoneEvent",
+                String.class,
+                InterviewSession.class,
+                InterviewQuestion.class,
+                int.class,
+                boolean.class
+        );
+        method.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        var event = (org.springframework.http.codec.ServerSentEvent<String>) method.invoke(
+                service,
+                "attempt-done",
+                session,
+                question,
+                12,
+                true
+        );
+
+        assertThat(event.event()).isEqualTo("done");
+        SseDoneEvent payload = new ObjectMapper().readValue(event.data(), SseDoneEvent.class);
+        assertThat(payload.getQuestionId()).isEqualTo(501L);
+        assertThat(payload.getAudioStatusUrl()).isEqualTo("/api/v1/interviews/300/questions/501/audio");
+        assertThat(payload.getQuestion()).isNotNull();
+        assertThat(payload.getQuestion().getQuestionId()).isEqualTo(501L);
+        assertThat(payload.getQuestion().getQuestionNo()).isEqualTo(4);
+        assertThat(payload.getQuestion().getQuestionType()).isEqualTo("BEHAVIORAL");
+        assertThat(payload.getQuestion().getDomainName()).isEqualTo("协作沟通");
+        assertThat(payload.getQuestion().getTargetSkill()).isEqualTo("跨团队协作");
     }
 
     private QuestionStreamService newService() {

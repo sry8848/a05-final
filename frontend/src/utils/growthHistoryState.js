@@ -67,8 +67,16 @@ export function getGrowthRequestPositionCodes(selectedPosition, positionCodeMap 
 export function applyReadyReportToInterviewRecord(record, report, nowIso = new Date().toISOString()) {
   const updated = { ...(record || {}) }
   const scoreNum = Number(report?.overallScore)
-  if (Number.isFinite(scoreNum)) {
-    updated.score = Math.round(scoreNum)
+  updated.score = Number.isFinite(scoreNum) ? Math.round(scoreNum) : null
+  updated.feedback = typeof report?.summary === 'string' && report.summary.trim() ? report.summary.trim() : null
+  updated.beatPercent = Number.isFinite(Number(report?.beatPercent))
+    ? Math.round(Number(report.beatPercent))
+    : null
+  if (Array.isArray(report?.questions) && report.questions.length > 0) {
+    updated.questions = report.questions.length
+    updated.correct = report.questions.filter((item) => Number(item?.score) >= 60).length
+  } else {
+    updated.correct = null
   }
   updated.reportStatus = 'ready'
   updated.reportStartedAt = updated.reportStartedAt || nowIso

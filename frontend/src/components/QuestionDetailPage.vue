@@ -136,7 +136,7 @@
                 <span>{{ item.domainName }}</span>
                 <strong>{{ hasDomainScore(item) ? `${Number(item.score)} 分` : '待评估' }}</strong>
               </div>
-              <p>{{ item.note }}</p>
+              <p>{{ item.commentary || item.note }}</p>
             </div>
           </div>
 
@@ -154,6 +154,143 @@
               </ul>
             </div>
           </div>
+        </section>
+
+        <section class="glass-card content-card">
+          <div class="section-header">
+            <h3 class="section-title">
+              <i class="fas fa-pen-to-square"></i>
+              重新作答
+            </h3>
+            <span class="section-tip">独立单题评估，不影响原会话与整场配额</span>
+          </div>
+
+          <div v-if="!redoContext.canRedo" class="redo-disabled">
+            <i class="fas fa-ban"></i>
+            <span>{{ redoContext.redoDisabledReason }}</span>
+          </div>
+
+          <template v-else>
+            <div class="redo-actions">
+              <button class="redo-action-btn primary" @click="beginRedo">
+                <i class="fas fa-rotate-right"></i>
+                {{ showRedoComposer ? '继续编辑重答' : '开始重新作答' }}
+              </button>
+              <button
+                class="redo-action-btn"
+                :disabled="redoLoading || redoSubmitting"
+                @click="syncLatestRedoAttempt()"
+              >
+                <i :class="redoLoading ? 'fas fa-spinner fa-spin' : 'fas fa-arrows-rotate'"></i>
+                刷新最新结果
+              </button>
+            </div>
+
+            <div v-if="showRedoComposer" class="redo-composer">
+              <textarea
+                v-model="redoAnswer"
+                class="redo-input"
+                rows="6"
+                placeholder="只针对这一题重新作答。这里不会触发下一题规划，也不会污染原会话。"
+              ></textarea>
+              <div class="redo-composer-actions">
+                <button
+                  class="redo-submit-btn"
+                  :disabled="!redoAnswer.trim() || redoSubmitting"
+                  @click="submitRedo"
+                >
+                  <i :class="redoSubmitting ? 'fas fa-spinner fa-spin' : 'fas fa-paper-plane'"></i>
+                  {{ redoSubmitting ? '提交中' : '提交重答' }}
+                </button>
+              </div>
+            </div>
+
+            <p v-if="redoError" class="redo-error">{{ redoError }}</p>
+
+            <div v-if="redoLoading && !redoLatest" class="redo-status-card generating">
+              <i class="fas fa-spinner fa-spin"></i>
+              <span>正在拉取最新重答结果...</span>
+            </div>
+
+            <div v-else-if="!redoLatest" class="redo-status-card idle">
+              <i class="fas fa-file-pen"></i>
+              <span>尚无单题重答记录。点击上方按钮开始重答。</span>
+            </div>
+
+            <template v-else>
+              <div class="redo-status-card" :class="redoLatest.evaluationStatus">
+                <template v-if="redoLatest.evaluationStatus === 'ready'">
+                  <i class="fas fa-circle-check"></i>
+                  <span>最新一次重答评估已生成{{ latestRedoAtText ? ` · ${latestRedoAtText}` : '' }}</span>
+                </template>
+                <template v-else-if="redoLatest.evaluationStatus === 'failed'">
+                  <i class="fas fa-circle-exclamation"></i>
+                  <span>最新一次重答评估失败，请调整答案后重新提交。</span>
+                </template>
+                <template v-else>
+                  <i class="fas fa-spinner fa-spin"></i>
+                  <span>最新一次重答评估生成中，请稍后刷新查看。</span>
+                </template>
+              </div>
+
+              <div class="redo-answer-block">
+                <h4 class="mini-title">最新重答内容</h4>
+                <p class="redo-answer-text">{{ redoLatest.answerText || '暂无重答内容' }}</p>
+              </div>
+
+              <div v-if="redoLatest.evaluationStatus === 'ready'" class="redo-result-layout">
+                <div class="redo-score-panel">
+                  <div v-if="redoHasNumericScore" class="score-badge" :class="redoScoreClass">
+                    <span class="score-value">{{ redoLatest.score }}</span>
+                    <span class="score-label">重答得分</span>
+                  </div>
+                  <div class="redo-commentary">
+                    <h4 class="mini-title">重答点评</h4>
+                    <p>{{ redoLatest.commentary || '评语待生成' }}</p>
+                  </div>
+                </div>
+
+                <div v-if="redoLatest.evaluatedDomains.length" class="domain-score-list">
+                  <div v-for="item in redoLatest.evaluatedDomains" :key="`${item.domainCode}-${item.domainName}`" class="domain-score-item">
+                    <div class="domain-score-header">
+                      <span>{{ item.domainName || item.domainCode }}</span>
+                      <strong>{{ hasDomainScore(item) ? `${Number(item.score)} 分` : '待评估' }}</strong>
+                    </div>
+                    <p>{{ item.commentary || '暂无点评' }}</p>
+                  </div>
+                </div>
+
+                <div class="point-grid">
+                  <div class="point-card success">
+                    <h4>重答亮点</h4>
+                    <ul>
+                      <li v-for="point in redoLatest.strengthPoints" :key="point">{{ point }}</li>
+                    </ul>
+                  </div>
+                  <div class="point-card danger">
+                    <h4>重答薄弱点</h4>
+                    <ul>
+                      <li v-for="point in redoLatest.weakPoints" :key="point">{{ point }}</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div v-if="redoLatest.idealAnswerOutline.length" class="redo-answer-block">
+                  <h4 class="mini-title">重答理想骨架</h4>
+                  <ol class="outline-list">
+                    <li v-for="(item, index) in redoLatest.idealAnswerOutline" :key="`${item}-${index}`">
+                      {{ item }}
+                    </li>
+                  </ol>
+                </div>
+
+                <div v-if="redoLatest.rewrittenAnswer" class="redo-answer-block">
+                  <h4 class="mini-title">重答参考答案</h4>
+                  <p class="rewritten-answer">{{ redoLatest.rewrittenAnswer }}</p>
+                </div>
+              </div>
+            </template>
+          </template>
         </section>
 
         <section class="glass-card content-card">
@@ -281,9 +418,16 @@
 </template>
 
 <script>
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import { createQuestionRedoAttempt, getLatestQuestionRedoAttempt } from '../api/resume'
+import {
+  normalizeQuestionRedoAttempt,
+  shouldPollQuestionRedoAttempt,
+  withQuestionRedoState
+} from '../utils/questionRedoState'
 
 const CONSULT_STORAGE_KEY = 'questionConsultHistory'
+const REDO_POLL_INTERVAL_MS = 2000
 
 export default {
   name: 'QuestionDetailPage',
@@ -304,7 +448,19 @@ export default {
     const consultError = ref('')
     const isConsultSending = ref(false)
 
+    const redoAnswer = ref('')
+    const redoError = ref('')
+    const redoSubmitting = ref(false)
+    const redoLoading = ref(false)
+    const redoLatest = ref(null)
+    const showRedoComposer = ref(false)
+    let redoPollTimer = null
+
     const hasDetail = computed(() => Boolean(props.detail))
+    const redoContext = computed(() => withQuestionRedoState(
+      props.detail,
+      { requested: Boolean(props.detail?.redoRequested) }
+    ))
 
     const evaluationStatus = computed(() => {
       const raw = props.detail?.evaluationStatus
@@ -340,6 +496,27 @@ export default {
       return `${Number(props.detail.score)} 分`
     })
 
+    const redoHasNumericScore = computed(() => {
+      const score = redoLatest.value?.score
+      return score != null && Number.isFinite(Number(score))
+    })
+
+    const redoScoreClass = computed(() => {
+      const score = Number(redoLatest.value?.score)
+      if (!Number.isFinite(score)) return 'medium'
+      if (score >= 80) return 'high'
+      if (score >= 60) return 'medium'
+      return 'low'
+    })
+
+    const latestRedoAtText = computed(() => {
+      const raw = redoLatest.value?.createdAt
+      if (!raw) return ''
+      const date = new Date(raw)
+      if (Number.isNaN(date.getTime())) return String(raw)
+      return date.toLocaleString('zh-CN', { hour12: false })
+    })
+
     const hasDomainScore = (item) => {
       if (!item || item.score == null) return false
       return Number.isFinite(Number(item.score))
@@ -373,9 +550,7 @@ export default {
         .filter(Boolean)
     })
 
-    const annotationNotes = computed(() => {
-      return renderSegments.value.filter((item) => item.note)
-    })
+    const annotationNotes = computed(() => renderSegments.value.filter((item) => item.note))
 
     const quickQuestions = computed(() => [
       '为什么这里会失分？',
@@ -389,6 +564,12 @@ export default {
       if (!props.detail) return ''
       return `${props.detail.recordId}-${props.detail.questionId}`
     })
+
+    const stopRedoPolling = () => {
+      if (!redoPollTimer) return
+      clearInterval(redoPollTimer)
+      redoPollTimer = null
+    }
 
     const readConsultHistory = () => {
       if (!questionStorageId.value) {
@@ -405,6 +586,61 @@ export default {
       const raw = JSON.parse(localStorage.getItem(CONSULT_STORAGE_KEY) || '{}')
       raw[questionStorageId.value] = consultMessages.value
       localStorage.setItem(CONSULT_STORAGE_KEY, JSON.stringify(raw))
+    }
+
+    const loadLatestRedoAttempt = async ({ silent = false } = {}) => {
+      if (!redoContext.value.canRedo) {
+        redoLatest.value = null
+        redoLoading.value = false
+        stopRedoPolling()
+        return
+      }
+
+      if (!silent) {
+        redoLoading.value = true
+      }
+      try {
+        const latest = await getLatestQuestionRedoAttempt(
+          redoContext.value.sessionId,
+          redoContext.value.questionId
+        )
+        redoLatest.value = normalizeQuestionRedoAttempt(latest)
+        if (!shouldPollQuestionRedoAttempt(redoLatest.value)) {
+          stopRedoPolling()
+        }
+      } catch (error) {
+        if (!silent) {
+          redoError.value = error?.message || '加载最新重答失败，请稍后重试。'
+        }
+        stopRedoPolling()
+      } finally {
+        if (!silent) {
+          redoLoading.value = false
+        }
+      }
+    }
+
+    const startRedoPolling = () => {
+      stopRedoPolling()
+      if (!redoContext.value.canRedo || !shouldPollQuestionRedoAttempt(redoLatest.value)) {
+        return
+      }
+      redoPollTimer = window.setInterval(async () => {
+        try {
+          await loadLatestRedoAttempt({ silent: true })
+          if (!shouldPollQuestionRedoAttempt(redoLatest.value)) {
+            stopRedoPolling()
+          }
+        } catch (_) {
+          stopRedoPolling()
+        }
+      }, REDO_POLL_INTERVAL_MS)
+    }
+
+    const syncLatestRedoAttempt = async () => {
+      redoError.value = ''
+      await loadLatestRedoAttempt()
+      startRedoPolling()
     }
 
     const buildAssistantReply = (question) => {
@@ -456,6 +692,36 @@ export default {
       sendConsult(question)
     }
 
+    const beginRedo = () => {
+      if (!redoContext.value.canRedo) return
+      showRedoComposer.value = true
+      if (!redoAnswer.value.trim() && redoLatest.value?.answerText) {
+        redoAnswer.value = redoLatest.value.answerText
+      }
+    }
+
+    const submitRedo = async () => {
+      if (!redoContext.value.canRedo || !redoAnswer.value.trim() || redoSubmitting.value) return
+
+      redoError.value = ''
+      redoSubmitting.value = true
+      stopRedoPolling()
+      try {
+        const created = await createQuestionRedoAttempt(
+          redoContext.value.sessionId,
+          redoContext.value.questionId,
+          { answerText: redoAnswer.value.trim() }
+        )
+        redoLatest.value = normalizeQuestionRedoAttempt(created)
+        showRedoComposer.value = true
+        startRedoPolling()
+      } catch (error) {
+        redoError.value = error?.message || '提交重答失败，请稍后重试。'
+      } finally {
+        redoSubmitting.value = false
+      }
+    }
+
     const handleBack = () => {
       emit('back')
     }
@@ -475,9 +741,24 @@ export default {
         consultError.value = ''
         isConsultSending.value = false
         readConsultHistory()
+
+        stopRedoPolling()
+        redoAnswer.value = ''
+        redoError.value = ''
+        redoSubmitting.value = false
+        redoLoading.value = false
+        redoLatest.value = null
+        showRedoComposer.value = Boolean(redoContext.value.canRedo && redoContext.value.redoRequested)
+        if (redoContext.value.canRedo) {
+          syncLatestRedoAttempt().catch(() => {})
+        }
       },
       { immediate: true }
     )
+
+    onUnmounted(() => {
+      stopRedoPolling()
+    })
 
     return {
       consultMessages,
@@ -485,11 +766,21 @@ export default {
       consultError,
       isConsultSending,
       hasDetail,
+      redoContext,
+      redoAnswer,
+      redoError,
+      redoSubmitting,
+      redoLoading,
+      redoLatest,
+      showRedoComposer,
       evaluationStatus,
       hasNumericScore,
       scoreClass,
       displayCommentary,
       summaryScoreText,
+      redoHasNumericScore,
+      redoScoreClass,
+      latestRedoAtText,
       hasDomainScore,
       renderSegments,
       annotationNotes,
@@ -499,7 +790,10 @@ export default {
       handleCollect,
       navigateQuestion,
       sendConsult,
-      useQuickQuestion
+      useQuickQuestion,
+      beginRedo,
+      submitRedo,
+      syncLatestRedoAttempt
     }
   }
 }
@@ -803,6 +1097,152 @@ export default {
   border-color: rgba(148, 163, 184, 0.28);
 }
 
+.redo-disabled,
+.redo-status-card,
+.redo-answer-block {
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+}
+
+.redo-disabled {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.22);
+  color: var(--text-secondary);
+}
+
+.redo-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.redo-action-btn,
+.redo-submit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.redo-action-btn.primary,
+.redo-submit-btn {
+  background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
+  border-color: transparent;
+  color: white;
+}
+
+.redo-action-btn:disabled,
+.redo-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.redo-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.redo-input {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  background: rgba(15, 23, 42, 0.28);
+  color: var(--text-primary);
+  resize: vertical;
+  font-family: inherit;
+}
+
+.redo-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.redo-error {
+  margin: 0 0 14px;
+  color: #f87171;
+  font-size: 13px;
+}
+
+.redo-status-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+  margin-bottom: 14px;
+}
+
+.redo-status-card.idle,
+.redo-status-card.pending {
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
+.redo-status-card.generating {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.28);
+}
+
+.redo-status-card.ready {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.24);
+}
+
+.redo-status-card.failed {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.28);
+}
+
+.mini-title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.redo-answer-block {
+  background: rgba(15, 23, 42, 0.24);
+  margin-bottom: 14px;
+}
+
+.redo-answer-text,
+.redo-commentary p {
+  margin: 0;
+  color: var(--text-primary);
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.redo-result-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.redo-score-panel {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.redo-commentary {
+  flex: 1;
+}
+
 .domain-score-list {
   display: flex;
   flex-direction: column;
@@ -1034,6 +1474,11 @@ export default {
   .point-grid {
     grid-template-columns: 1fr;
   }
+
+  .redo-score-panel {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1047,6 +1492,7 @@ export default {
     align-items: flex-start;
   }
 
+  .redo-actions,
   .navigation-actions {
     flex-direction: column;
   }

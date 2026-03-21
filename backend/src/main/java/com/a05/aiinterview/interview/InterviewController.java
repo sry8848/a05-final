@@ -5,12 +5,11 @@ import com.a05.aiinterview.interview.dto.CreateInterviewRequest;
 import com.a05.aiinterview.interview.dto.CreateInterviewResponse;
 import com.a05.aiinterview.interview.dto.InterviewDetailDto;
 import com.a05.aiinterview.interview.dto.InterviewHistoryPageDto;
-import com.a05.aiinterview.interview.dto.InterviewHintRequest;
-import com.a05.aiinterview.interview.dto.InterviewHintResponse;
 import com.a05.aiinterview.interview.dto.InterviewQuestionReviewDto;
 import com.a05.aiinterview.interview.dto.InterviewReportDto;
 import com.a05.aiinterview.interview.dto.LearningRecommendationDto;
-import com.a05.aiinterview.interview.dto.SkipAndNextRequest;
+import com.a05.aiinterview.interview.dto.QuestionRedoAttemptDto;
+import com.a05.aiinterview.interview.dto.QuestionRedoAttemptRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptResponse;
 import com.a05.aiinterview.interview.engine.AnswerSubmitService;
@@ -19,9 +18,8 @@ import com.a05.aiinterview.interview.service.InterviewManagementService;
 import com.a05.aiinterview.interview.service.InterviewQuestionReviewService;
 import com.a05.aiinterview.interview.service.InterviewReportService;
 import com.a05.aiinterview.interview.service.InterviewService;
-import com.a05.aiinterview.interview.service.InterviewHintService;
-import com.a05.aiinterview.interview.service.InterviewSkipService;
 import com.a05.aiinterview.interview.service.LearningRecommendationService;
+import com.a05.aiinterview.interview.service.QuestionRedoService;
 import com.a05.aiinterview.interview.service.QuestionStreamService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -57,13 +55,12 @@ public class InterviewController {
     private final InterviewService interviewService;
     private final InterviewHistoryService interviewHistoryService;
     private final AnswerSubmitService answerSubmitService;
-    private final InterviewHintService interviewHintService;
-    private final InterviewSkipService interviewSkipService;
     private final InterviewQuestionReviewService interviewQuestionReviewService;
     private final InterviewReportService interviewReportService;
     private final InterviewManagementService interviewManagementService;
     private final LearningRecommendationService learningRecommendationService;
     private final QuestionStreamService questionStreamService;
+    private final QuestionRedoService questionRedoService;
 
     @Operation(summary = "Get interview history list")
     @GetMapping
@@ -119,40 +116,6 @@ public class InterviewController {
             @PathVariable Long sessionId,
             @Valid @RequestBody SubmitAttemptRequest request) {
         return ApiResponse.ok(answerSubmitService.submitAnswer(sessionId, userId, request));
-    }
-
-    /**
-     * 获取面试提示
-     * @param userId
-     * @param sessionId
-     * @param request
-     * @return
-     */
-    @Operation(summary = "Get interview hint")
-    @PostMapping("/{sessionId}/hint")
-    public ApiResponse<InterviewHintResponse> getHint(
-            @AuthenticationPrincipal Long userId,
-            @PathVariable Long sessionId,
-            @Valid @RequestBody InterviewHintRequest request) {
-        return ApiResponse.ok(interviewHintService.getHint(sessionId, request.getQuestionId(), userId));
-    }
-
-    /**
-     * 跳过问题并继续到下一个问题
-     * @param userId
-     * @param sessionId
-     * @param questionId
-     * @param request
-     * @return
-     */
-    @Operation(summary = "Skip question and continue to next")
-    @PostMapping("/{sessionId}/questions/{questionId}/skip-and-next")
-    public ApiResponse<SubmitAttemptResponse> skipAndNext(
-            @AuthenticationPrincipal Long userId,
-            @PathVariable Long sessionId,
-            @PathVariable Long questionId,
-            @Valid @RequestBody SkipAndNextRequest request) {
-        return ApiResponse.ok(interviewSkipService.skipAndNext(sessionId, questionId, userId, request));
     }
 
     /**
@@ -223,6 +186,25 @@ public class InterviewController {
             @AuthenticationPrincipal Long userId,
             @PathVariable Long sessionId) {
         return ApiResponse.ok(learningRecommendationService.getRecommendations(sessionId, userId));
+    }
+
+    @Operation(summary = "Create question redo attempt")
+    @PostMapping("/{sessionId}/questions/{questionId}/redo-attempts")
+    public ApiResponse<QuestionRedoAttemptDto> createQuestionRedoAttempt(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId,
+            @PathVariable Long questionId,
+            @Valid @RequestBody QuestionRedoAttemptRequest request) {
+        return ApiResponse.ok(questionRedoService.createRedoAttempt(sessionId, questionId, userId, request));
+    }
+
+    @Operation(summary = "Get latest question redo attempt")
+    @GetMapping("/{sessionId}/questions/{questionId}/redo-attempts/latest")
+    public ApiResponse<QuestionRedoAttemptDto> getLatestQuestionRedoAttempt(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId,
+            @PathVariable Long questionId) {
+        return ApiResponse.ok(questionRedoService.getLatestRedoAttempt(sessionId, questionId, userId));
     }
 
     @Operation(summary = "Get state ledger for debugging")

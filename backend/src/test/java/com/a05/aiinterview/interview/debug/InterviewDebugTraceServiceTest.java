@@ -43,7 +43,7 @@ class InterviewDebugTraceServiceTest {
                 "attempt-abc",
                 "evaluationOutput",
                 evaluationPayload,
-                Map.of("action", "CONTINUE", "nextType", "PROJECT", "nextFocus", "缓存击穿")
+                Map.of("action", "CONTINUE", "nextType", "PROJECT_DEEP_DIVE", "nextFocus", "缓存击穿")
         );
 
         service.recordQuestionStage(

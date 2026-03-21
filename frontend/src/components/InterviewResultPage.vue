@@ -24,7 +24,7 @@
             <h3 class="card-title">
               <i class="fas fa-chart-radar"></i>
               面试能力雷达图
-              <span class="score-in-title">{{ animatedScore }} 分</span>
+              <span class="score-in-title">{{ hasOverallScore ? `${animatedScore} 分` : '待生成' }}</span>
             </h3>
 
             <div v-if="isProfessionalMode && hasRadarData" class="radar-container">
@@ -84,9 +84,8 @@
             </div>
 
             <div class="summary-tags">
-              <span class="tag success">表现优秀</span>
-              <span class="tag info">基础扎实</span>
-              <span class="tag warning">可继续提升</span>
+              <span class="tag info">正式报告</span>
+              <span class="tag warning">结果为准</span>
             </div>
           </div>
         </div>
@@ -124,10 +123,13 @@
             </h3>
 
             <div class="domain-list">
+              <div v-if="domainWeakSpots.length === 0" class="domain-empty">
+                正式报告暂未提供知识域薄弱点分析。
+              </div>
               <div v-for="domain in domainWeakSpots" :key="domain.name" class="domain-item">
                 <div class="domain-header">
                   <h4>{{ domain.name }}</h4>
-                  <span class="score-delta" :class="domain.delta >= 0 ? 'positive' : 'negative'">
+                  <span v-if="domain.delta != null" class="score-delta" :class="domain.delta >= 0 ? 'positive' : 'negative'">
                     {{ domain.delta >= 0 ? '+' : '' }}{{ domain.delta }} 分
                   </span>
                 </div>
@@ -224,12 +226,12 @@ export default {
     resultData: {
       type: Object,
       default: () => ({
-        score: 85,
-        correctCount: 8,
-        totalQuestions: 10,
-        duration: '15:30',
-        jobName: '前端开发工程师',
-        experienceLabel: '1-3年',
+        score: null,
+        correctCount: null,
+        totalQuestions: 0,
+        duration: '--',
+        jobName: '模拟面试',
+        experienceLabel: '',
         answers: []
       })
     }
@@ -240,11 +242,19 @@ export default {
     const recommendationResources = ref([])
     const recommendationStatus = ref('idle')
 
-    const score = computed(() => props.resultData.score || 85)
-    const totalQuestions = computed(() => props.resultData.totalQuestions || 10)
-    const duration = computed(() => props.resultData.duration || '15:30')
-    const jobName = computed(() => props.resultData.jobName || '前端开发工程师')
-    const experienceLabel = computed(() => props.resultData.experienceLabel || '1-3年')
+    const score = computed(() => {
+      const numeric = Number(props.resultData?.score)
+      return Number.isFinite(numeric) ? Math.round(numeric) : null
+    })
+    const hasOverallScore = computed(() => score.value != null)
+    const totalQuestions = computed(() => {
+      const numeric = Number(props.resultData?.totalQuestions)
+      if (Number.isFinite(numeric) && numeric > 0) return Math.round(numeric)
+      return Array.isArray(props.resultData?.answers) ? props.resultData.answers.length : 0
+    })
+    const duration = computed(() => props.resultData.duration || '--')
+    const jobName = computed(() => props.resultData.jobName || '模拟面试')
+    const experienceLabel = computed(() => props.resultData.experienceLabel || '未知')
     const answers = computed(() => props.resultData.answers || [])
     const sessionId = computed(() => props.resultData.sessionId || props.resultData?.report?.sessionId || null)
 
@@ -297,7 +307,7 @@ export default {
     }
 
     onMounted(() => {
-      const target = score.value
+      const target = score.value ?? 0
       const dur = 1500
       const start = Date.now()
       const step = () => {
@@ -345,17 +355,7 @@ export default {
     const summaryComment = computed(() => {
       const reportSummary = props.resultData?.report?.summary
       if (reportSummary) return reportSummary
-
-      if (score.value >= 85) {
-        return '非常棒！你在本次面试中表现出色，技术基础扎实，思路清晰。继续保持这个节奏。'
-      }
-      if (score.value >= 70) {
-        return '整体表现不错，基础掌握较好。建议继续针对薄弱点做重点补强。'
-      }
-      if (score.value >= 60) {
-        return '基本合格，但仍有提升空间。建议系统复盘并做针对性训练。'
-      }
-      return '本次面试表现还有提升空间。建议先补基础，再做高频题强化。'
+      return '正式报告摘要暂未生成，请以后端报告内容为准。'
     })
 
     const radarEmptyTitle = computed(() => (
@@ -372,35 +372,15 @@ export default {
       if (Array.isArray(reportScores) && reportScores.length) {
         return reportScores.slice(0, RADAR_DIMENSIONS.length).map((item) => {
           const scoreNum = Number(item?.score)
-          const scoreValue = Number.isFinite(scoreNum) ? scoreNum : 70
-          const delta = Math.round(scoreValue - 70)
+          const hasNumericScore = Number.isFinite(scoreNum)
           return {
             name: item?.domainName || item?.domainCode || '通用能力',
-            weakPoints: item?.commentary || (scoreValue < 70
-              ? '建议围绕核心概念、常见追问和场景题做补强训练。'
-              : '本场表现良好，建议持续保持。'),
-            delta
+            weakPoints: String(item?.commentary || '').trim() || '正式报告未提供该知识域点评。',
+            delta: hasNumericScore ? Math.round(scoreNum - 70) : null
           }
         })
       }
-
-      const weakDesc = [
-        '加强技术细节理解，确保回答准确完整。',
-        '深入学习底层原理，强化工程化落地能力。',
-        '扩展关联知识面，建立完整知识网络。',
-        '练习结构化表达，先结论再展开。',
-        '多做场景题与项目题，强化问题拆解能力。'
-      ]
-
-      return radarLabels.map((name, i) => {
-        const v = radarValues[i]
-        const delta = v - 70
-        return {
-          name,
-          weakPoints: v < 70 ? weakDesc[i] : '本场表现良好，可继续保持',
-          delta
-        }
-      })
+      return []
     })
 
     const recommendResources = computed(() => {
@@ -465,11 +445,7 @@ export default {
         return '本题尚未作答或结果待同步。'
       }
 
-      if (score >= 90) return '回答非常全面，覆盖了关键点，表达结构清晰。'
-      if (score >= 75) return '回答较好，主要内容完整，细节还可以再展开。'
-      if (score >= 60) return '回答基本正确，但深度和结构还可加强。'
-      if (score > 0) return '回答有部分正确内容，建议围绕核心概念重新复盘。'
-      return status === 'skipped' ? '本题已跳过，建议优先补强该知识点。' : '本题尚未作答或结果待同步。'
+      return '本题正式评分已生成，但当前缺少单题点评文案，请查看正式报告或稍后重试。'
     }
 
     const goToQuestionDetail = (index) => {
@@ -486,6 +462,7 @@ export default {
 
     return {
       animatedScore,
+      hasOverallScore,
       score,
       totalQuestions,
       duration,
@@ -893,6 +870,15 @@ export default {
 
 .score-delta.positive { color: #10b981; }
 .score-delta.negative { color: #ef4444; }
+
+.domain-empty {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
 
 .domain-weak {
   font-size: 13px;
