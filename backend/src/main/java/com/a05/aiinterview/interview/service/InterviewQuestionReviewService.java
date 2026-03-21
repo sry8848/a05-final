@@ -59,7 +59,6 @@ public class InterviewQuestionReviewService {
         dto.setQuestionStem(question.getStem());
         dto.setQuestionType(question.getQuestionType());
         dto.setDomainName(resolveDomainName(session, question));
-        dto.setTargetDepth(question.getTargetDepth());
 
         InterviewAttempt latestFinalAttempt = interviewAttemptMapper.selectLatestFinalAttempt(sessionId, questionId);
         if (latestFinalAttempt == null) {

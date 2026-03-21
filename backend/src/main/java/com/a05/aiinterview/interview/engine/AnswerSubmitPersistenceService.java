@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -38,11 +39,10 @@ public class AnswerSubmitPersistenceService {
     private final ApplicationEventPublisher eventPublisher;
 
     @Transactional(rollbackFor = Exception.class)
-    public PersistedAttemptResult persist(
-            Long sessionId,
-            InterviewQuestion currentQuestion,
-            SubmitAttemptRequest request,
-            EvaluationDecisionOutput evalOutput) {
+    public PersistedAttemptResult persist(Long sessionId,
+                                          InterviewQuestion currentQuestion,
+                                          SubmitAttemptRequest request,
+                                          EvaluationDecisionOutput evalOutput) {
         StateLedgerPatchService.ReductionAudit reductionAudit = stateLedgerPatchService.applyReduction(
                 sessionId,
                 evalOutput,
@@ -55,7 +55,7 @@ public class AnswerSubmitPersistenceService {
         InterviewAttempt attempt = saveAttempt(sessionId, currentQuestion.getId(), request, evalOutput, reductionAudit);
         markQuestionStatus(currentQuestion.getId(), request.getAnswerText());
 
-        boolean shouldEnd = "wrapup".equalsIgnoreCase(evalOutput.getDecision());
+        boolean shouldEnd = "WRAPUP".equalsIgnoreCase(evalOutput.getInterviewAction());
         if (shouldEnd) {
             markSessionFinishing(sessionId);
         }
@@ -74,66 +74,41 @@ public class AnswerSubmitPersistenceService {
                 .attemptDbId(attempt.getId())
                 .attemptId(attempt.getAttemptId())
                 .isFinal(isFinal)
-                .decision(evalOutput.getDecision())
                 .shouldEnd(shouldEnd)
+                .decision(evalOutput.getInterviewAction())
                 .build();
     }
 
     private InterviewAttempt saveAttempt(Long sessionId,
                                          Long questionId,
                                          SubmitAttemptRequest request,
-        EvaluationDecisionOutput evalOutput,
+                                         EvaluationDecisionOutput evalOutput,
                                          StateLedgerPatchService.ReductionAudit reductionAudit) {
-        Map<String, Object> evalSnapshot = new LinkedHashMap<>();
-        evalSnapshot.put("decision", evalOutput.getDecision());
-        evalSnapshot.put("answerAssessment", evalOutput.getAnswerAssessment());
-        evalSnapshot.put("answerVerdict", evalOutput.getAnswerVerdict());
-        evalSnapshot.put("targetFocus", evalOutput.getTargetFocus());
-        evalSnapshot.put("targetAngle", evalOutput.getTargetAngle());
-        evalSnapshot.put("difficultyAdjustment", evalOutput.getDifficultyAdjustment());
-        evalSnapshot.put("nextQuestionGoal", evalOutput.getNextQuestionGoal());
-        evalSnapshot.put("nextDomainId", evalOutput.getNextDomainId());
-        evalSnapshot.put("nextDomainCode", evalOutput.getNextDomainCode());
-        evalSnapshot.put("nextDomainName", evalOutput.getNextDomainName());
-        evalSnapshot.put("questionType", evalOutput.getQuestionType());
-        evalSnapshot.put("focusPoint", evalOutput.getFocusPoint());
-        evalSnapshot.put("domainOutcome", evalOutput.getDomainOutcome());
-        if (evalOutput.getReasoning() != null && !evalOutput.getReasoning().isBlank()) {
-            evalSnapshot.put("reasoning", evalOutput.getReasoning());
-        }
-        if (evalOutput.getSummary() != null && !evalOutput.getSummary().isBlank()) {
-            evalSnapshot.put("summary", evalOutput.getSummary());
-        }
+        Map<String, Object> evaluationJson = new LinkedHashMap<>();
+        evaluationJson.put("interviewAction", evalOutput.getInterviewAction());
+        evaluationJson.put("answerSummary", evalOutput.getAnswerSummary());
+        evaluationJson.put("answerAssessment", evalOutput.getAnswerAssessment());
+        evaluationJson.put("decisionReason", evalOutput.getDecisionReason());
+        evaluationJson.put("candidateStrategies", evalOutput.getCandidateStrategies());
+        evaluationJson.put("finalDecision", evalOutput.getFinalDecision());
+        evaluationJson.put("nextQuestionType", evalOutput.getNextQuestionType());
+        evaluationJson.put("nextFocus", evalOutput.getNextFocus());
+        evaluationJson.put("expectedAnswerPoints", evalOutput.getExpectedAnswerPoints());
+        evaluationJson.put("possibleNextMoves", evalOutput.getPossibleNextMoves());
+        evaluationJson.put("newCoveredDomains", evalOutput.getNewCoveredDomains());
+        evaluationJson.put("newCoveredPoints", evalOutput.getNewCoveredPoints());
+        evaluationJson.put("newCandidatePointsByDomain", evalOutput.getNewCandidatePointsByDomain());
+        evaluationJson.put("retrievalPlans", evalOutput.getRetrievalPlans());
         if (reductionAudit != null) {
-            evalSnapshot.put("ledgerDiff", reductionAudit.getDiff());
-            evalSnapshot.put("reducedLedger", reductionAudit.getNewLedger());
-            if (reductionAudit.getDomainClosureReason() != null
-                    && !reductionAudit.getDomainClosureReason().isBlank()) {
-                evalSnapshot.put("domainClosureReason", reductionAudit.getDomainClosureReason());
-            }
+            evaluationJson.put("ledgerDiff", reductionAudit.getDiff());
+            evaluationJson.put("reducedLedger", reductionAudit.getNewLedger());
+            evaluationJson.put("domainClosureReason", reductionAudit.getDomainClosureReason());
         }
         if (request.getRawAsrText() != null && !request.getRawAsrText().isBlank()) {
-            evalSnapshot.put("rawAsrText", request.getRawAsrText());
+            evaluationJson.put("rawAsrText", request.getRawAsrText());
         }
         if (request.getAsrCorrectionChanges() != null && !request.getAsrCorrectionChanges().isEmpty()) {
-            evalSnapshot.put("asrCorrectionChanges", request.getAsrCorrectionChanges());
-        }
-        if (evalOutput.getRetrievalIntent() != null) {
-            Map<String, Object> retrievalIntent = new LinkedHashMap<>();
-            retrievalIntent.put("domainHint", evalOutput.getRetrievalIntent().getDomainHint());
-            retrievalIntent.put("focusQuery", evalOutput.getRetrievalIntent().getFocusQuery());
-            retrievalIntent.put("questionTypeHint", evalOutput.getRetrievalIntent().getQuestionTypeHint());
-            retrievalIntent.put("avoidRecentFamilies", evalOutput.getRetrievalIntent().getAvoidRecentFamilies());
-            evalSnapshot.put("retrievalIntent", retrievalIntent);
-        }
-        if (evalOutput.getStatePatch() != null && !evalOutput.getStatePatch().isEmpty()) {
-            evalSnapshot.put("statePatch", evalOutput.getStatePatch());
-        }
-        if (evalOutput.getTags() != null) {
-            Map<String, Object> tags = new LinkedHashMap<>();
-            tags.put("questionFamilyHint", evalOutput.getTags().getQuestionFamilyHint());
-            tags.put("interviewerIntent", evalOutput.getTags().getInterviewerIntent());
-            evalSnapshot.put("tags", tags);
+            evaluationJson.put("asrCorrectionChanges", request.getAsrCorrectionChanges());
         }
 
         InterviewAttempt attempt = new InterviewAttempt();
@@ -142,7 +117,7 @@ public class AnswerSubmitPersistenceService {
         attempt.setAttemptId(request.getAttemptId());
         attempt.setAnswerText(request.getAnswerText());
         attempt.setIsFinal(Boolean.TRUE.equals(request.getIsFinal()));
-        attempt.setEvaluationJson(evalSnapshot);
+        attempt.setEvaluationJson(evaluationJson);
         attempt.setDetailEvaluationStatus(DETAIL_STATUS_PENDING);
         attempt.setCreatedAt(LocalDateTime.now());
         interviewAttemptMapper.insert(attempt);

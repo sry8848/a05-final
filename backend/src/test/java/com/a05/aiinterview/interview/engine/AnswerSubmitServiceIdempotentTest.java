@@ -1,13 +1,13 @@
 package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.AiClient;
+import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
 import com.a05.aiinterview.interview.dto.SubmitAttemptRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptResponse;
 import com.a05.aiinterview.interview.entity.InterviewAttempt;
 import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
-import com.a05.aiinterview.resume.mapper.ResumeMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
@@ -26,7 +26,6 @@ class AnswerSubmitServiceIdempotentTest {
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
-        ResumeMapper resumeMapper = mock(ResumeMapper.class);
         AnswerSubmitPersistenceService persistenceService = mock(AnswerSubmitPersistenceService.class);
         ReportGenerationService reportService = mock(ReportGenerationService.class);
         AnswerSubmitService service = new AnswerSubmitService(
@@ -34,10 +33,9 @@ class AnswerSubmitServiceIdempotentTest {
                 sessionMapper,
                 questionMapper,
                 attemptMapper,
-                resumeMapper,
                 persistenceService,
                 reportService,
-                new ObjectMapper()
+                new InterviewDebugTraceService(new ObjectMapper())
         );
 
         InterviewAttempt existing = new InterviewAttempt();
@@ -53,9 +51,9 @@ class AnswerSubmitServiceIdempotentTest {
 
         SubmitAttemptResponse response = service.submitAnswer(1L, 2L, request);
 
-        assertThat(response.getDecision()).isEqualTo("broaden");
+        assertThat(response.getDecision()).isEqualTo("continue");
         assertThat(response.getStreamAttemptId()).isEqualTo("attempt-legacy-signal");
         assertThat(response.getSessionStatus()).isEqualTo("in_progress");
-        verifyNoInteractions(aiClient, sessionMapper, questionMapper, resumeMapper, persistenceService, reportService);
+        verifyNoInteractions(aiClient, sessionMapper, questionMapper, persistenceService, reportService);
     }
 }

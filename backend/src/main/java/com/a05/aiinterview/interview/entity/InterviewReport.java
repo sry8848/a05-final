@@ -17,7 +17,7 @@ import java.util.Map;
  * <p>报告分两层：
  * <ul>
  *   <li>总体层：overallScore、summary、strengths、weaknesses、improvementSuggestions</li>
- *   <li>知识域明细层：skillDomainScores（逐域得分、达到深度、AI 点评）</li>
+ *   <li>知识域明细层：skillDomainScores（逐域得分、AI 点评）</li>
  * </ul>
  */
 @Data
@@ -35,7 +35,7 @@ public class InterviewReport {
 
     /**
      * 逐知识域评分明细列表（JSON）。
-     * 每项包含 domainCode、domainName、score、achievedDepth、commentary。
+     * 每项包含 domainCode、domainName、score、commentary。
      * 前端用于渲染雷达图和各域折叠卡片。
      */
     @TableField(typeHandler = JacksonTypeHandler.class)

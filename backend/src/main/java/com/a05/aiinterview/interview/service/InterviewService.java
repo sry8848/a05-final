@@ -6,6 +6,7 @@ import com.a05.aiinterview.common.enums.TargetRole;
 import com.a05.aiinterview.interview.dto.CreateInterviewRequest;
 import com.a05.aiinterview.interview.dto.CreateInterviewResponse;
 import com.a05.aiinterview.interview.dto.InterviewDetailDto;
+import com.a05.aiinterview.interview.dto.InterviewSyllabus;
 import com.a05.aiinterview.interview.dto.QuestionDto;
 import com.a05.aiinterview.interview.dto.SyllabusSummaryDto;
 import com.a05.aiinterview.interview.engine.PlannerOrchestrationService;
@@ -158,9 +159,6 @@ public class InterviewService {
         String questionType = StringUtils.hasText(request.getSingleQuestionType())
                 ? request.getSingleQuestionType().trim()
                 : "PRINCIPLE";
-        String targetDepth = StringUtils.hasText(request.getSingleQuestionTargetDepth())
-                ? request.getSingleQuestionTargetDepth().trim()
-                : "L2";
         int maxQuestions = request.getMaxQuestions() != null && request.getMaxQuestions() > 0
                 ? request.getMaxQuestions() : 1;
 
@@ -173,48 +171,52 @@ public class InterviewService {
         question.setTargetSkill(domainName);
         question.setExpectedPoints(request.getSingleQuestionExpectedPoints() != null
                 ? request.getSingleQuestionExpectedPoints() : List.of());
-        question.setTargetDepth(targetDepth);
         question.setStatus("asked");
 
         Map<String, Object> generationCtx = new LinkedHashMap<>();
         generationCtx.put("domainCode", domainCode);
         generationCtx.put("questionType", questionType);
-        generationCtx.put("targetDepth", targetDepth);
+        generationCtx.put("focusPoint", domainName);
+        generationCtx.put("generatedBySingleQuestion", true);
         question.setGenerationContextJson(generationCtx);
 
         question.setCreatedAt(LocalDateTime.now());
         question.setUpdatedAt(LocalDateTime.now());
         interviewQuestionMapper.insert(question);
 
-        Map<String, Object> domain = new LinkedHashMap<>();
-        domain.put("domainId", null);
-        domain.put("domainCode", domainCode);
-        domain.put("domainName", domainName);
-        domain.put("targetDepth", targetDepth);
-        domain.put("priority", "high");
-
-        Map<String, Object> syllabus = new LinkedHashMap<>();
-        syllabus.put("domains", List.of(domain));
-        syllabus.put("questionMixPlan", Map.of(questionType, 1));
-        syllabus.put("projects", List.of());
-
-        Map<String, Object> domainState = new LinkedHashMap<>();
-        domainState.put("domain_id", domainCode);
-        domainState.put("current_depth", "L1");
-        domainState.put("status", "UNASKED");
-        domainState.put("saturated", false);
-        domainState.put("evidence_refs", new ArrayList<>());
-
-        Map<String, Object> questionMixProgress = new LinkedHashMap<>();
-        questionMixProgress.put(questionType, 0);
+        InterviewSyllabus syllabus = InterviewSyllabus.builder()
+                .planningReasoning("单题模式，直接围绕指定题目进入面试。")
+                .domains(List.of(InterviewSyllabus.SyllabusDomain.builder()
+                        .domainId(null)
+                        .domainCode(domainCode)
+                        .domainName(domainName)
+                        .focusPoints(question.getExpectedPoints())
+                        .build()))
+                .experienceItems(List.of())
+                .build();
 
         Map<String, Object> ledger = new LinkedHashMap<>();
-        ledger.put("domain_states", List.of(domainState));
-        ledger.put("question_mix_progress", questionMixProgress);
+        ledger.put("overall_status", "in_progress");
         ledger.put("asked_total", 0);
         ledger.put("last_attempt_id", null);
         ledger.put("max_questions", maxQuestions);
         ledger.put("single_question_mode", true);
+        ledger.put("active_item_key", null);
+        ledger.put("active_item_type", null);
+        ledger.put("active_item_name", null);
+        ledger.put("current_focus", domainName);
+        ledger.put("covered_domains", new ArrayList<>());
+        ledger.put("covered_points", new ArrayList<>());
+        ledger.put("candidate_points_by_domain", new ArrayList<>());
+        ledger.put("recent_question_families", new ArrayList<>());
+        Map<String, Object> singleDomainState = new LinkedHashMap<>();
+        singleDomainState.put("domainId", null);
+        singleDomainState.put("domainCode", domainCode);
+        singleDomainState.put("domainName", domainName);
+        singleDomainState.put("status", "UNASKED");
+        singleDomainState.put("saturated", false);
+        singleDomainState.put("evidenceRefs", new ArrayList<>());
+        ledger.put("domain_states", List.of(singleDomainState));
 
         Map<String, Object> firstQuestionSnapshot = new LinkedHashMap<>();
         firstQuestionSnapshot.put("questionId", question.getId());
@@ -224,13 +226,16 @@ public class InterviewService {
         firstQuestionSnapshot.put("domainName", domainName);
         firstQuestionSnapshot.put("stem", question.getStem());
         firstQuestionSnapshot.put("targetSkill", question.getTargetSkill());
-        firstQuestionSnapshot.put("targetDepth", targetDepth);
         firstQuestionSnapshot.put("aiResultStatus", "success");
         firstQuestionSnapshot.put("hintAvailable", true);
 
         InterviewSession update = new InterviewSession();
         update.setId(session.getId());
-        update.setSyllabusJson(syllabus);
+        update.setSyllabusJson(new LinkedHashMap<>(Map.of(
+                "planningReasoning", syllabus.getPlanningReasoning(),
+                "domains", syllabus.getDomains(),
+                "experienceItems", syllabus.getExperienceItems()
+        )));
         update.setStateLedgerJson(ledger);
         update.setFirstQuestionJson(firstQuestionSnapshot);
         update.setCurrentQuestionNo(1);
@@ -335,7 +340,6 @@ public class InterviewService {
         dto.setDomainName((String) snapshot.get("domainName"));
         dto.setStem((String) snapshot.get("stem"));
         dto.setTargetSkill((String) snapshot.get("targetSkill"));
-        dto.setTargetDepth((String) snapshot.get("targetDepth"));
         Object aiResultStatus = snapshot.get("aiResultStatus");
         dto.setAiResultStatus(aiResultStatus instanceof String ? (String) aiResultStatus : null);
         Object hintAvailable = snapshot.get("hintAvailable");

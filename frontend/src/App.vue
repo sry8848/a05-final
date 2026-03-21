@@ -536,13 +536,6 @@ export default {
       return index === 0 ? '开场题' : '综合题'
     }
 
-    const inferTargetDepth = (score = 0, questionIndex = 0) => {
-      if (score >= 85) return 'L4'
-      if (score >= 70) return 'L3'
-      if (questionIndex >= 3) return 'L3'
-      return 'L2'
-    }
-
     const buildHighlightedSegments = (answerText = '', keywords = [], score = 0) => {
       if (!answerText || answerText === '[跳过]') return []
 
@@ -701,7 +694,6 @@ export default {
       if (hasOwn(source, 'questionStem')) merged.questionStem = source.questionStem
       if (hasOwn(source, 'domainName')) merged.domainName = source.domainName
       if (hasOwn(source, 'questionType')) merged.questionType = source.questionType
-      if (hasOwn(source, 'targetDepth')) merged.targetDepth = source.targetDepth
       if (hasOwn(source, 'userAnswer')) merged.userAnswer = source.userAnswer
       if (hasOwn(source, 'answerStatus')) {
         merged.answerStatus = source.answerStatus == null ? null : normalizeQuestionStatus(source.answerStatus)
@@ -808,7 +800,6 @@ export default {
         questionStem,
         domainName,
         questionType: answer.questionType || inferQuestionType(questionStem, questionIndex),
-        targetDepth: answer.targetDepth || inferTargetDepth(answerScore, questionIndex),
         answerStatus,
         evaluationStatus: isLocalFallback ? 'ready' : 'pending',
         userAnswer: answerText,
@@ -1001,7 +992,6 @@ export default {
         questionStem: item.questionStem || item.question || '未命名题目',
         domainName: item.domainName || inferDomainName(item.questionStem || item.question, item.keywords || [], item.jobName || item.job || ''),
         questionType: item.questionType || inferQuestionType(item.questionStem || item.question, index),
-        targetDepth: item.targetDepth || 'L2',
         answerStatus: !(item.userAnswer || item.answer) ? 'skipped' : 'answered',
         evaluationStatus: isLocalFallback ? 'ready' : 'pending',
         userAnswer: item.userAnswer || item.answer || '',
@@ -1332,7 +1322,6 @@ export default {
           analysis: detail.commentary,
           domainName: collected?.domainName || detail.domainName,
           questionType: collected?.questionType || detail.questionType,
-          targetDepth: collected?.targetDepth || detail.targetDepth,
           isLocalFallback: false
         }
 

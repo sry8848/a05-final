@@ -6,16 +6,10 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 评估决策 AI 输出。
- *
- * <p>新契约以“提问目标驱动”为主，最小必要结构包括：
- * answerAssessment / answerVerdict / decision / targetFocus / targetAngle /
- * difficultyAdjustment / nextQuestionGoal / questionType / focusPoint /
- * nextDomain* / retrievalIntent / domainOutcome / statePatch。
- *
+ * 新契约区分机器动作（interviewAction）与自然语言策略描述（finalDecision）。
  */
 @Data
 @Builder
@@ -23,63 +17,54 @@ import java.util.Map;
 @AllArgsConstructor
 public class EvaluationDecisionOutput {
 
+    /** CONTINUE / WRAPUP */
+    private String interviewAction;
+    private String answerSummary;
     private String answerAssessment;
-    private String answerVerdict;
-    private String decision;
-    private String targetFocus;
-    private String targetAngle;
-    private String difficultyAdjustment;
-    private String nextQuestionGoal;
-    private Long nextDomainId;
-    private String nextDomainCode;
-    private String nextDomainName;
-    private String questionType;
-    private String focusPoint;
-    private String domainOutcome;
-    private RetrievalIntent retrievalIntent;
-    private Map<String, Object> statePatch;
-    private Tags tags;
-
-    /** 兼容旧日志字段。 */
-    private String reasoning;
-
-    /** 兼容旧日志字段。 */
-    private String summary;
+    private String decisionReason;
+    private List<String> candidateStrategies;
+    private String finalDecision;
+    /** THEORY / PROJECT / SCENARIO / SOFT_SKILL */
+    private String nextQuestionType;
+    private String nextFocus;
+    private List<String> expectedAnswerPoints;
+    private List<String> possibleNextMoves;
+    private List<CoveredDomain> newCoveredDomains;
+    private List<String> newCoveredPoints;
+    private List<CandidatePointsByDomain> newCandidatePointsByDomain;
+    private List<RetrievalPlan> retrievalPlans;
 
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class RetrievalIntent {
-        private String domainHint;
-        private String focusQuery;
-        private String questionTypeHint;
-        private List<String> avoidRecentFamilies;
+    public static class CoveredDomain {
+        private Long domainId;
+        private String domainName;
     }
 
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class Tags {
-        private String questionFamilyHint;
-        private String interviewerIntent;
+    public static class CandidatePointsByDomain {
+        private Long domainId;
+        private String domainName;
+        private List<String> points;
     }
 
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class NextQuestionStrategy {
-
-        private Long nextDomainId;
-        private String nextDomainCode;
-        private String nextDomainName;
-        private String questionType;
-        private String targetDepth;
-        private String targetSkill;
-        private List<String> expectedPoints;
-        private String difficulty;
-        private String focusPoint;
+    public static class RetrievalPlan {
+        private Boolean retrievalNeed;
+        private String retrievalGoal;
+        private String primaryQuery;
+        private List<String> alternateQueries;
+        /** questions / domain */
+        private String retrievalType;
+        private List<String> expectedEvidence;
+        private List<String> avoidEvidence;
     }
 }

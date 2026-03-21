@@ -31,12 +31,6 @@ public class SessionSkillState {
     /** 该知识域已被考察的题数 */
     private Integer testedCount;
 
-    /** 目标深度等级（由 Planner 设定）：L1~L5 */
-    private String targetDepth;
-
-    /** 当前已达到的深度等级（随答题评估动态更新） */
-    private String currentDepth;
-
     /** 是否已"问透"（满足问透判定规则后置为 true，后续降权） */
     private Boolean saturated;
 

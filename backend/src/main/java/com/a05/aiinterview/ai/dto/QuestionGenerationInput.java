@@ -1,37 +1,27 @@
 package com.a05.aiinterview.ai.dto;
 
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.util.List;
 import java.util.Map;
 
 /**
  * 题目生成 AI 调用入参。
- *
- * <p>新模型以“提问目标驱动”为主，包含 role/project/recent/goal/retrieval/constraints 六类上下文。
- * 旧字段当前保留为迁移支架，待 QuestionStream/OpenAI Prompt 全部切完后删除。
+ * 只保留新 prompt 真实消费的上下文块，不再保留深度/难度迁移字段。
  */
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class QuestionGenerationInput {
 
-    /** 面试会话 ID（审计透传） */
     private Long interviewId;
-
-    /** 当前题目 ID（流式出题时通常为空，统一审计字段保留） */
     private Long questionId;
-
-    /** 题目变体 ID（普通出题场景通常为空，统一审计字段保留） */
-    private String variantId;
-
-    /** 岗位编码 */
     private String positionCode;
-
-    /** 面试模式：practice / professional */
     private String mode;
-
-    /** 工作年限枚举 */
     private String experienceLevel;
 
     private RoleContext roleContext;
@@ -41,45 +31,35 @@ public class QuestionGenerationInput {
     private RetrievalContext retrievalContext;
     private Constraints constraints;
 
-    /** 已问过的题目列表（避免重复出题） */
     private List<AskedQuestion> askedQuestions;
-
-    /** 主考纲摘要（供 AI 参考整体规划） */
     private Map<String, Object> syllabus;
-
-    /** 简历文本摘要（供 AI 出项目相关题） */
     private String resumeTextSummary;
-
-    // ===== 迁移期兼容字段 =====
-    private Long nextDomainId;
-    private String nextDomainCode;
-    private String nextDomainName;
-    private String nextQuestionType;
-    private String targetDepth;
-    private String difficulty;
-    private String targetSkill;
-    private List<String> expectedPoints;
-    private String ragContext;
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class RoleContext {
         private String roundType;
         private String candidateLevel;
-        private List<String> difficultyBand;
         private String style;
     }
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class ProjectContext {
-        private String activeProjectId;
-        private String projectName;
+        private String activeItemKey;
+        private String itemType;
+        private String itemName;
         private String currentFocus;
     }
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class RecentContext {
         private String lastQuestion;
         private String lastAnswerSummary;
@@ -89,40 +69,45 @@ public class QuestionGenerationInput {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class NextQuestionGoal {
-        private String decision;
-        private String targetFocus;
-        private String targetAngle;
-        private String difficultyAdjustment;
         private String questionType;
-        private String focusPoint;
-        private String nextQuestionGoal;
-        private Long nextDomainId;
-        private String nextDomainCode;
-        private String nextDomainName;
+        private String nextFocus;
+        private String goalSummary;
+        private Long relatedDomainId;
+        private String relatedDomainCode;
+        private String relatedDomainName;
+        private String relatedItemKey;
+        private String relatedItemType;
+        private String relatedItemName;
+        private List<String> expectedAnswerPoints;
     }
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class RetrievalContext {
-        private String query;
-        private String ragContext;
-        private String domainHint;
-        private String questionTypeHint;
-        private List<String> avoidRecentFamilies;
+        private String summary;
+        private List<EvaluationDecisionOutput.RetrievalPlan> retrievalPlans;
+        private List<EvaluationDecisionInput.RetrievedMaterial> retrievedMaterials;
     }
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class Constraints {
         private List<String> avoidRepetitionFamilies;
         private boolean mustSoundNatural;
         private Integer maxSentences;
     }
 
-    /** 已问题目摘要（避免重复） */
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class AskedQuestion {
         private Long questionId;
         private String questionType;
@@ -130,6 +115,6 @@ public class QuestionGenerationInput {
         private String stem;
         private String focusPoint;
         private String questionFamilyId;
-        private String activeProjectId;
+        private String activeItemKey;
     }
 }

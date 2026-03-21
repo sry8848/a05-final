@@ -58,6 +58,4 @@ public class CreateInterviewRequest {
     @Schema(description = "Single-question mode expected key points (optional)")
     private List<String> singleQuestionExpectedPoints;
 
-    @Schema(description = "Single-question mode target depth (optional)", example = "L2")
-    private String singleQuestionTargetDepth;
 }

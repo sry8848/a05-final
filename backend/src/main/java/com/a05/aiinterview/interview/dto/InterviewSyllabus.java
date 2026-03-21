@@ -1,4 +1,4 @@
-package com.a05.aiinterview.ai.dto;
+package com.a05.aiinterview.interview.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -11,17 +11,18 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class PlannerOutput {
+public class InterviewSyllabus {
 
     private String planningReasoning;
-    private List<DomainPlan> domains;
-    private List<ExperienceItem> experienceItems;
+    private List<SyllabusDomain> domains;
+    private List<SyllabusExperienceItem> experienceItems;
 
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class DomainPlan {
+    public static class SyllabusDomain {
+        private Long domainId;
         private String domainCode;
         private String domainName;
         private List<String> focusPoints;
@@ -31,7 +32,8 @@ public class PlannerOutput {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class ExperienceItem {
+    public static class SyllabusExperienceItem {
+        private String itemKey;
         private String itemType;
         private String itemName;
         private String resumeDescription;

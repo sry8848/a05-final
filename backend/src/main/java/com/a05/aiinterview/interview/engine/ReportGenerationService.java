@@ -184,7 +184,6 @@ public class ReportGenerationService {
                     .questionType(q.getQuestionType())
                     .domainCode(domainCode)
                     .domainName(domainName)
-                    .targetDepth(q.getTargetDepth())
                     .stem(q.getStem())
                     .answerText(answerMap.get(q.getId()))
                     .expectedPoints(q.getExpectedPoints())
@@ -205,7 +204,6 @@ public class ReportGenerationService {
                         m.put("domainCode", s.getDomainCode());
                         m.put("domainName", s.getDomainName());
                         m.put("score", s.getScore());
-                        m.put("achievedDepth", s.getAchievedDepth());
                         m.put("commentary", s.getCommentary());
                         return m;
                     })

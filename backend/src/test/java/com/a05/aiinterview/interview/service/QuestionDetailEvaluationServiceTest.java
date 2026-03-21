@@ -116,7 +116,6 @@ class QuestionDetailEvaluationServiceTest {
         question.setSessionId(1L);
         question.setStem("请解释AQS");
         question.setQuestionType("PRINCIPLE");
-        question.setTargetDepth("L3");
         question.setExpectedPoints(List.of("state", "CAS"));
         question.setGenerationContextJson(Map.of("domainCode", "java_concurrency"));
         when(questionMapper.selectById(2L)).thenReturn(question);

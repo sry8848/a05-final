@@ -1,5 +1,6 @@
 package com.a05.aiinterview.interview.engine;
 
+import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
@@ -8,238 +9,124 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class StateLedgerReducerTest {
+class StateLedgerPatchServiceUpdatedLedgerTest {
 
     private final StateLedgerReducer reducer = new DefaultStateLedgerReducer();
 
     @Test
-    void reduce_intro_shouldUpdateGlobalStateOnly() {
-        Map<String, Object> oldLedger = baseLedger("java_core");
+    void reduce_shouldUpdateFocusItemAndQuestionFamily() {
+        Map<String, Object> oldLedger = baseLedger();
 
         LedgerMutation mutation = LedgerMutation.builder()
                 .questionType("INTRO")
-                .decision("probe")
-                .answerVerdict("STRONG")
-                .activeProjectId("p_001")
-                .currentFocus("订单项目")
-                .statePatch(Map.of(
-                        "activeProjectId", "p_001",
-                        "currentFocus", "订单项目"
-                ))
+                .currentFocus("自我介绍")
+                .nextFocus("订单项目")
+                .currentItemKey("item-old")
+                .nextItemKey("item-order")
+                .nextItemType("PROJECT")
+                .nextItemName("订单系统")
+                .questionFamilyId("INTRO.订单项目")
                 .build();
 
         Map<String, Object> newLedger = reducer.reduce(oldLedger, mutation, "attempt-intro-1", 100L);
 
         assertThat(newLedger.get("asked_total")).isEqualTo(1);
         assertThat(newLedger.get("last_attempt_id")).isEqualTo("attempt-intro-1");
-        assertThat(newLedger.get("active_project_id")).isEqualTo("p_001");
         assertThat(newLedger.get("current_focus")).isEqualTo("订单项目");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> mixProgress = (Map<String, Object>) newLedger.get("question_mix_progress");
-        assertThat(mixProgress).containsEntry("INTRO", 1);
-        assertThat(newLedger.get("domain_states")).isEqualTo(oldLedger.get("domain_states"));
+        assertThat(newLedger.get("active_item_key")).isEqualTo("item-order");
+        assertThat(newLedger.get("active_item_type")).isEqualTo("PROJECT");
+        assertThat(newLedger.get("active_item_name")).isEqualTo("订单系统");
+        assertThat(newLedger.get("recent_question_families")).isEqualTo(List.of("INTRO.订单项目"));
     }
 
     @Test
-    void reduce_introRescueShouldCountTowardsRescueQuota() {
-        Map<String, Object> oldLedger = baseLedger("java_core");
-
-        LedgerMutation mutation = LedgerMutation.builder()
-                .questionType("INTRO")
-                .decision("rescue")
-                .answerVerdict("PARTIAL")
-                .currentDomainCode("intro")
-                .focusPoint("项目真实性")
-                .build();
-
-        Map<String, Object> newLedger = reducer.reduce(oldLedger, mutation, "attempt-intro-rescue-1", 101L);
-
-        assertThat(newLedger.get("rescue_total")).isEqualTo(1);
-        assertThat(newLedger.get("rescue_counts_by_domain")).isEqualTo(Map.of("intro", 1));
-    }
-
-    @Test
-    void reduce_weakBroadenShouldCircuitBreakCurrentDomain() {
-        Map<String, Object> oldLedger = baseLedger("redis");
+    void reduce_shouldMergeCoveredDomainsCoveredPointsAndCandidatePoints() {
+        Map<String, Object> oldLedger = baseLedger();
 
         LedgerMutation mutation = LedgerMutation.builder()
                 .questionType("PRINCIPLE")
                 .currentDomainCode("redis")
                 .currentDomainId(6L)
-                .currentTargetDepth("L2")
-                .decision("broaden")
-                .answerVerdict("WEAK")
-                .domainOutcome("circuit_broken")
-                .focusPoint("缓存击穿")
-                .statePatch(Map.of(
-                        "weakSignalsAdd", List.of("缓存击穿不清晰")
+                .currentFocus("缓存击穿")
+                .questionFamilyId("PRINCIPLE.缓存击穿")
+                .newCoveredDomains(List.of(
+                        EvaluationDecisionOutput.CoveredDomain.builder()
+                                .domainId(6L)
+                                .domainName("Redis")
+                                .build()
+                ))
+                .newCoveredPoints(List.of("Redis / 缓存击穿基础方案"))
+                .newCandidatePointsByDomain(List.of(
+                        EvaluationDecisionOutput.CandidatePointsByDomain.builder()
+                                .domainId(6L)
+                                .domainName("Redis")
+                                .points(List.of("热点 key", "缓存雪崩"))
+                                .build()
                 ))
                 .build();
 
         Map<String, Object> newLedger = reducer.reduce(oldLedger, mutation, "attempt-redis-1", 22L);
 
+        assertThat(newLedger.get("covered_domains")).isEqualTo(List.of("Redis"));
+        assertThat(newLedger.get("covered_points")).isEqualTo(List.of("Redis / 缓存击穿基础方案"));
         @SuppressWarnings("unchecked")
-        Map<String, Object> redis = (Map<String, Object>) ((List<?>) newLedger.get("domain_states")).getFirst();
-        assertThat(redis.get("status")).isEqualTo("CIRCUIT_BROKEN");
-        assertThat(redis.get("saturated")).isEqualTo(true);
-        assertThat(redis.get("evidence_refs")).isEqualTo(List.of(22L));
-        assertThat(newLedger.get("weak_signals")).isEqualTo(List.of("缓存击穿不清晰"));
+        List<Map<String, Object>> candidatePoints = (List<Map<String, Object>>) newLedger.get("candidate_points_by_domain");
+        assertThat(candidatePoints).hasSize(1);
+        assertThat(candidatePoints.getFirst()).containsEntry("domainId", 6L);
+        assertThat(candidatePoints.getFirst()).containsEntry("domainName", "Redis");
+        assertThat(candidatePoints.getFirst().get("points")).isEqualTo(List.of("热点 key", "缓存雪崩"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> redisState = (Map<String, Object>) ((List<?>) newLedger.get("domain_states")).getFirst();
+        assertThat(redisState.get("status")).isEqualTo("COVERED");
+        assertThat(redisState.get("saturated")).isEqualTo(true);
+        assertThat(redisState.get("evidenceRefs")).isEqualTo(List.of(22L));
     }
 
     @Test
-    void reduce_partialRescueShouldKeepDomainInProgress() {
-        Map<String, Object> oldLedger = baseLedger("redis");
+    void reduce_shouldKeepCurrentDomainInProgressWhenNotCovered() {
+        Map<String, Object> oldLedger = baseLedger();
 
         LedgerMutation mutation = LedgerMutation.builder()
                 .questionType("PRINCIPLE")
                 .currentDomainCode("redis")
                 .currentDomainId(6L)
-                .currentTargetDepth("L2")
-                .decision("rescue")
-                .answerVerdict("PARTIAL")
-                .domainOutcome("continue")
-                .focusPoint("缓存击穿")
-                .statePatch(Map.of(
-                        "currentFocus", "缓存击穿",
-                        "weakSignalsAdd", List.of("实现思路不清晰")
-                ))
+                .currentFocus("缓存击穿")
                 .build();
 
-        Map<String, Object> newLedger = reducer.reduce(oldLedger, mutation, "attempt-redis-1b", 23L);
+        Map<String, Object> newLedger = reducer.reduce(oldLedger, mutation, "attempt-redis-2", 23L);
 
         @SuppressWarnings("unchecked")
-        Map<String, Object> redis = (Map<String, Object>) ((List<?>) newLedger.get("domain_states")).getFirst();
-        assertThat(redis.get("status")).isEqualTo("IN_PROGRESS");
-        assertThat(redis.get("current_depth")).isEqualTo("");
-        assertThat(redis.get("saturated")).isEqualTo(false);
-        assertThat(redis.get("evidence_refs")).isEqualTo(List.of(23L));
+        Map<String, Object> redisState = (Map<String, Object>) ((List<?>) newLedger.get("domain_states")).getFirst();
+        assertThat(redisState.get("status")).isEqualTo("IN_PROGRESS");
+        assertThat(redisState.get("saturated")).isEqualTo(false);
+        assertThat(redisState.get("evidenceRefs")).isEqualTo(List.of(23L));
         assertThat(newLedger.get("current_focus")).isEqualTo("缓存击穿");
-        assertThat(newLedger.get("rescue_total")).isEqualTo(1);
-        assertThat(newLedger.get("rescue_counts_by_domain")).isEqualTo(Map.of("redis", 1));
-        assertThat(newLedger.get("last_focus_point")).isEqualTo("缓存击穿");
-        assertThat(newLedger.get("current_focus_streak")).isEqualTo(1);
     }
 
-    @Test
-    void reduce_strongCoveredShouldAdvanceDepthAndMarkCovered() {
-        Map<String, Object> oldLedger = baseLedger("mq");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> mq = (Map<String, Object>) ((List<?>) oldLedger.get("domain_states")).getFirst();
-        mq.put("status", "IN_PROGRESS");
-        mq.put("current_depth", "L1");
-        mq.put("evidence_refs", List.of(10L));
-
-        LedgerMutation mutation = LedgerMutation.builder()
-                .questionType("PROJECT_DEEP_DIVE")
-                .currentDomainCode("mq")
-                .currentDomainId(8L)
-                .currentTargetDepth("L2")
-                .decision("probe")
-                .answerVerdict("STRONG")
-                .domainOutcome("covered")
-                .focusPoint("支付回调并发冲突")
-                .statePatch(Map.of(
-                        "coveredPointsAdd", List.of("mq:pay-close-conflict"),
-                        "recentQuestionFamiliesAdd", List.of("mq.pay-close.boundary")
-                ))
-                .build();
-
-        Map<String, Object> newLedger = reducer.reduce(oldLedger, mutation, "attempt-mq-2", 33L);
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> newMq = (Map<String, Object>) ((List<?>) newLedger.get("domain_states")).getFirst();
-        assertThat(newMq.get("status")).isEqualTo("COVERED");
-        assertThat(newMq.get("current_depth")).isEqualTo("L2");
-        assertThat(newMq.get("saturated")).isEqualTo(true);
-        assertThat(newMq.get("evidence_refs")).isEqualTo(List.of(10L, 33L));
-        assertThat(newLedger.get("covered_points")).isEqualTo(List.of("mq:pay-close-conflict"));
-        assertThat(newLedger.get("recent_question_families")).isEqualTo(List.of("mq.pay-close.boundary"));
-        assertThat(newLedger.get("last_focus_point")).isEqualTo("支付回调并发冲突");
-        assertThat(newLedger.get("current_focus_streak")).isEqualTo(1);
-    }
-
-    @Test
-    void reduce_sameFocusFollowupShouldIncreaseFocusStreak() {
-        Map<String, Object> oldLedger = baseLedger("redis");
-        oldLedger.put("last_focus_point", "缓存击穿");
-        oldLedger.put("current_focus_streak", 4);
-
-        LedgerMutation mutation = LedgerMutation.builder()
-                .questionType("PRINCIPLE")
-                .currentDomainCode("redis")
-                .currentDomainId(6L)
-                .currentTargetDepth("L2")
-                .decision("followup")
-                .answerVerdict("STRONG")
-                .domainOutcome("continue")
-                .focusPoint("缓存击穿")
-                .build();
-
-        Map<String, Object> newLedger = reducer.reduce(oldLedger, mutation, "attempt-redis-2", 24L);
-
-        assertThat(newLedger.get("last_focus_point")).isEqualTo("缓存击穿");
-        assertThat(newLedger.get("current_focus_streak")).isEqualTo(5);
-    }
-
-    @Test
-    void reduce_coveredDomainShouldNotBeReopened() {
-        Map<String, Object> oldLedger = baseLedger("mq");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> mq = (Map<String, Object>) ((List<?>) oldLedger.get("domain_states")).getFirst();
-        mq.put("status", "COVERED");
-        mq.put("current_depth", "L2");
-        mq.put("saturated", true);
-        mq.put("evidence_refs", List.of(10L));
-
-        LedgerMutation mutation = LedgerMutation.builder()
-                .questionType("PROJECT_DEEP_DIVE")
-                .currentDomainCode("mq")
-                .currentDomainId(8L)
-                .currentTargetDepth("L3")
-                .decision("followup")
-                .answerVerdict("PARTIAL")
-                .domainOutcome("continue")
-                .focusPoint("支付回调并发冲突")
-                .build();
-
-        Map<String, Object> newLedger = reducer.reduce(oldLedger, mutation, "attempt-mq-3", 34L);
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> newMq = (Map<String, Object>) ((List<?>) newLedger.get("domain_states")).getFirst();
-        assertThat(newMq.get("status")).isEqualTo("COVERED");
-        assertThat(newMq.get("current_depth")).isEqualTo("L2");
-        assertThat(newMq.get("saturated")).isEqualTo(true);
-        assertThat(newMq.get("evidence_refs")).isEqualTo(List.of(10L, 34L));
-    }
-
-    private Map<String, Object> baseLedger(String domainCode) {
+    private Map<String, Object> baseLedger() {
         Map<String, Object> ledger = new LinkedHashMap<>();
-        ledger.put("session_id", "26");
         ledger.put("overall_status", "IN_PROGRESS");
-        ledger.put("active_project_id", null);
-        ledger.put("current_focus", null);
-        ledger.put("remaining_turn_budget", 8);
-        ledger.put("covered_domains", List.of());
-        ledger.put("covered_points", List.of());
-        ledger.put("weak_signals", List.of());
-        ledger.put("recent_question_families", List.of());
-        ledger.put("rescue_total", 0);
-        ledger.put("rescue_counts_by_domain", new LinkedHashMap<>());
-        ledger.put("last_focus_point", null);
-        ledger.put("current_focus_streak", 0);
-        ledger.put("domain_states", List.of(
-                new LinkedHashMap<>(Map.of(
-                        "domain_id", domainCode,
-                        "status", "UNASKED",
-                        "target_depth", "L2",
-                        "current_depth", "",
-                        "saturated", false,
-                        "evidence_refs", List.of()
-                ))
-        ));
-        ledger.put("question_mix_progress", new LinkedHashMap<>(Map.of("INTRO", 0, "PRINCIPLE", 0, "PROJECT_DEEP_DIVE", 0)));
         ledger.put("asked_total", 0);
         ledger.put("last_attempt_id", null);
+        ledger.put("active_item_key", null);
+        ledger.put("active_item_type", null);
+        ledger.put("active_item_name", null);
+        ledger.put("current_focus", null);
+        ledger.put("covered_domains", List.of());
+        ledger.put("covered_points", List.of());
+        ledger.put("candidate_points_by_domain", List.of());
+        ledger.put("recent_question_families", List.of());
+        ledger.put("domain_states", List.of(
+                new LinkedHashMap<>(Map.of(
+                        "domainId", 6L,
+                        "domainCode", "redis",
+                        "domainName", "Redis",
+                        "status", "UNASKED",
+                        "saturated", false,
+                        "evidenceRefs", List.of()
+                ))
+        ));
         return ledger;
     }
 }

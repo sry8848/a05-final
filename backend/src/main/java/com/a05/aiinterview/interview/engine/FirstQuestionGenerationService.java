@@ -34,7 +34,6 @@ public class FirstQuestionGenerationService {
     private static final ObjectMapper AUDIT_OBJECT_MAPPER = new ObjectMapper();
     private static final String INTRO_DOMAIN_CODE = "intro";
     private static final String INTRO_QUESTION_TYPE = "INTRO";
-    private static final String INTRO_TARGET_DEPTH = "L1";
     private static final String INTRO_TARGET_SKILL = "沟通表达与项目概述";
     private static final String INTRO_REWRITE_PROMPT_CODE = "intro_rewrite";
     private static final int INTRO_REWRITE_MAX_LEN = 180;
@@ -171,13 +170,11 @@ public class FirstQuestionGenerationService {
         question.setStem(safePrompt(stem));
         question.setTargetSkill(INTRO_TARGET_SKILL);
         question.setExpectedPoints(INTRO_EXPECTED_POINTS);
-        question.setTargetDepth(INTRO_TARGET_DEPTH);
         question.setStatus("asked");
 
         Map<String, Object> ctx = new LinkedHashMap<>();
         ctx.put("domainCode", INTRO_DOMAIN_CODE);
         ctx.put("questionType", INTRO_QUESTION_TYPE);
-        ctx.put("targetDepth", INTRO_TARGET_DEPTH);
         ctx.put("variantId", selection.getVariantId());
         ctx.put("basePromptText", selection.getBasePrompt());
         ctx.put("rewritten", rewritten);

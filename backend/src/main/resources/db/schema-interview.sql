@@ -10,7 +10,6 @@ CREATE TABLE IF NOT EXISTS interview_sessions (
     user_id BIGINT NOT NULL COMMENT '用户ID',
     target_position VARCHAR(128) NOT NULL COMMENT '目标岗位名称或编码',
     experience_level VARCHAR(64) NOT NULL COMMENT '工作年限，例如: 应届 / 1-3年',
-    difficulty VARCHAR(32) NOT NULL DEFAULT 'medium' COMMENT '难度：easy/medium/hard',
     mode VARCHAR(32) NOT NULL COMMENT '面试模式：practice=练习模式, professional=专业模式',
     job_description TEXT NULL COMMENT 'JD 文本（可选）',
     resume_id BIGINT NULL COMMENT '本次面试选用的简历ID（来自简历库）',
@@ -25,4 +24,3 @@ CREATE TABLE IF NOT EXISTS interview_sessions (
     INDEX idx_interview_sessions_status (status),
     INDEX idx_interview_sessions_user_status (user_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试会话表';
-

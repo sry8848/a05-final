@@ -13,14 +13,11 @@
         <result column="secondary_domain_ids"
                 property="secondaryDomainIds"
                 typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
-        <result column="project_id" property="projectId"/>
         <result column="stem" property="stem"/>
         <result column="target_skill" property="targetSkill"/>
         <result column="expected_points"
                 property="expectedPoints"
                 typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
-        <result column="target_depth" property="targetDepth"/>
-        <result column="difficulty" property="difficulty"/>
         <result column="status" property="status"/>
         <result column="hint_text" property="hintText"/>
         <result column="generation_context_json"

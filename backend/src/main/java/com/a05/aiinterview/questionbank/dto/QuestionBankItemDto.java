@@ -17,7 +17,6 @@ public class QuestionBankItemDto {
     private String questionStem;
     private String domainName;
     private String questionType;
-    private String targetDepth;
     private String answerSummary;
     private String sourceCreatedAt;
     private String createdAt;

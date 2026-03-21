@@ -50,7 +50,6 @@ promptVersion: v1
 - 题干：{{questionStem}}
 - 题型：{{questionType}}
 - 知识域：{{domainName}}（{{domainCode}}）
-- 目标深度：{{targetDepth}}
 
 【候选人最终回答】
 {{answerText}}

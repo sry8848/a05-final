@@ -11,7 +11,8 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 默认账本 reducer，按新 decision/domainOutcome 语义推进账本。
+ * 新账本 reducer。
+ * 只维护最小运行态：当前焦点、当前 item、已覆盖点、候选点和知识域状态。
  */
 @Component
 public class DefaultStateLedgerReducer implements StateLedgerReducer {
@@ -22,251 +23,243 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
                                       String attemptId,
                                       Long evidenceQuestionId) {
         Map<String, Object> ledger = deepCopyLedger(oldLedger);
-        incrementMixProgress(ledger, normalizeQuestionType(mutation.getQuestionType()));
         ledger.put("asked_total", toInt(ledger.get("asked_total")) + 1);
         ledger.put("last_attempt_id", attemptId);
-        decrementTurnBudget(ledger);
-        applyStatePatch(ledger, mutation);
-        updateFocusTracking(ledger, mutation);
-        updateRescueCounters(ledger, mutation);
-        updateDomainFollowupCount(ledger, mutation);
 
-        if (isIntro(mutation.getQuestionType())) {
-            if (mutation.getActiveProjectId() != null && !mutation.getActiveProjectId().isBlank()) {
-                ledger.put("active_project_id", mutation.getActiveProjectId());
-            }
-            if (mutation.getCurrentFocus() != null && !mutation.getCurrentFocus().isBlank()) {
-                ledger.put("current_focus", mutation.getCurrentFocus());
-            }
-            return ledger;
-        }
+        putIfNotBlank(ledger, "current_focus", firstNonBlank(mutation.getNextFocus(), mutation.getCurrentFocus()));
+        putIfNotBlank(ledger, "active_item_key", firstNonBlank(mutation.getNextItemKey(), mutation.getCurrentItemKey()));
+        putIfNotBlank(ledger, "active_item_type", firstNonBlank(mutation.getNextItemType(), mutation.getCurrentItemType()));
+        putIfNotBlank(ledger, "active_item_name", firstNonBlank(mutation.getNextItemName(), mutation.getCurrentItemName()));
 
-        List<Map<String, Object>> states = extractDomainStates(ledger);
-        for (Map<String, Object> state : states) {
-            if (!Objects.equals(mutation.getCurrentDomainCode(), String.valueOf(state.get("domain_id")))) {
-                continue;
-            }
-            applyDomainMutation(state, mutation, evidenceQuestionId);
-            break;
-        }
-        ledger.put("domain_states", states);
+        mergeStringListField(ledger, "covered_points", mutation.getNewCoveredPoints());
+        mergeQuestionFamily(ledger, mutation.getQuestionFamilyId());
+        mergeCoveredDomains(ledger, mutation.getNewCoveredDomains());
+        mergeCandidatePoints(ledger, mutation.getNewCandidatePointsByDomain());
+        updateDomainStates(ledger, mutation, evidenceQuestionId);
         return ledger;
     }
 
-    private void applyDomainMutation(Map<String, Object> state,
-                                     LedgerMutation mutation,
-                                     Long evidenceQuestionId) {
-        DomainStatus before = DomainStatus.fromLedgerValue(asString(state.get("status")));
-        appendEvidence(state, evidenceQuestionId);
-
-        if (before == DomainStatus.COVERED || before == DomainStatus.CIRCUIT_BROKEN) {
-            state.put("status", before.getValue());
-            state.put("saturated", true);
+    private void mergeQuestionFamily(Map<String, Object> ledger, String questionFamilyId) {
+        if (questionFamilyId == null || questionFamilyId.isBlank()) {
             return;
         }
+        LinkedHashSet<String> values = new LinkedHashSet<>(toStringList(ledger.get("recent_question_families")));
+        values.add(questionFamilyId.trim());
+        ledger.put("recent_question_families", new ArrayList<>(values));
+    }
 
-        if ("STRONG".equalsIgnoreCase(asString(mutation.getAnswerVerdict()))) {
-            advanceDepth(state, mutation.getCurrentTargetDepth());
+    private void mergeCoveredDomains(Map<String, Object> ledger,
+                                     List<com.a05.aiinterview.ai.dto.EvaluationDecisionOutput.CoveredDomain> coveredDomains) {
+        if (coveredDomains == null || coveredDomains.isEmpty()) {
+            return;
         }
-
-        String domainOutcome = asString(mutation.getDomainOutcome()).trim().toLowerCase();
-        if (mutation.isSkipCurrentQuestion()) {
-            domainOutcome = "circuit_broken";
+        LinkedHashSet<String> values = new LinkedHashSet<>(toStringList(ledger.get("covered_domains")));
+        for (com.a05.aiinterview.ai.dto.EvaluationDecisionOutput.CoveredDomain coveredDomain : coveredDomains) {
+            if (coveredDomain == null || coveredDomain.getDomainName() == null || coveredDomain.getDomainName().isBlank()) {
+                continue;
+            }
+            values.add(coveredDomain.getDomainName().trim());
         }
-
-        switch (domainOutcome) {
-            case "covered" -> {
-                state.put("status", DomainStatus.COVERED.getValue());
-                state.put("saturated", true);
-            }
-            case "circuit_broken" -> {
-                state.put("status", DomainStatus.CIRCUIT_BROKEN.getValue());
-                state.put("saturated", true);
-            }
-            default -> {
-                state.put("status", DomainStatus.IN_PROGRESS.getValue());
-                state.put("saturated", false);
-            }
-        }
+        ledger.put("covered_domains", new ArrayList<>(values));
     }
 
     @SuppressWarnings("unchecked")
-    private void applyStatePatch(Map<String, Object> ledger, LedgerMutation mutation) {
-        Map<String, Object> patch = mutation.getStatePatch();
-        if (patch == null || patch.isEmpty()) {
-            return;
-        }
-        mergeStringField(ledger, "active_project_id", patch, "activeProjectId", "active_project_id");
-        mergeStringField(ledger, "current_focus", patch, "currentFocus", "current_focus");
-        mergeListField(ledger, "covered_points", patch, "coveredPointsAdd", "covered_points_add");
-        mergeListField(ledger, "weak_signals", patch, "weakSignalsAdd", "weak_signals_add");
-        mergeListField(ledger, "recent_question_families", patch, "recentQuestionFamiliesAdd", "recent_question_families_add");
-    }
-
-    private void mergeStringField(Map<String, Object> ledger,
-                                  String ledgerKey,
-                                  Map<String, Object> patch,
-                                  String... patchKeys) {
-        for (String patchKey : patchKeys) {
-            Object value = patch.get(patchKey);
-            if (value instanceof String str && !str.isBlank()) {
-                ledger.put(ledgerKey, str);
-                return;
-            }
-        }
-    }
-
-    private void mergeListField(Map<String, Object> ledger,
-                                String ledgerKey,
-                                Map<String, Object> patch,
-                                String... patchKeys) {
-        LinkedHashSet<String> values = new LinkedHashSet<>(toStringList(ledger.get(ledgerKey)));
-        for (String patchKey : patchKeys) {
-            values.addAll(toStringList(patch.get(patchKey)));
-        }
-        ledger.put(ledgerKey, new ArrayList<>(values));
-    }
-
-    private void decrementTurnBudget(Map<String, Object> ledger) {
-        Object value = ledger.get("remaining_turn_budget");
-        if (!(value instanceof Number n)) {
-            return;
-        }
-        ledger.put("remaining_turn_budget", Math.max(0, n.intValue() - 1));
-    }
-
-    private void advanceDepth(Map<String, Object> state, String currentTargetDepth) {
-        String oldDepth = normalizeDepthOrNull(asString(state.get("current_depth")));
-        String newDepth = maxDepth(oldDepth, normalizeDepthOrNull(currentTargetDepth));
-        state.put("current_depth", newDepth == null ? "" : newDepth);
-    }
-
-    @SuppressWarnings("unchecked")
-    private void appendEvidence(Map<String, Object> state, Long evidenceQuestionId) {
-        if (evidenceQuestionId == null) {
-            return;
-        }
-        List<Object> refs = state.get("evidence_refs") instanceof List<?> raw
-                ? new ArrayList<>(raw)
+    private void mergeCandidatePoints(Map<String, Object> ledger,
+                                      List<com.a05.aiinterview.ai.dto.EvaluationDecisionOutput.CandidatePointsByDomain> candidatePoints) {
+        List<Map<String, Object>> existing = ledger.get("candidate_points_by_domain") instanceof List<?> raw
+                ? new ArrayList<>((List<Map<String, Object>>) raw)
                 : new ArrayList<>();
-        refs.add(evidenceQuestionId);
-        state.put("evidence_refs", refs);
-    }
-
-    @SuppressWarnings("unchecked")
-    private void incrementMixProgress(Map<String, Object> ledger, String questionType) {
-        Object mixObj = ledger.get("question_mix_progress");
-        Map<String, Object> mix = mixObj instanceof Map<?, ?> raw
-                ? new LinkedHashMap<>((Map<String, Object>) raw)
-                : new LinkedHashMap<>();
-        mix.put(questionType, toInt(mix.get(questionType)) + 1);
-        ledger.put("question_mix_progress", mix);
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> extractDomainStates(Map<String, Object> ledger) {
-        Object statesObj = ledger.get("domain_states");
-        if (!(statesObj instanceof List<?> raw)) {
-            return new ArrayList<>();
+        if (candidatePoints == null || candidatePoints.isEmpty()) {
+            ledger.put("candidate_points_by_domain", existing);
+            return;
         }
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (Object item : raw) {
-            if (item instanceof Map<?, ?> map) {
-                result.add(new LinkedHashMap<>((Map<String, Object>) map));
+
+        for (com.a05.aiinterview.ai.dto.EvaluationDecisionOutput.CandidatePointsByDomain item : candidatePoints) {
+            if (item == null || item.getDomainId() == null || item.getDomainName() == null || item.getDomainName().isBlank()) {
+                continue;
+            }
+            Map<String, Object> matched = null;
+            for (Map<String, Object> existingItem : existing) {
+                if (Objects.equals(item.getDomainId(), toLong(existingItem.get("domainId")))) {
+                    matched = existingItem;
+                    break;
+                }
+            }
+            if (matched == null) {
+                matched = new LinkedHashMap<>();
+                matched.put("domainId", item.getDomainId());
+                matched.put("domainName", item.getDomainName());
+                matched.put("points", new ArrayList<String>());
+                existing.add(matched);
+            }
+            LinkedHashSet<String> points = new LinkedHashSet<>(toStringList(matched.get("points")));
+            points.addAll(item.getPoints() == null ? List.of() : item.getPoints());
+            matched.put("points", new ArrayList<>(points));
+        }
+        ledger.put("candidate_points_by_domain", existing);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void updateDomainStates(Map<String, Object> ledger,
+                                    LedgerMutation mutation,
+                                    Long evidenceQuestionId) {
+        Object rawStates = ledger.get("domain_states");
+        if (!(rawStates instanceof List<?> states)) {
+            return;
+        }
+        List<Map<String, Object>> copiedStates = new ArrayList<>();
+        for (Object stateObj : states) {
+            if (stateObj instanceof Map<?, ?> state) {
+                copiedStates.add(new LinkedHashMap<>((Map<String, Object>) state));
             }
         }
-        return result;
+
+        for (Map<String, Object> state : copiedStates) {
+            String domainCode = asString(state.get("domainCode"));
+            Long domainId = toLong(state.get("domainId"));
+
+            if (Objects.equals(domainCode, mutation.getCurrentDomainCode()) && evidenceQuestionId != null) {
+                LinkedHashSet<Long> refs = new LinkedHashSet<>(toLongList(state.get("evidenceRefs")));
+                refs.add(evidenceQuestionId);
+                state.put("evidenceRefs", new ArrayList<>(refs));
+                if (!isCovered(state) && !mutation.isSkipCurrentQuestion()) {
+                    state.put("status", DomainStatus.IN_PROGRESS.getValue());
+                    state.put("saturated", false);
+                }
+            }
+
+            if (mutation.getNewCoveredDomains() == null) {
+                continue;
+            }
+            for (com.a05.aiinterview.ai.dto.EvaluationDecisionOutput.CoveredDomain coveredDomain : mutation.getNewCoveredDomains()) {
+                if (coveredDomain == null) {
+                    continue;
+                }
+                if (Objects.equals(domainId, coveredDomain.getDomainId())
+                        || Objects.equals(asString(state.get("domainName")), coveredDomain.getDomainName())) {
+                    state.put("status", DomainStatus.COVERED.getValue());
+                    state.put("saturated", true);
+                }
+            }
+        }
+
+        ledger.put("domain_states", copiedStates);
+    }
+
+    private boolean isCovered(Map<String, Object> state) {
+        return DomainStatus.COVERED.getValue().equalsIgnoreCase(asString(state.get("status")));
+    }
+
+    private void mergeStringListField(Map<String, Object> ledger, String key, List<String> additions) {
+        LinkedHashSet<String> values = new LinkedHashSet<>(toStringList(ledger.get(key)));
+        if (additions != null) {
+            additions.stream()
+                    .filter(value -> value != null && !value.isBlank())
+                    .map(String::trim)
+                    .forEach(values::add);
+        }
+        ledger.put(key, new ArrayList<>(values));
     }
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> deepCopyLedger(Map<String, Object> ledger) {
         Map<String, Object> copy = ledger == null ? new LinkedHashMap<>() : new LinkedHashMap<>(ledger);
-        copy.put("domain_states", extractDomainStates(copy));
-        Object mixObj = copy.get("question_mix_progress");
-        if (mixObj instanceof Map<?, ?> rawMix) {
-            copy.put("question_mix_progress", new LinkedHashMap<>((Map<String, Object>) rawMix));
-        }
+        copy.put("covered_domains", new ArrayList<>(toStringList(copy.get("covered_domains"))));
         copy.put("covered_points", new ArrayList<>(toStringList(copy.get("covered_points"))));
-        copy.put("weak_signals", new ArrayList<>(toStringList(copy.get("weak_signals"))));
         copy.put("recent_question_families", new ArrayList<>(toStringList(copy.get("recent_question_families"))));
-        Object rescueCounts = copy.get("rescue_counts_by_domain");
-        if (rescueCounts instanceof Map<?, ?> rawRescueCounts) {
-            copy.put("rescue_counts_by_domain", new LinkedHashMap<>((Map<String, Object>) rawRescueCounts));
+        Object candidatePoints = copy.get("candidate_points_by_domain");
+        if (candidatePoints instanceof List<?> rawCandidatePoints) {
+            List<Map<String, Object>> cloned = new ArrayList<>();
+            for (Object item : rawCandidatePoints) {
+                if (item instanceof Map<?, ?> map) {
+                    cloned.add(new LinkedHashMap<>((Map<String, Object>) map));
+                }
+            }
+            copy.put("candidate_points_by_domain", cloned);
+        } else {
+            copy.put("candidate_points_by_domain", new ArrayList<>());
+        }
+        Object domainStates = copy.get("domain_states");
+        if (domainStates instanceof List<?> rawDomainStates) {
+            List<Map<String, Object>> cloned = new ArrayList<>();
+            for (Object item : rawDomainStates) {
+                if (item instanceof Map<?, ?> map) {
+                    cloned.add(new LinkedHashMap<>((Map<String, Object>) map));
+                }
+            }
+            copy.put("domain_states", cloned);
+        } else {
+            copy.put("domain_states", new ArrayList<>());
         }
         return copy;
     }
 
-    @SuppressWarnings("unchecked")
-    private void updateRescueCounters(Map<String, Object> ledger, LedgerMutation mutation) {
-        if (!"rescue".equalsIgnoreCase(asString(mutation.getDecision()))) {
-            return;
-        }
-        ledger.put("rescue_total", toInt(ledger.get("rescue_total")) + 1);
-        Object raw = ledger.get("rescue_counts_by_domain");
-        Map<String, Object> counts = raw instanceof Map<?, ?> existing
-                ? new LinkedHashMap<>((Map<String, Object>) existing)
-                : new LinkedHashMap<>();
-        String domainCode = asString(mutation.getCurrentDomainCode());
-        counts.put(domainCode, toInt(counts.get(domainCode)) + 1);
-        ledger.put("rescue_counts_by_domain", counts);
-    }
-
-    private void updateFocusTracking(Map<String, Object> ledger, LedgerMutation mutation) {
-        String focus = asString(mutation.getFocusPoint()).trim();
-        if (focus.isBlank() || isIntro(mutation.getQuestionType())) {
-            return;
-        }
-        String previousFocus = asString(ledger.get("last_focus_point")).trim();
-        int nextStreak = Objects.equals(previousFocus, focus)
-                ? toInt(ledger.get("current_focus_streak")) + 1
-                : 1;
-        ledger.put("last_focus_point", focus);
-        ledger.put("current_focus_streak", nextStreak);
-    }
-
-    /**
-     * 更新当前知识域的连续追问计数。
-     * 当切换到新知识域时重置计数，同一域追问时递增。
-     * 用于限制同一知识域的追问轮数，避免面试官一直深入一个点问不停。
-     */
-    private void updateDomainFollowupCount(Map<String, Object> ledger, LedgerMutation mutation) {
-        String currentDomainCode = asString(mutation.getCurrentDomainCode()).trim();
-        if (currentDomainCode.isBlank() || isIntro(mutation.getQuestionType())) {
-            return;
-        }
-        
-        String lastDomainCode = asString(ledger.get("current_domain_code")).trim();
-        int currentCount = toInt(ledger.get("current_domain_followup_count"));
-        
-        // 判断是否为追问行为（followup 或 probe）
-        String decision = asString(mutation.getDecision()).trim().toLowerCase();
-        boolean isFollowupAction = "followup".equals(decision) || "probe".equals(decision);
-        
-        if (currentDomainCode.equals(lastDomainCode)) {
-            // 同一知识域，追问计数+1
-            ledger.put("current_domain_followup_count", currentCount + 1);
-        } else {
-            // 切换到新知识域，重置计数
-            // 如果是追问行为开始新域，计数从1开始；否则重置为0
-            ledger.put("current_domain_code", currentDomainCode);
-            ledger.put("current_domain_followup_count", isFollowupAction ? 1 : 0);
+    private void putIfNotBlank(Map<String, Object> target, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            target.put(key, value.trim());
         }
     }
 
-    private boolean isIntro(String questionType) {
-        return "INTRO".equalsIgnoreCase(asString(questionType));
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
-    private String normalizeQuestionType(String questionType) {
-        if (questionType == null || questionType.isBlank()) {
-            return "PRINCIPLE";
+    private List<String> toStringList(Object value) {
+        if (!(value instanceof List<?> rawList)) {
+            return List.of();
         }
-        return questionType.trim().toUpperCase();
+        List<String> result = new ArrayList<>();
+        for (Object item : rawList) {
+            if (item == null) {
+                continue;
+            }
+            String text = String.valueOf(item).trim();
+            if (!text.isBlank()) {
+                result.add(text);
+            }
+        }
+        return result;
+    }
+
+    private List<Long> toLongList(Object value) {
+        if (!(value instanceof List<?> rawList)) {
+            return List.of();
+        }
+        List<Long> result = new ArrayList<>();
+        for (Object item : rawList) {
+            Long longValue = toLong(item);
+            if (longValue != null) {
+                result.add(longValue);
+            }
+        }
+        return result;
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private int toInt(Object value) {
-        if (value instanceof Number n) {
-            return n.intValue();
+        if (value instanceof Number number) {
+            return number.intValue();
         }
         if (value == null) {
             return 0;
@@ -280,44 +273,5 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
 
     private String asString(Object value) {
         return value == null ? "" : String.valueOf(value);
-    }
-
-    private List<String> toStringList(Object value) {
-        if (!(value instanceof List<?> rawList)) {
-            return List.of();
-        }
-        List<String> result = new ArrayList<>();
-        for (Object item : rawList) {
-            if (item == null) {
-                continue;
-            }
-            String str = item.toString().trim();
-            if (!str.isBlank()) {
-                result.add(str);
-            }
-        }
-        return result;
-    }
-
-    private String normalizeDepthOrNull(String depth) {
-        if (depth == null || depth.isBlank()) {
-            return null;
-        }
-        String normalized = depth.trim().toUpperCase();
-        return normalized.matches("L[1-5]") ? normalized : null;
-    }
-
-    private String maxDepth(String left, String right) {
-        if (left == null) {
-            return right;
-        }
-        if (right == null) {
-            return left;
-        }
-        return depthIndex(left) >= depthIndex(right) ? left : right;
-    }
-
-    private int depthIndex(String depth) {
-        return depth.charAt(1) - '0';
     }
 }

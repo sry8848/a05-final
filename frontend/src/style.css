@@ -619,35 +619,6 @@ body {
 }
 
 /* 闅惧害閫夋嫨鍣?*/
-.difficulty-selector {
-    display: flex;
-    gap: 12px;
-}
-
-.diff-btn {
-    flex: 1;
-    padding: 12px;
-    background: var(--glass-bg);
-    backdrop-filter: blur(10px);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-md);
-    font-size: 14px;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all var(--transition-normal);
-    font-family: inherit;
-}
-
-.diff-btn:hover {
-    background: rgba(99, 102, 241, 0.1);
-}
-
-.diff-btn.active {
-    background: rgba(99, 102, 241, 0.2);
-    border-color: var(--primary-color);
-    color: var(--primary-color);
-}
-
 /* 婊戝潡 */
 .glass-slider {
     -webkit-appearance: none;
@@ -1433,4 +1404,3 @@ body {
     opacity: 0.7;
     cursor: not-allowed;
 }
-

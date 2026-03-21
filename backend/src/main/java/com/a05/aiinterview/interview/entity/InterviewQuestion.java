@@ -35,9 +35,6 @@ public class InterviewQuestion {
     @TableField(typeHandler = JacksonTypeHandler.class)
     private List<Long> secondaryDomainIds;
 
-    /** 若为项目深挖题，对应考纲中的项目锚点 ID */
-    private String projectId;
-
     /** 题目正文 */
     private String stem;
 
@@ -47,12 +44,6 @@ public class InterviewQuestion {
     /** 理想回答要点列表（JSON 数组），如 ["布隆过滤器原理", "误判率控制"] */
     @TableField(typeHandler = JacksonTypeHandler.class)
     private List<String> expectedPoints;
-
-    /** 本题目标深度等级：L1~L5 */
-    private String targetDepth;
-
-    /** 本题难度等级：L1~L5 */
-    private String difficulty;
 
     /** 题目状态：pending / asked / answered / skipped */
     private String status;

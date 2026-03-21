@@ -84,8 +84,8 @@ public class OpenAiClient implements AiClient {
                     rendered.getPromptCode(),
                     rendered.getPromptVersion(),
                     input.getInterviewId(),
-                    input.getQuestionId(),
-                    input.getVariantId(),
+                    null,
+                    null,
                     latencyMs,
                     "success",
                     null,
@@ -102,8 +102,8 @@ public class OpenAiClient implements AiClient {
                     resolvePromptCode(rendered, PROMPT_CODE_PLANNER),
                     resolvePromptVersion(rendered, PROMPT_CODE_PLANNER),
                     input.getInterviewId(),
-                    input.getQuestionId(),
-                    input.getVariantId(),
+                    null,
+                    null,
                     latencyMs,
                     "error",
                     null,
@@ -117,7 +117,10 @@ public class OpenAiClient implements AiClient {
 
     @Override
     public Flux<String> callQuestionGenerationStream(QuestionGenerationInput input) {
-        log.info("调用 OpenAI 出题（流式）, domainCode={}", input.getNextDomainCode());
+        String relatedDomainCode = input.getNextQuestionGoal() != null
+                ? input.getNextQuestionGoal().getRelatedDomainCode()
+                : null;
+        log.info("调用 OpenAI 出题（流式）, domainCode={}", relatedDomainCode);
         RenderedPrompt rendered = renderPrompt(PROMPT_CODE_QUESTION_GENERATION_STREAM,
                 buildQuestionGenerationStreamVariables(input));
         long startMs = System.currentTimeMillis();
@@ -137,7 +140,7 @@ public class OpenAiClient implements AiClient {
                         rendered.getPromptVersion(),
                         input.getInterviewId(),
                         input.getQuestionId(),
-                        input.getVariantId(),
+                        null,
                         System.currentTimeMillis() - startMs,
                         "success",
                         null,
@@ -150,7 +153,7 @@ public class OpenAiClient implements AiClient {
                         rendered.getPromptVersion(),
                         input.getInterviewId(),
                         input.getQuestionId(),
-                        input.getVariantId(),
+                        null,
                         System.currentTimeMillis() - startMs,
                         "error",
                         null,
@@ -212,7 +215,7 @@ public class OpenAiClient implements AiClient {
 
     @Override
     public AiCallResult<EvaluationDecisionOutput> callEvaluationDecision(EvaluationDecisionInput input) {
-        log.info("调用 OpenAI 评估决策, domainCode={}", input.getCurrentDomainCode());
+        log.info("调用 OpenAI 评估决策, questionId={}", input.getCurrentQuestionId());
 
         BeanOutputConverter<EvaluationDecisionOutput> converter =
                 new BeanOutputConverter<>(EvaluationDecisionOutput.class);// 评估决策输出转换器
@@ -232,7 +235,7 @@ public class OpenAiClient implements AiClient {
                     rendered.getPromptVersion(),
                     input.getInterviewId(),
                     input.getCurrentQuestionId(),
-                    input.getVariantId(),
+                    null,
                     latencyMs,
                     "success",
                     null,
@@ -240,7 +243,7 @@ public class OpenAiClient implements AiClient {
                     null,
                     null
             );
-            log.info("评估决策调用成功，decision={}", output.getDecision());
+            log.info("评估决策调用成功，interviewAction={}", output.getInterviewAction());
             return buildResult(output, response, latencyMs, rendered);
         } catch (Exception e) {
             long latencyMs = System.currentTimeMillis() - startMs;
@@ -249,7 +252,7 @@ public class OpenAiClient implements AiClient {
                     resolvePromptVersion(rendered, PROMPT_CODE_EVALUATION_DECISION),
                     input.getInterviewId(),
                     input.getCurrentQuestionId(),
-                    input.getVariantId(),
+                    null,
                     latencyMs,
                     "error",
                     null,
@@ -564,11 +567,13 @@ public class OpenAiClient implements AiClient {
         variables.put("position", safeString(input.getPositionName()));
         variables.put("positionCode", safeString(input.getPositionCode()));
         variables.put("experienceLevel", safeString(input.getExperienceLevel()));
+        variables.put("roundType", safeString(input.getRoundType()));
         variables.put("mode", safeString(input.getMode()));
         variables.put("jd", truncate(input.getJobDescription(), 500));
         variables.put("resumeText", truncate(input.getResumeText(), 1000));
         variables.put("focusTopics", safeString(input.getFocusTopics()));
         variables.put("domains", formatDomains(input.getDomains()));
+        variables.put("historyInterviews", stringifyAsJson(input.getHistoryInterviews()));
         return variables;
     }
 
@@ -583,23 +588,20 @@ public class OpenAiClient implements AiClient {
 
     private Map<String, Object> buildEvaluationDecisionVariables(EvaluationDecisionInput input, String outputSchema) {
         Map<String, Object> variables = new LinkedHashMap<>();
-        variables.put("positionCode", safeString(input.getPositionCode()));
-        variables.put("experienceLevel", safeString(input.getExperienceLevel()));
-        variables.put("mode", safeString(input.getMode()));
-        variables.put("interviewHardConstraints", stringifyAsJson(buildInterviewHardConstraints(input)));
-        variables.put("currentQuestionStem", safeString(input.getCurrentQuestionStem()));
-        variables.put("currentDomainName", safeString(input.getCurrentDomainName()));
-        variables.put("currentDomainCode", safeString(input.getCurrentDomainCode()));
-        variables.put("currentTargetDepth", safeString(input.getCurrentTargetDepth()));
-        variables.put("currentQuestionType", safeString(input.getCurrentQuestionType()));
+        EvaluationDecisionInput.InterviewMeta interview = input.getInterview();
+        variables.put("positionCode", safeString(interview != null ? interview.getPositionCode() : null));
+        variables.put("experienceLevel", safeString(interview != null ? interview.getExperienceLevel() : null));
+        variables.put("roundType", safeString(interview != null ? interview.getRoundType() : null));
+        variables.put("projectAndInternshipSummary", stringifyAsJson(input.getProjectAndInternshipSummary()));
+        variables.put("interviewGoalSummary", stringifyAsJson(input.getInterviewGoalSummary()));
+        variables.put("coveredKnowledgeSummary", stringifyAsJson(input.getCoveredKnowledgeSummary()));
+        variables.put("quotaSummary", stringifyAsJson(input.getQuotaSummary()));
+        variables.put("currentQuestion", stringifyAsJson(input.getCurrentQuestion()));
         variables.put("answerText", safeString(input.getAnswerText()));
-        variables.put("resumeText", truncate(input.getResumeText(), 1000));
-        variables.put("expectedPoints", formatBulletLines(input.getExpectedPoints()));
-        variables.put("recentContext", formatRecentContext(input.getRecentContext()));
-        variables.put("currentInterviewContext", stringifyAsJson(buildCurrentInterviewContext(input)));
-        variables.put("pauseStats", formatPauseStats(input.getPauseStats()));
-        variables.put("stateLedgerJson", stringifyAsJson(input.getStateLedger()));
-        variables.put("syllabusJson", stringifyAsJson(input.getSyllabusJson()));
+        variables.put("expectedPoints", stringifyAsJson(input.getExpectedPoints()));
+        variables.put("possibleFutureDirections", stringifyAsJson(input.getPossibleFutureDirections()));
+        variables.put("retrievedMaterials", stringifyAsJson(input.getRetrievedMaterials()));
+        variables.put("recentInterviewMemory", stringifyAsJson(input.getRecentInterviewMemory()));
         variables.put("outputSchema", safeString(outputSchema));
         return variables;
     }
@@ -627,7 +629,6 @@ public class OpenAiClient implements AiClient {
         variables.put("questionType", safeString(input.getQuestionType()));
         variables.put("domainCode", safeString(input.getDomainCode()));
         variables.put("domainName", safeString(input.getDomainName()));
-        variables.put("targetDepth", safeString(input.getTargetDepth()));
         variables.put("answerText", safeString(input.getAnswerText()));
         variables.put("expectedPoints", formatBulletLines(input.getExpectedPoints()));
         variables.put("recentContext", formatQuestionDetailRecentContext(input.getRecentContext()));
@@ -635,46 +636,13 @@ public class OpenAiClient implements AiClient {
         return variables;
     }
 
-    private Map<String, Object> buildInterviewHardConstraints(EvaluationDecisionInput input) {
-        Map<String, Object> constraints = new LinkedHashMap<>();
-        constraints.put("difficultyBand", List.of(normalizeDepth(safeString(input.getCurrentTargetDepth()))));
-        constraints.put("remainingTurnBudget", extractLedgerScalar(input.getStateLedger(), "remaining_turn_budget"));
-        constraints.put("requiredDomains", extractSyllabusDomainCodes(input.getSyllabusJson()));
-        constraints.put("maxDomainRescueCount", 1);
-        constraints.put("maxSessionRescueCount", 3);
-        constraints.put("maxFocusFollowupStreak", 5);
-        return constraints;
-    }
-
-    private Map<String, Object> buildCurrentInterviewContext(EvaluationDecisionInput input) {
-        Map<String, Object> context = new LinkedHashMap<>();
-        context.put("activeProjectId", extractLedgerScalar(input.getStateLedger(), "active_project_id"));
-        context.put("currentFocus", extractLedgerScalar(input.getStateLedger(), "current_focus"));
-        context.put("coveredDomains", extractLedgerList(input.getStateLedger(), "covered_domains"));
-        context.put("coveredPoints", extractLedgerList(input.getStateLedger(), "covered_points"));
-        context.put("weakSignals", extractLedgerList(input.getStateLedger(), "weak_signals"));
-        context.put("recentQuestionFamilies", extractLedgerList(input.getStateLedger(), "recent_question_families"));
-        int sessionRescueCount = toInt(extractLedgerScalar(input.getStateLedger(), "rescue_total"));
-        int currentFocusFollowupStreak = toInt(extractLedgerScalar(input.getStateLedger(), "current_focus_streak"));
-        String currentDomainCode = safeString(input.getCurrentDomainCode());
-        context.put("domainRescueUsed", domainRescueUsed(input.getStateLedger(), currentDomainCode));
-        context.put("sessionRescueCount", sessionRescueCount);
-        context.put("currentFocusFollowupStreak", currentFocusFollowupStreak);
-        context.put("lastFocusPoint", extractLedgerScalar(input.getStateLedger(), "last_focus_point"));
-        context.put("maxDomainRescueCount", 1);
-        context.put("maxSessionRescueCount", 3);
-        context.put("maxFocusFollowupStreak", 5);
-        return context;
-    }
-
     private Map<String, Object> buildQuestionRoleContext(QuestionGenerationInput input) {
         if (input.getRoleContext() != null) {
             return toMap(input.getRoleContext());
         }
         Map<String, Object> context = new LinkedHashMap<>();
-        context.put("roundType", input.getMode());
+        context.put("roundType", "");
         context.put("candidateLevel", input.getExperienceLevel());
-        context.put("difficultyBand", List.of(normalizeDepth(safeString(input.getTargetDepth()))));
         context.put("style", "natural_followup");
         return context;
     }
@@ -684,9 +652,10 @@ public class OpenAiClient implements AiClient {
             return toMap(input.getProjectContext());
         }
         Map<String, Object> context = new LinkedHashMap<>();
-        context.put("activeProjectId", null);
-        context.put("projectName", null);
-        context.put("currentFocus", safeString(input.getTargetSkill()));
+        context.put("activeItemKey", null);
+        context.put("itemType", null);
+        context.put("itemName", null);
+        context.put("currentFocus", null);
         return context;
     }
 
@@ -712,16 +681,16 @@ public class OpenAiClient implements AiClient {
             return toMap(input.getNextQuestionGoal());
         }
         Map<String, Object> goal = new LinkedHashMap<>();
-        goal.put("decision", "broaden");
-        goal.put("targetFocus", safeString(input.getTargetSkill()));
-        goal.put("targetAngle", "implementation");
-        goal.put("difficultyAdjustment", "same");
-        goal.put("questionType", safeString(input.getNextQuestionType()));
-        goal.put("focusPoint", safeString(input.getTargetSkill()));
-        goal.put("nextQuestionGoal", safeString(input.getTargetSkill()));
-        goal.put("nextDomainId", input.getNextDomainId());
-        goal.put("nextDomainCode", safeString(input.getNextDomainCode()));
-        goal.put("nextDomainName", safeString(input.getNextDomainName()));
+        goal.put("questionType", "");
+        goal.put("nextFocus", "");
+        goal.put("goalSummary", "");
+        goal.put("relatedDomainId", null);
+        goal.put("relatedDomainCode", "");
+        goal.put("relatedDomainName", "");
+        goal.put("relatedItemKey", "");
+        goal.put("relatedItemType", "");
+        goal.put("relatedItemName", "");
+        goal.put("expectedAnswerPoints", List.of());
         return goal;
     }
 
@@ -730,11 +699,9 @@ public class OpenAiClient implements AiClient {
             return toMap(input.getRetrievalContext());
         }
         Map<String, Object> retrieval = new LinkedHashMap<>();
-        retrieval.put("query", safeString(input.getTargetSkill()));
-        retrieval.put("ragContext", safeString(input.getRagContext()));
-        retrieval.put("domainHint", safeString(input.getNextDomainCode()));
-        retrieval.put("questionTypeHint", safeString(input.getNextQuestionType()));
-        retrieval.put("avoidRecentFamilies", List.of());
+        retrieval.put("summary", "暂无 RAG 检索资料");
+        retrieval.put("retrievalPlans", List.of());
+        retrieval.put("retrievedMaterials", List.of());
         return retrieval;
     }
 
@@ -792,30 +759,6 @@ public class OpenAiClient implements AiClient {
         return sb.isEmpty() ? "- 无" : sb.toString();
     }
 
-    private String formatRecentContext(List<EvaluationDecisionInput.QaContext> recentContext) {
-        if (recentContext == null || recentContext.isEmpty()) {
-            return "- 无";
-        }
-        StringBuilder sb = new StringBuilder();
-        for (EvaluationDecisionInput.QaContext ctx : recentContext) {
-            if (ctx == null) {
-                continue;
-            }
-            if (!sb.isEmpty()) {
-                sb.append("\n");
-            }
-            sb.append("- [")
-                    .append(safeString(ctx.getQuestionType()))
-                    .append("/")
-                    .append(safeString(ctx.getDomainCode()))
-                    .append("] Q: ")
-                    .append(safeString(ctx.getStem()))
-                    .append(" | A: ")
-                    .append(safeString(ctx.getAnswer()));
-        }
-        return sb.isEmpty() ? "- 无" : sb.toString();
-    }
-
     private String formatQuestionDetailRecentContext(List<QuestionDetailEvaluationInput.QaContext> recentContext) {
         if (recentContext == null || recentContext.isEmpty()) {
             return "- 无";
@@ -854,19 +797,6 @@ public class OpenAiClient implements AiClient {
         return sb.toString();
     }
 
-    @SuppressWarnings("unchecked")
-    private boolean domainRescueUsed(Map<String, Object> ledger, String domainCode) {
-        if (ledger == null || domainCode == null || domainCode.isBlank()) {
-            return false;
-        }
-        Object raw = ledger.get("rescue_counts_by_domain");
-        if (!(raw instanceof Map<?, ?> rescueCounts)) {
-            return false;
-        }
-        Object value = rescueCounts.get(domainCode);
-        return toInt(value) >= 1;
-    }
-
     private int toInt(Object value) {
         if (value instanceof Number n) {
             return n.intValue();
@@ -898,7 +828,6 @@ public class OpenAiClient implements AiClient {
                     .append(safeString(pair.getDomainName())).append("\n");
             sb.append("题目: ").append(safeString(pair.getStem())).append("\n");
             sb.append("回答: ").append(safeString(pair.getAnswerText())).append("\n");
-            sb.append("目标深度: ").append(safeString(pair.getTargetDepth())).append("\n");
             sb.append("参考要点:\n").append(formatBulletLines(pair.getExpectedPoints()));
         }
         return sb.isEmpty() ? "- 无" : sb.toString();
@@ -974,27 +903,6 @@ public class OpenAiClient implements AiClient {
             String text = safeString(item == null ? null : String.valueOf(item)).trim();
             if (!text.isBlank()) {
                 result.add(text);
-            }
-        }
-        return result;
-    }
-
-    private List<String> extractSyllabusDomainCodes(Map<String, Object> syllabus) {
-        if (syllabus == null) {
-            return List.of();
-        }
-        Object domainsObj = syllabus.get("domains");
-        if (!(domainsObj instanceof List<?> domains)) {
-            return List.of();
-        }
-        List<String> result = new java.util.ArrayList<>();
-        for (Object domainObj : domains) {
-            if (!(domainObj instanceof Map<?, ?> domain)) {
-                continue;
-            }
-            String code = safeString(domain.get("domainCode") == null ? null : String.valueOf(domain.get("domainCode"))).trim();
-            if (!code.isBlank()) {
-                result.add(code);
             }
         }
         return result;

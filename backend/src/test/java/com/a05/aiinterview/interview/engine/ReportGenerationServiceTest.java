@@ -61,7 +61,6 @@ class ReportGenerationServiceTest {
         question.setSessionId(1L);
         question.setQuestionNo(1);
         question.setQuestionType("PRINCIPLE");
-        question.setTargetDepth("L3");
         question.setStem("请讲讲 HashMap");
         question.setExpectedPoints(List.of("扩容", "冲突"));
         question.setGenerationContextJson(Map.of("domainCode", "java_core"));
@@ -85,7 +84,6 @@ class ReportGenerationServiceTest {
                                 .domainCode("java_core")
                                 .domainName("Java 核心基础")
                                 .score(BigDecimal.valueOf(86))
-                                .achievedDepth("L3")
                                 .commentary("掌握较好")
                                 .build()
                 ))

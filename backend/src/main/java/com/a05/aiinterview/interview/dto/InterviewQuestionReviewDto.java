@@ -28,9 +28,6 @@ public class InterviewQuestionReviewDto {
     @Schema(description = "知识域名称", example = "Java 并发编程")
     private String domainName;
 
-    @Schema(description = "目标深度", example = "L3")
-    private String targetDepth;
-
     @Schema(description = "用户回答")
     private String userAnswer;
 

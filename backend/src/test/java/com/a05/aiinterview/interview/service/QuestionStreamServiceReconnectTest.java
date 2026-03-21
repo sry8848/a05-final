@@ -1,6 +1,7 @@
 package com.a05.aiinterview.interview.service;
 
 import com.a05.aiinterview.ai.AiClient;
+import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
 import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
@@ -70,6 +71,7 @@ class QuestionStreamServiceReconnectTest {
                 ragService,
                 ttsService,
                 redisTemplate,
+                new InterviewDebugTraceService(new ObjectMapper()),
                 new ObjectMapper()
         );
 

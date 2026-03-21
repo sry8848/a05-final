@@ -22,18 +22,20 @@ class ClasspathPromptTemplateServiceTest {
         vars.put("position", "Java 后端开发");
         vars.put("positionCode", "JAVA_BACKEND");
         vars.put("experienceLevel", "SENIOR");
+        vars.put("roundType", "");
         vars.put("mode", "professional");
         vars.put("jd", "负责高并发交易系统开发");
         vars.put("resumeText", "熟悉 JVM、并发、MySQL");
         vars.put("focusTopics", "并发,JVM");
         vars.put("domains", "- id=1, code=jvm, name=JVM 原理");
+        vars.put("historyInterviews", "[]");
 
         RenderedPrompt rendered = service.render("planner", "v2", vars);
 
         assertThat(rendered).isNotNull();
         assertThat(rendered.getPromptCode()).isEqualTo("planner");
         assertThat(rendered.getPromptVersion()).isEqualTo("v2");
-        assertThat(rendered.getSystemPrompt()).contains("你是一名经验丰富的技术面试官");
+        assertThat(rendered.getSystemPrompt()).contains("高级技术面试大纲规划引擎");
         assertThat(rendered.getUserPrompt()).contains("岗位：Java 后端开发（JAVA_BACKEND）");
         assertThat(rendered.getUserPrompt()).doesNotContain("{{position}}");
     }
@@ -47,10 +49,12 @@ class ClasspathPromptTemplateServiceTest {
         vars.put("position", "Java 后端开发");
         vars.put("positionCode", "JAVA_BACKEND");
         vars.put("experienceLevel", "SENIOR");
+        vars.put("roundType", "");
         vars.put("mode", "professional");
         vars.put("jd", "负责高并发交易系统开发");
         vars.put("resumeText", "熟悉 JVM、并发、MySQL");
         vars.put("focusTopics", "并发,JVM");
+        vars.put("historyInterviews", "[]");
 
         assertThatThrownBy(() -> service.render("planner", "v2", vars))
                 .isInstanceOf(IllegalArgumentException.class)

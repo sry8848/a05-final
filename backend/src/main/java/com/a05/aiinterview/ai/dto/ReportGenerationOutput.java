@@ -65,12 +65,6 @@ public class ReportGenerationOutput {
         /** 该知识域得分，0~100 */
         private BigDecimal score;
 
-        /**
-         * 候选人在该知识域实际达到的深度等级。
-         * 来源：状态账本 domain_states[i].current_depth。
-         */
-        private String achievedDepth;
-
         /** AI 对该知识域表现的定性点评（1~2 句话） */
         private String commentary;
     }

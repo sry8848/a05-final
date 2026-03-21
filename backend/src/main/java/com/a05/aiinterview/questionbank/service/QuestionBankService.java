@@ -61,7 +61,6 @@ public class QuestionBankService {
         snapshot.put("questionStem", question.getStem());
         snapshot.put("domainName", resolveDomainName(session, question));
         snapshot.put("questionType", question.getQuestionType());
-        snapshot.put("targetDepth", question.getTargetDepth());
         snapshot.put("answerSummary", summarizeAnswer(latestAttempt != null ? latestAttempt.getAnswerText() : null));
         snapshot.put("sourceCreatedAt", session.getCreatedAt() != null ? session.getCreatedAt().toString() : null);
 
@@ -172,7 +171,6 @@ public class QuestionBankService {
             dto.setQuestionStem(toStr(snapshot.get("questionStem")));
             dto.setDomainName(toStr(snapshot.get("domainName")));
             dto.setQuestionType(toStr(snapshot.get("questionType")));
-            dto.setTargetDepth(toStr(snapshot.get("targetDepth")));
             dto.setAnswerSummary(toStr(snapshot.get("answerSummary")));
             dto.setSourceCreatedAt(toStr(snapshot.get("sourceCreatedAt")));
         }

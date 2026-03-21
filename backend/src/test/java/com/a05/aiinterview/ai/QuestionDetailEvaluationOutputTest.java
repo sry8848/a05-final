@@ -76,7 +76,6 @@ class QuestionDetailEvaluationOutputTest {
                 .questionType("SCENARIO")
                 .domainCode("perf")
                 .domainName("性能优化")
-                .targetDepth("L3")
                 .answerText("我优化了缓存策略。")
                 .build();
 
@@ -90,4 +89,3 @@ class QuestionDetailEvaluationOutputTest {
         assertThat(first.getHighlightedSegments().get(0).getLabel()).isIn("strength", "weakness");
     }
 }
-

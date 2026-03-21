@@ -49,7 +49,6 @@ class InterviewQuestionReviewServiceTest {
         question.setQuestionNo(2);
         question.setStem("请解释 AQS");
         question.setQuestionType("PRINCIPLE");
-        question.setTargetDepth("L3");
         question.setGenerationContextJson(Map.of("domainCode", "java_concurrency"));
         when(questionMapper.selectById(questionId)).thenReturn(question);
 
@@ -104,7 +103,6 @@ class InterviewQuestionReviewServiceTest {
         question.setQuestionNo(1);
         question.setStem("Q");
         question.setQuestionType("INTRO");
-        question.setTargetDepth("L1");
         when(questionMapper.selectById(questionId)).thenReturn(question);
         when(attemptMapper.selectLatestFinalAttempt(sessionId, questionId)).thenReturn(null);
 
@@ -140,7 +138,6 @@ class InterviewQuestionReviewServiceTest {
         question.setQuestionNo(1);
         question.setStem("Q");
         question.setQuestionType("PRINCIPLE");
-        question.setTargetDepth("L2");
         when(questionMapper.selectById(questionId)).thenReturn(question);
 
         InterviewAttempt finalAttempt = buildAttempt(9L, sessionId, questionId, true, "answer", null, null);

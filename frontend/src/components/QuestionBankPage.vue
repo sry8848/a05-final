@@ -262,7 +262,6 @@ export default {
         jobName: item.jobName || item.job || '模拟面试',
         jobType: item.jobType || 'frontend',
         questionType: item.questionType || '综合题',
-        targetDepth: item.targetDepth || 'L2',
         modeLabel: item.modeLabel || '练习模式',
         userAnswer: item.userAnswer || item.answerSummary || item.answer || '',
         rewrittenAnswer: item.rewrittenAnswer || item.standardAnswer || '',

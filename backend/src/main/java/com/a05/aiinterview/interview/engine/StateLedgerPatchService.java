@@ -2,6 +2,7 @@ package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.common.enums.DomainStatus;
+import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.entity.SessionSkillState;
@@ -14,7 +15,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,24 +27,18 @@ import java.util.Objects;
 
 /**
  * 账本写入服务。
- *
- * <p>AI 不再回写正式账本；这里统一根据当前题和 AI 最小决策，使用 reducer 计算新账本后落库。
+ * 新版本只接受结构化 mutation，再交由 reducer 计算新账本。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class StateLedgerPatchService {
 
-    @Value("${interview.debug.enabled:false}")
-    private boolean interviewDebugEnabled = false;
-
-    @Value("${interview.debug.max-text-chars:1200}")
-    private int interviewDebugMaxTextChars = 1200;
-
     private final InterviewSessionMapper interviewSessionMapper;
     private final SessionSkillStateMapper sessionSkillStateMapper;
     private final StateLedgerReducer stateLedgerReducer;
     private final StateLedgerDiffService stateLedgerDiffService;
+    private final InterviewDebugTraceService interviewDebugTraceService;
 
     @Transactional(rollbackFor = Exception.class)
     public ReductionAudit applyReduction(Long sessionId,
@@ -57,16 +51,14 @@ public class StateLedgerPatchService {
         if (session == null) {
             throw new IllegalArgumentException("面试会话不存在, sessionId=" + sessionId);
         }
-        Map<String, Object> oldLedger = session.getStateLedgerJson();
-        if (oldLedger == null) {
+        if (session.getStateLedgerJson() == null) {
             throw new IllegalStateException("状态账本为空, sessionId=" + sessionId);
         }
 
         LedgerMutation mutation = buildMutation(session, currentQuestion, evalOutput, answerText);
-        validateMutation(oldLedger, mutation);
-
-        Map<String, Object> newLedger = stateLedgerReducer.reduce(oldLedger, mutation, attemptId, evidenceQuestionId);
-        Map<String, Object> diff = stateLedgerDiffService.diff(oldLedger, newLedger);
+        Map<String, Object> newLedger = stateLedgerReducer.reduce(
+                session.getStateLedgerJson(), mutation, attemptId, evidenceQuestionId);
+        Map<String, Object> diff = stateLedgerDiffService.diff(session.getStateLedgerJson(), newLedger);
 
         InterviewSession update = new InterviewSession();
         update.setId(sessionId);
@@ -74,16 +66,13 @@ public class StateLedgerPatchService {
         update.setUpdatedAt(LocalDateTime.now());
         interviewSessionMapper.updateById(update);
 
-        if (!isIntro(currentQuestion.getQuestionType()) && mutation.getCurrentDomainId() != null) {
-            syncSkillState(sessionId, mutation, newLedger, evidenceQuestionId);
-        }
-
-        logReductionDebug(sessionId, currentQuestion, mutation, diff, oldLedger, newLedger, attemptId);
+        syncSkillState(sessionId, mutation, newLedger, evidenceQuestionId);
+        logReductionDebug(sessionId, currentQuestion, mutation, diff, session.getStateLedgerJson(), newLedger, attemptId);
 
         return ReductionAudit.builder()
                 .newLedger(newLedger)
                 .diff(diff)
-                .domainClosureReason(resolveDomainClosureReason(currentQuestion, mutation))
+                .domainClosureReason(resolveDomainClosureReason(mutation))
                 .build();
     }
 
@@ -91,59 +80,55 @@ public class StateLedgerPatchService {
                                          InterviewQuestion currentQuestion,
                                          EvaluationDecisionOutput evalOutput,
                                          String answerText) {
+        Map<String, Object> generationContext = currentQuestion.getGenerationContextJson() != null
+                ? currentQuestion.getGenerationContextJson()
+                : Map.of();
+        Map<String, Object> ledger = session.getStateLedgerJson() != null ? session.getStateLedgerJson() : Map.of();
+
+        String currentItemKey = firstNonBlank(
+                asString(generationContext.get("activeItemKey")),
+                asString(ledger.get("active_item_key")));
+        String currentItemType = firstNonBlank(
+                asString(generationContext.get("activeItemType")),
+                asString(ledger.get("active_item_type")));
+        String currentItemName = firstNonBlank(
+                asString(generationContext.get("activeItemName")),
+                asString(ledger.get("active_item_name")));
+        String currentFocus = firstNonBlank(
+                asString(generationContext.get("focusPoint")),
+                currentQuestion.getTargetSkill(),
+                asString(ledger.get("current_focus")));
+
         return LedgerMutation.builder()
                 .questionType(currentQuestion.getQuestionType())
                 .currentDomainCode(resolveDomainCode(currentQuestion))
                 .currentDomainId(currentQuestion.getDomainId())
-                .currentTargetDepth(currentQuestion.getTargetDepth())
-                .decision(evalOutput.getDecision())
-                .answerVerdict(evalOutput.getAnswerVerdict())
-                .domainOutcome(evalOutput.getDomainOutcome())
-                .activeProjectId(resolveActiveProjectId(session, currentQuestion, evalOutput))
-                .currentFocus(resolveCurrentFocus(evalOutput))
-                .focusPoint(evalOutput.getFocusPoint())
-                .questionFamilyId(resolveQuestionFamilyId(evalOutput))
+                .currentFocus(currentFocus)
+                .currentItemKey(currentItemKey)
+                .currentItemType(currentItemType)
+                .currentItemName(currentItemName)
+                .nextFocus(evalOutput.getNextFocus())
+                .nextItemKey(currentItemKey)
+                .nextItemType(currentItemType)
+                .nextItemName(currentItemName)
+                .questionFamilyId(buildQuestionFamilyId(evalOutput))
                 .skipCurrentQuestion("[skip]".equals(answerText))
-                .statePatch(evalOutput.getStatePatch())
+                .interviewAction(evalOutput.getInterviewAction())
+                .newCoveredDomains(evalOutput.getNewCoveredDomains())
+                .newCoveredPoints(evalOutput.getNewCoveredPoints())
+                .newCandidatePointsByDomain(evalOutput.getNewCandidatePointsByDomain())
                 .build();
     }
 
-    private void validateMutation(Map<String, Object> oldLedger, LedgerMutation mutation) {
-        String questionType = normalizeQuestionType(mutation.getQuestionType());
-        mutation.setQuestionType(questionType);
-        if (isIntro(questionType)) {
-            return;
-        }
-        String domainCode = mutation.getCurrentDomainCode();
-        if (domainCode == null || domainCode.isBlank()) {
-            throw new IllegalArgumentException("非 INTRO 题必须提供 currentDomainCode");
-        }
-        if (!domainCodeExists(oldLedger, domainCode)) {
-            throw new IllegalArgumentException("currentDomainCode 不存在于账本: " + domainCode);
-        }
-        if (mutation.getDecision() == null || mutation.getDecision().isBlank()) {
-            throw new IllegalArgumentException("mutation.decision 不能为空");
-        }
-        if (mutation.getDomainOutcome() == null || mutation.getDomainOutcome().isBlank()) {
-            throw new IllegalArgumentException("mutation.domainOutcome 不能为空");
-        }
-    }
-
-    private String resolveDomainClosureReason(InterviewQuestion currentQuestion, LedgerMutation mutation) {
-        if (isIntro(currentQuestion.getQuestionType())) {
-            return null;
+    private String resolveDomainClosureReason(LedgerMutation mutation) {
+        if (mutation.getNewCoveredDomains() != null && !mutation.getNewCoveredDomains().isEmpty()) {
+            return "COVERED";
         }
         if (mutation.isSkipCurrentQuestion()) {
-            return "NO_FURTHER_VALUE";
+            return "SKIPPED";
         }
-        if ("wrapup".equalsIgnoreCase(mutation.getDecision())) {
-            return "NO_FURTHER_VALUE";
-        }
-        if ("circuit_broken".equalsIgnoreCase(mutation.getDomainOutcome())) {
-            return "FAILED_HARD";
-        }
-        if ("covered".equalsIgnoreCase(mutation.getDomainOutcome())) {
-            return "DEPTH_REACHED";
+        if ("WRAPUP".equalsIgnoreCase(mutation.getInterviewAction())) {
+            return "WRAPUP";
         }
         return null;
     }
@@ -152,13 +137,14 @@ public class StateLedgerPatchService {
                                 LedgerMutation mutation,
                                 Map<String, Object> newLedger,
                                 Long evidenceQuestionId) {
+        if (mutation.getCurrentDomainId() == null) {
+            return;
+        }
         SessionSkillState existing = sessionSkillStateMapper.selectOne(
                 new LambdaQueryWrapper<SessionSkillState>()
                         .eq(SessionSkillState::getSessionId, sessionId)
-                        .eq(SessionSkillState::getDomainId, mutation.getCurrentDomainId())
-        );
+                        .eq(SessionSkillState::getDomainId, mutation.getCurrentDomainId()));
         if (existing == null) {
-            log.warn("session_skill_states 未找到对应行, sessionId={}, domainId={}", sessionId, mutation.getCurrentDomainId());
             return;
         }
 
@@ -166,10 +152,8 @@ public class StateLedgerPatchService {
         if (domainState == null) {
             return;
         }
-        DomainStatus domainStatus = DomainStatus.fromLedgerValue(asString(domainState.get("status")));
-        existing.setCurrentDepth(asString(domainState.get("current_depth")));
+        existing.setStatus(DomainStatus.fromLedgerValue(asString(domainState.get("status"))).getSkillStateValue());
         existing.setSaturated(Boolean.TRUE.equals(domainState.get("saturated")));
-        existing.setStatus(domainStatus.getSkillStateValue());
         existing.setTestedCount(existing.getTestedCount() == null ? 1 : existing.getTestedCount() + 1);
         if (evidenceQuestionId != null) {
             List<Long> refs = existing.getEvidenceRefs() != null ? new ArrayList<>(existing.getEvidenceRefs()) : new ArrayList<>();
@@ -182,115 +166,43 @@ public class StateLedgerPatchService {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> findDomainState(Map<String, Object> ledger, String domainCode) {
-        Object statesObj = ledger.get("domain_states");
-        if (!(statesObj instanceof List<?> states)) {
+        Object rawStates = ledger.get("domain_states");
+        if (!(rawStates instanceof List<?> states)) {
             return null;
         }
-        for (Object item : states) {
-            if (!(item instanceof Map<?, ?> raw)) {
+        for (Object stateObj : states) {
+            if (!(stateObj instanceof Map<?, ?> state)) {
                 continue;
             }
-            Map<String, Object> state = new LinkedHashMap<>((Map<String, Object>) raw);
-            if (Objects.equals(domainCode, asString(state.get("domain_id")))) {
-                return state;
+            if (Objects.equals(domainCode, asString(state.get("domainCode")))) {
+                return new LinkedHashMap<>((Map<String, Object>) state);
             }
         }
         return null;
     }
 
-    @SuppressWarnings("unchecked")
-    private boolean domainCodeExists(Map<String, Object> ledger, String domainCode) {
-        Object statesObj = ledger.get("domain_states");
-        if (!(statesObj instanceof List<?> states)) {
-            return false;
+    private String buildQuestionFamilyId(EvaluationDecisionOutput evalOutput) {
+        if (evalOutput == null || "WRAPUP".equalsIgnoreCase(evalOutput.getInterviewAction())) {
+            return null;
         }
-        for (Object item : states) {
-            if (item instanceof Map<?, ?> state && Objects.equals(domainCode, asString(state.get("domain_id")))) {
-                return true;
-            }
+        String questionType = evalOutput.getNextQuestionType() == null
+                ? ""
+                : evalOutput.getNextQuestionType().trim().toUpperCase();
+        String focus = evalOutput.getNextFocus() == null
+                ? ""
+                : evalOutput.getNextFocus().trim().replaceAll("\\s+", "_");
+        if (questionType.isBlank() || focus.isBlank()) {
+            return null;
         }
-        return false;
+        return questionType + "." + focus;
     }
 
     private String resolveDomainCode(InterviewQuestion question) {
-        if (question.getGenerationContextJson() != null) {
-            Object code = question.getGenerationContextJson().get("domainCode");
-            if (code instanceof String domainCode && !domainCode.isBlank()) {
-                return domainCode;
-            }
+        if (question.getGenerationContextJson() == null) {
+            return "";
         }
-        return isIntro(question.getQuestionType()) ? null : "intro";
-    }
-
-    private String resolveActiveProjectId(InterviewSession session,
-                                          InterviewQuestion currentQuestion,
-                                          EvaluationDecisionOutput evalOutput) {
-        if (evalOutput.getStatePatch() != null) {
-            Object projectId = evalOutput.getStatePatch().get("activeProjectId");
-            if (projectId instanceof String str && !str.isBlank()) {
-                return str;
-            }
-        }
-        Object existing = session.getStateLedgerJson() != null ? session.getStateLedgerJson().get("active_project_id") : null;
-        if (existing instanceof String projectId && !projectId.isBlank()) {
-            return projectId;
-        }
-        if (!isIntro(currentQuestion.getQuestionType())) {
-            return null;
-        }
-        if (session.getSyllabusJson() == null) {
-            return null;
-        }
-        Object projectsObj = session.getSyllabusJson().get("projects");
-        if (!(projectsObj instanceof List<?> projects) || projects.isEmpty()) {
-            return null;
-        }
-        Object first = projects.getFirst();
-        if (!(first instanceof Map<?, ?> project)) {
-            return null;
-        }
-        Object projectId = project.get("projectId");
-        if (projectId instanceof String str && !str.isBlank()) {
-            return str;
-        }
-        return null;
-    }
-
-    private String resolveCurrentFocus(EvaluationDecisionOutput evalOutput) {
-        if (evalOutput.getStatePatch() == null) {
-            return null;
-        }
-        Object focus = evalOutput.getStatePatch().get("currentFocus");
-        if (focus instanceof String str && !str.isBlank()) {
-            return str;
-        }
-        return evalOutput.getFocusPoint();
-    }
-
-    private String resolveQuestionFamilyId(EvaluationDecisionOutput evalOutput) {
-        if (evalOutput.getTags() != null && evalOutput.getTags().getQuestionFamilyHint() != null
-                && !evalOutput.getTags().getQuestionFamilyHint().isBlank()) {
-            return evalOutput.getTags().getQuestionFamilyHint();
-        }
-        if (evalOutput.getNextDomainCode() != null && evalOutput.getFocusPoint() != null) {
-            return evalOutput.getNextDomainCode() + "." + evalOutput.getFocusPoint();
-        }
-        return evalOutput.getFocusPoint();
-    }
-
-    private boolean isIntro(String questionType) {
-        return "INTRO".equalsIgnoreCase(asString(questionType));
-    }
-
-    private String normalizeQuestionType(String questionType) {
-        if (questionType == null || questionType.isBlank()) {
-            return "PRINCIPLE";
-        }
-        return questionType.trim().toUpperCase();
-    }
-
-    private String asString(Object value) {
-        return value == null ? "" : String.valueOf(value);
+        Object domainCode = question.getGenerationContextJson().get("domainCode");
+        return domainCode instanceof String code ? code : "";
     }
 
     private void logReductionDebug(Long sessionId,
@@ -300,22 +212,33 @@ public class StateLedgerPatchService {
                                    Map<String, Object> oldLedger,
                                    Map<String, Object> newLedger,
                                    String attemptId) {
-        if (!interviewDebugEnabled) {
-            return;
-        }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("sessionId", sessionId);
         payload.put("attemptId", attemptId);
         payload.put("questionId", currentQuestion != null ? currentQuestion.getId() : null);
-        payload.put("decision", mutation.getDecision());
-        payload.put("domainCode", mutation.getCurrentDomainCode());
-        payload.put("domainOutcome", mutation.getDomainOutcome());
-        payload.put("focusPoint", mutation.getFocusPoint());
-        payload.put("questionFamilyId", mutation.getQuestionFamilyId());
+        payload.put("interviewAction", mutation.getInterviewAction());
+        payload.put("currentDomainCode", mutation.getCurrentDomainCode());
+        payload.put("currentFocus", mutation.getCurrentFocus());
+        payload.put("nextFocus", mutation.getNextFocus());
         payload.put("ledgerBefore", summarizeLedger(oldLedger));
         payload.put("ledgerAfter", summarizeLedger(newLedger));
         payload.put("diff", diff);
-        log.info("[INTERVIEW-DEBUG][ledger.patch] {}", clipDebugText(String.valueOf(payload)));
+        interviewDebugTraceService.recordQuestionStage(
+                sessionId,
+                currentQuestion != null ? currentQuestion.getId() : null,
+                attemptId,
+                "ledgerPatch",
+                payload,
+                buildLedgerDebugSummary(mutation, diff)
+        );
+    }
+
+    private Map<String, Object> buildLedgerDebugSummary(LedgerMutation mutation, Map<String, Object> diff) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("currentFocus", asString(firstNonBlank(mutation.getCurrentFocus(), "")));
+        summary.put("nextFocus", asString(firstNonBlank(mutation.getNextFocus(), "")));
+        summary.put("diffKeys", diff == null ? List.of() : new ArrayList<>(diff.keySet()));
+        return summary;
     }
 
     private Map<String, Object> summarizeLedger(Map<String, Object> ledger) {
@@ -323,24 +246,28 @@ public class StateLedgerPatchService {
         if (ledger == null) {
             return summary;
         }
-        summary.put("activeProjectId", ledger.get("active_project_id"));
-        summary.put("currentFocus", ledger.get("current_focus"));
-        summary.put("coveredDomains", ledger.get("covered_domains"));
-        summary.put("coveredPoints", ledger.get("covered_points"));
-        summary.put("weakSignals", ledger.get("weak_signals"));
-        summary.put("recentQuestionFamilies", ledger.get("recent_question_families"));
-        summary.put("remainingTurnBudget", ledger.get("remaining_turn_budget"));
+        summary.put("asked_total", ledger.get("asked_total"));
+        summary.put("current_focus", ledger.get("current_focus"));
+        summary.put("active_item_key", ledger.get("active_item_key"));
+        summary.put("covered_domains", ledger.get("covered_domains"));
+        summary.put("covered_points", ledger.get("covered_points"));
         return summary;
     }
 
-    private String clipDebugText(String text) {
-        if (text == null || text.isBlank()) {
-            return text;
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
         }
-        if (interviewDebugMaxTextChars <= 0 || text.length() <= interviewDebugMaxTextChars) {
-            return text;
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
         }
-        return text.substring(0, interviewDebugMaxTextChars) + "...(truncated)";
+        return null;
+    }
+
+    private String asString(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     @Data

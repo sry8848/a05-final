@@ -82,7 +82,6 @@ class QuestionBankServiceTest {
         question.setSessionId(1L);
         question.setStem("请解释线程池拒绝策略");
         question.setQuestionType("PRINCIPLE");
-        question.setTargetDepth("L3");
         question.setTargetSkill("并发");
         when(questionMapper.selectById(2L)).thenReturn(question);
 
@@ -109,7 +108,6 @@ class QuestionBankServiceTest {
         Map<String, Object> snapshot = itemCaptor.getValue().getSourceSnapshotJson();
         assertEquals("请解释线程池拒绝策略", snapshot.get("questionStem"));
         assertEquals("PRINCIPLE", snapshot.get("questionType"));
-        assertEquals("L3", snapshot.get("targetDepth"));
         assertEquals("2026-03-01T09:00", snapshot.get("sourceCreatedAt"));
     }
 
@@ -129,4 +127,3 @@ class QuestionBankServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.delete(9L, 5L));
     }
 }
-

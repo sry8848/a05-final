@@ -31,9 +31,6 @@ public class QuestionDto {
     @Schema(description = "核心考察点", example = "项目经验表达")
     private String targetSkill;
 
-    @Schema(description = "本题目标深度等级", example = "L3")
-    private String targetDepth;
-
     @Schema(description = "AI 结果状态：success/fallback", example = "success")
     private String aiResultStatus;
 

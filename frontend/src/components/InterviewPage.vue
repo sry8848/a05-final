@@ -712,7 +712,6 @@ export default {
   setup(props, { emit }) {
     const config = reactive({
       jobType: 'frontend',
-      difficulty: 'medium',
       totalQuestions: 10,
       mode: 'chat',
       resumeId: 'default',
@@ -1193,13 +1192,6 @@ export default {
       singleQuestionPayload.value = null
       config.totalQuestions = 10
       savePrepareConfig()
-      if (config.experience === 'intern' || config.experience === 'fresh') {
-        config.difficulty = 'easy'
-      } else if (config.experience === 'senior' || config.experience === 'expert') {
-        config.difficulty = 'hard'
-      } else {
-        config.difficulty = 'medium'
-      }
 
       if (config.interviewMode === 'professional') {
         config.mode = 'voice'
@@ -1299,8 +1291,7 @@ export default {
           questionNo: 1,
           questionType: 'PRINCIPLE',
           question: singleQuestionPayload.value.question,
-          targetSkill: '',
-          targetDepth: ''
+          targetSkill: ''
         }]
       } else {
         const firstQuestion = await createAndWaitFirstQuestion()
@@ -1926,7 +1917,6 @@ export default {
         question: stem,
         stem,
         targetSkill: raw.targetSkill || '',
-        targetDepth: raw.targetDepth || '',
         hintAvailable: raw.hintAvailable !== false,
         keywords: raw.keywords || []
       }
@@ -2065,7 +2055,6 @@ export default {
           domainName: '',
           stem: finalStem,
           targetSkill: '',
-          targetDepth: '',
           hintAvailable: true
         }, nextNo, finalStem)
 
@@ -2518,13 +2507,12 @@ export default {
           resultData.reportStartedAt = new Date().toISOString()
           resultData.feedback = '报告正在生成中，你可以先返回面试记录页。'
         } else {
-          resultData.reportStatus = 'ready'
-        }
+        resultData.reportStatus = 'ready'
+      }
 
-        resultData.answers = answers.value
-        resultData.jobName = jobDisplayName.value
-        resultData.difficulty = config.difficulty === 'easy' ? '简单' : config.difficulty === 'hard' ? '困难' : '中等'
-        resultData.companyName = config.companyName
+      resultData.answers = answers.value
+      resultData.jobName = jobDisplayName.value
+      resultData.companyName = config.companyName
         resultData.interviewRound = currentRound.value.label
         resultData.interviewMode = config.interviewMode
         resultData.sessionId = backendSessionId.value ?? null
@@ -2634,7 +2622,6 @@ export default {
       const resultData = calculateFinalResult()
       resultData.answers = answers.value
       resultData.jobName = jobDisplayName.value
-      resultData.difficulty = config.difficulty === 'easy' ? '简单' : config.difficulty === 'hard' ? '困难' : '中等'
       const expLabel = experienceLevels.find(e => e.value === config.experience)
       resultData.experienceLabel = expLabel ? expLabel.label : '未知'
       resultData.sessionId = backendSessionId.value ?? null

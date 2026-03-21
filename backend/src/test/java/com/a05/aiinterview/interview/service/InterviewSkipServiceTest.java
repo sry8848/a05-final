@@ -1,10 +1,10 @@
 package com.a05.aiinterview.interview.service;
 
+import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.interview.dto.SkipAndNextRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptResponse;
 import com.a05.aiinterview.interview.engine.AnswerSubmitPersistenceService;
-import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.interview.engine.ReportGenerationService;
 import com.a05.aiinterview.interview.entity.InterviewAttempt;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
@@ -42,7 +42,7 @@ class InterviewSkipServiceTest {
 
         InterviewAttempt existing = new InterviewAttempt();
         existing.setAttemptId("attempt-1");
-        existing.setEvaluationJson(Map.of("decision", "wrapup"));
+        existing.setEvaluationJson(Map.of("interviewAction", "WRAPUP"));
         when(attemptMapper.selectByAttemptId("attempt-1")).thenReturn(existing);
 
         SkipAndNextRequest request = new SkipAndNextRequest();
@@ -56,7 +56,7 @@ class InterviewSkipServiceTest {
     }
 
     @Test
-    void skipAndNext_shouldIgnoreLegacySignalWhenDecisionMissing() {
+    void skipAndNext_shouldDefaultToContinueWhenLegacyPayloadHasNoInterviewAction() {
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
@@ -67,22 +67,22 @@ class InterviewSkipServiceTest {
         );
 
         InterviewAttempt existing = new InterviewAttempt();
-        existing.setAttemptId("attempt-legacy-signal");
+        existing.setAttemptId("attempt-legacy");
         existing.setEvaluationJson(Map.of("signal", "END"));
-        when(attemptMapper.selectByAttemptId("attempt-legacy-signal")).thenReturn(existing);
+        when(attemptMapper.selectByAttemptId("attempt-legacy")).thenReturn(existing);
 
         SkipAndNextRequest request = new SkipAndNextRequest();
-        request.setAttemptId("attempt-legacy-signal");
+        request.setAttemptId("attempt-legacy");
 
         SubmitAttemptResponse response = service.skipAndNext(1L, 2L, 3L, request);
-        assertEquals("broaden", response.getDecision());
-        assertEquals("attempt-legacy-signal", response.getStreamAttemptId());
+        assertEquals("continue", response.getDecision());
+        assertEquals("attempt-legacy", response.getStreamAttemptId());
         assertEquals("in_progress", response.getSessionStatus());
         verify(persistenceService, never()).persist(any(), any(), any(), any());
     }
 
     @Test
-    void skipAndNext_shouldPersistSkipAndReturnNextDomain() {
+    void skipAndNext_shouldPersistSkipAndReturnContinue() {
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
@@ -99,18 +99,11 @@ class InterviewSkipServiceTest {
         session.setUserId(3L);
         session.setStatus("in_progress");
         session.setCurrentQuestionNo(3);
-        session.setStateLedgerJson(Map.of(
-                "max_questions", 10,
-                "domain_states", List.of(
-                        Map.of("domain_id", "redis", "status", "IN_PROGRESS"),
-                        Map.of("domain_id", "java_core", "status", "UNASKED"),
-                        Map.of("domain_id", "mq", "status", "COVERED")
-                )
-        ));
+        session.setStateLedgerJson(Map.of("max_questions", 10));
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
-                        Map.of("domainId", 1L, "domainCode", "java_core", "domainName", "Java 核心"),
-                        Map.of("domainId", 8L, "domainCode", "mq", "domainName", "消息队列")
+                        Map.of("domainId", 6L, "domainCode", "redis", "domainName", "Redis"),
+                        Map.of("domainId", 1L, "domainCode", "java_core", "domainName", "Java 核心")
                 )
         ));
         when(sessionMapper.selectById(1L)).thenReturn(session);
@@ -119,7 +112,6 @@ class InterviewSkipServiceTest {
         question.setId(2L);
         question.setSessionId(1L);
         question.setDomainId(6L);
-        question.setTargetDepth("L2");
         question.setTargetSkill("并发控制");
         question.setGenerationContextJson(Map.of("domainCode", "redis"));
         when(questionMapper.selectById(2L)).thenReturn(question);
@@ -128,7 +120,7 @@ class InterviewSkipServiceTest {
         request.setAttemptId("attempt-2");
 
         SubmitAttemptResponse response = service.skipAndNext(1L, 2L, 3L, request);
-        assertEquals("broaden", response.getDecision());
+        assertEquals("continue", response.getDecision());
         assertEquals("attempt-2", response.getStreamAttemptId());
         assertEquals("in_progress", response.getSessionStatus());
 
@@ -138,10 +130,9 @@ class InterviewSkipServiceTest {
         assertEquals("attempt-2", submitCaptor.getValue().getAttemptId());
         assertEquals("[skip]", submitCaptor.getValue().getAnswerText());
         assertEquals(true, submitCaptor.getValue().getIsFinal());
-        assertEquals("broaden", evalCaptor.getValue().getDecision());
-        assertEquals("java_core", evalCaptor.getValue().getNextDomainCode());
-        assertEquals("continue", evalCaptor.getValue().getDomainOutcome());
-        assertEquals("PRINCIPLE", evalCaptor.getValue().getQuestionType());
+        assertEquals("CONTINUE", evalCaptor.getValue().getInterviewAction());
+        assertEquals("THEORY", evalCaptor.getValue().getNextQuestionType());
+        assertEquals("Redis", evalCaptor.getValue().getNextFocus());
     }
 
     @Test

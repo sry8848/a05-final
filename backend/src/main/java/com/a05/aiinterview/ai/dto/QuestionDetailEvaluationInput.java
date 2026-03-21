@@ -34,7 +34,6 @@ public class QuestionDetailEvaluationInput {
     private String questionType;
     private String domainCode;
     private String domainName;
-    private String targetDepth;
 
     private String answerText;
     private List<String> expectedPoints;
@@ -53,4 +52,3 @@ public class QuestionDetailEvaluationInput {
         private String domainCode;
     }
 }
-

@@ -14,14 +14,39 @@ class PromptTemplateCoverageTest {
     private final PromptTemplateService service = new ClasspathPromptTemplateService(new ObjectMapper());
 
     @Test
+    @DisplayName("planner template should load and render")
+    void renderPlanner_shouldLoad() {
+        RenderedPrompt rendered = service.render("planner", "v2", Map.ofEntries(
+                Map.entry("position", "Java 后端开发"),
+                Map.entry("positionCode", "JAVA_BACKEND"),
+                Map.entry("experienceLevel", "SENIOR"),
+                Map.entry("roundType", ""),
+                Map.entry("mode", "professional"),
+                Map.entry("jd", "负责高并发订单系统研发。"),
+                Map.entry("resumeText", "候选人负责订单、支付和缓存优化。"),
+                Map.entry("focusTopics", "并发、缓存"),
+                Map.entry("domains", "- id=1, code=concurrency, name=并发编程"),
+                Map.entry("historyInterviews", "[]")
+        ));
+
+        assertThat(rendered.getPromptCode()).isEqualTo("planner");
+        assertThat(rendered.getUserPrompt()).contains("Java 后端开发")
+                .contains("面试轮次")
+                .contains("负责高并发订单系统研发");
+        assertThat(rendered.getSystemPrompt())
+                .contains("5~8 个")
+                .contains("只能从输入提供的岗位知识域列表中选择");
+    }
+
+    @Test
     @DisplayName("question_generation_stream template should load and render")
     void renderQuestionGenerationStream_shouldLoad() {
         RenderedPrompt rendered = service.render("question_generation_stream", "v1", Map.ofEntries(
-                Map.entry("roleContext", "{\"roundType\":\"technical_first\",\"candidateLevel\":\"SENIOR\",\"difficultyBand\":[\"L2\",\"L3\"],\"style\":\"natural_followup\"}"),
-                Map.entry("projectContext", "{\"activeProjectId\":\"p_order\",\"projectName\":\"订单系统\",\"currentFocus\":\"线程池调优\"}"),
+                Map.entry("roleContext", "{\"roundType\":\"\",\"candidateLevel\":\"SENIOR\",\"style\":\"natural_followup\"}"),
+                Map.entry("projectContext", "{\"activeItemKey\":\"item_order\",\"itemType\":\"PROJECT\",\"itemName\":\"订单系统\",\"currentFocus\":\"线程池调优\"}"),
                 Map.entry("recentContext", "{\"lastQuestion\":\"线程池参数怎么配？\",\"lastAnswerSummary\":\"候选人讲了核心参数，但拒绝策略和容量评估偏空。\",\"recentTurnsSummary\":\"最近两轮都在项目主线内追问。\",\"lastAnswerHighlights\":[\"corePoolSize\",\"队列容量\"]}"),
-                Map.entry("nextQuestionGoal", "{\"decision\":\"followup\",\"targetFocus\":\"拒绝策略与容量评估\",\"targetAngle\":\"tradeoff\",\"difficultyAdjustment\":\"same\",\"questionType\":\"PRINCIPLE\",\"focusPoint\":\"线程池拒绝策略\",\"nextQuestionGoal\":\"继续验证线程池在项目里的取舍能力\",\"nextDomainCode\":\"concurrency\",\"nextDomainName\":\"Concurrency\"}"),
-                Map.entry("retrievalContext", "{\"query\":\"线程池拒绝策略 容量评估\",\"ragContext\":\"项目里使用线程池处理异步通知。\",\"domainHint\":\"concurrency\",\"questionTypeHint\":\"PRINCIPLE\",\"avoidRecentFamilies\":[\"concurrency.threadpool.definition\"]}"),
+                Map.entry("nextQuestionGoal", "{\"questionType\":\"PRINCIPLE\",\"nextFocus\":\"拒绝策略与容量评估\",\"goalSummary\":\"继续验证线程池在项目里的取舍能力\",\"relatedDomainId\":1,\"relatedDomainCode\":\"concurrency\",\"relatedDomainName\":\"Concurrency\",\"relatedItemKey\":\"item_order\",\"relatedItemType\":\"PROJECT\",\"relatedItemName\":\"订单系统\",\"expectedAnswerPoints\":[\"拒绝策略\",\"容量评估\"]}"),
+                Map.entry("retrievalContext", "{\"summary\":\"无外部参考资料，请严格依赖你自身的工程师知识库进行出题。\",\"retrievalPlans\":[],\"retrievedMaterials\":[]}"),
                 Map.entry("constraints", "{\"avoidRepetitionFamilies\":[\"concurrency.threadpool.definition\"],\"mustSoundNatural\":true,\"maxSentences\":2}"),
                 Map.entry("positionCode", "JAVA_BACKEND"),
                 Map.entry("experienceLevel", "SENIOR"),
@@ -32,7 +57,7 @@ class PromptTemplateCoverageTest {
         ));
 
         assertThat(rendered.getPromptCode()).isEqualTo("question_generation_stream");
-        assertThat(rendered.getUserPrompt()).contains("下一问目标").contains("线程池拒绝策略");
+        assertThat(rendered.getUserPrompt()).contains("下一问目标").contains("拒绝策略与容量评估");
     }
 
     @Test
@@ -41,26 +66,22 @@ class PromptTemplateCoverageTest {
         RenderedPrompt rendered = service.render("evaluation_decision", "v2", Map.ofEntries(
                 Map.entry("positionCode", "JAVA_BACKEND"),
                 Map.entry("experienceLevel", "SENIOR"),
-                Map.entry("mode", "professional"),
-                Map.entry("interviewHardConstraints", "{\"difficultyBand\":[\"L2\",\"L3\"],\"requiredDomains\":[\"concurrency\",\"mysql\"],\"remainingTurnBudget\":6}"),
-                Map.entry("currentQuestionStem", "请解释线程池参数。"),
-                Map.entry("currentDomainName", "并发编程"),
-                Map.entry("currentDomainCode", "concurrency"),
-                Map.entry("currentTargetDepth", "L3"),
-                Map.entry("currentQuestionType", "PRINCIPLE"),
+                Map.entry("roundType", ""),
+                Map.entry("currentQuestion", "{\"stem\":\"请先做一个简短的自我介绍。\",\"questionType\":\"INTRO\",\"domainId\":null,\"domainName\":\"\",\"currentFocus\":\"\",\"relatedItemKey\":\"\",\"relatedItemType\":\"\",\"relatedItemName\":\"\"}"),
                 Map.entry("answerText", "回答内容"),
-                Map.entry("resumeText", "候选人做过订单系统与缓存优化"),
                 Map.entry("expectedPoints", "- 参数含义\n- 调优思路"),
-                Map.entry("recentContext", "- [PRINCIPLE/concurrency] Q: 讲讲锁升级 | A: ..."),
-                Map.entry("currentInterviewContext", "{\"activeProjectId\":\"p_order\",\"currentFocus\":\"线程池调优\",\"coveredDomains\":[\"java_basic\"],\"coveredPoints\":[\"concurrency:thread-pool-basic\"],\"weakSignals\":[\"容量评估偏空\"],\"recentQuestionFamilies\":[\"concurrency.threadpool.definition\"]}"),
-                Map.entry("pauseStats", "无"),
-                Map.entry("stateLedgerJson", "{\"asked_total\":1}"),
-                Map.entry("syllabusJson", "{\"domains\":[]}"),
+                Map.entry("projectAndInternshipSummary", "[{\"itemType\":\"PROJECT\",\"itemName\":\"订单系统\",\"resumeDescription\":\"负责订单链路\",\"techHooks\":[\"线程池调优\"]}]"),
+                Map.entry("interviewGoalSummary", "{\"domains\":[{\"domainId\":1,\"domainCode\":\"concurrency\",\"domainName\":\"并发编程\",\"focusPoints\":[\"线程池参数\"],\"status\":\"UNASKED\"}]}"),
+                Map.entry("coveredKnowledgeSummary", "[\"Java / 锁升级\"]"),
+                Map.entry("quotaSummary", "{\"samePointContinue\":{\"count\":1,\"maxCount\":20},\"sameDomainContinue\":{\"count\":1,\"maxCount\":20},\"sameProjectPointContinue\":{\"count\":0,\"maxCount\":20},\"sameProjectContinue\":{\"count\":0,\"maxCount\":20},\"sameTypeTotal\":{\"count\":1,\"maxCount\":20}}"),
+                Map.entry("possibleFutureDirections", "[\"THEORY: 线程池拒绝策略\",\"PROJECT: 回到订单系统线程池调优\"]"),
+                Map.entry("retrievedMaterials", "[]"),
+                Map.entry("recentInterviewMemory", "[]"),
                 Map.entry("outputSchema", "{\"type\":\"object\"}")
         ));
 
         assertThat(rendered.getPromptCode()).isEqualTo("evaluation_decision");
-        assertThat(rendered.getUserPrompt()).contains("请解释线程池参数").contains("当前面试语境");
+        assertThat(rendered.getUserPrompt()).contains("请先做一个简短的自我介绍。").contains("历史问题、回答概要、回答评价");
     }
 
     @Test

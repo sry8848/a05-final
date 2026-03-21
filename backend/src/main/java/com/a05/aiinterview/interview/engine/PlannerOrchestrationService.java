@@ -1,8 +1,11 @@
 package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.AiClient;
+import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.PlannerInput;
 import com.a05.aiinterview.ai.dto.PlannerOutput;
+import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
+import com.a05.aiinterview.interview.dto.InterviewSyllabus;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
@@ -47,6 +50,9 @@ public class PlannerOrchestrationService {
     private final AiClient aiClient;
     private final StateLedgerInitService stateLedgerInitService;
     private final FirstQuestionGenerationService firstQuestionGenerationService;
+    private final PlannerDomainNormalizationService plannerDomainNormalizationService;
+    private final InterviewSyllabusAssembler interviewSyllabusAssembler;
+    private final InterviewDebugTraceService interviewDebugTraceService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -72,14 +78,51 @@ public class PlannerOrchestrationService {
             List<PositionSkillDomain> domains = positionService.listSkillDomainEntities(session.getTargetRole());
 
             PlannerInput plannerInput = buildPlannerInput(session, resumeText, domains);
+            interviewDebugTraceService.recordPlannerStage(
+                    sessionId,
+                    "plannerInput",
+                    plannerInput,
+                    Map.of(
+                            "domainsCount", plannerInput.getDomains() == null ? 0 : plannerInput.getDomains().size(),
+                            "historyCount", plannerInput.getHistoryInterviews() == null ? 0 : plannerInput.getHistoryInterviews().size()
+                    )
+            );
 
-            PlannerOutput plannerOutput = aiClient.callPlanner(plannerInput).getOutput();
+            AiCallResult<PlannerOutput> plannerResult = aiClient.callPlanner(plannerInput);
+            PlannerOutput plannerOutput = plannerResult.getOutput();
+            interviewDebugTraceService.recordPlannerStage(
+                    sessionId,
+                    "plannerOutput",
+                    buildPlannerDebugPayload(plannerResult, plannerOutput),
+                    Map.of(
+                            "domainsCount", plannerOutput.getDomains() == null ? 0 : plannerOutput.getDomains().size(),
+                            "experienceItemsCount", plannerOutput.getExperienceItems() == null ? 0 : plannerOutput.getExperienceItems().size()
+                    )
+            );
 
             validateAndFillPlannerOutput(plannerOutput, sessionId);
+            PlannerDomainNormalizationService.NormalizationResult normalizationResult =
+                    plannerDomainNormalizationService.normalize(plannerOutput, domains);
+            plannerOutput = normalizationResult.normalizedOutput();
+            recordPlannerNormalization(sessionId, normalizationResult);
+            InterviewSyllabus syllabus = interviewSyllabusAssembler.assemble(plannerOutput, domains);
+            interviewDebugTraceService.recordPlannerStage(
+                    sessionId,
+                    "assembledSyllabus",
+                    syllabus,
+                    Map.of(
+                            "rawDomainsCount", normalizationResult.rawDomainsCount(),
+                            "droppedDomains", normalizationResult.droppedDomains(),
+                            "backfilledDomains", normalizationResult.backfilledDomains(),
+                            "finalDomainsCount", normalizationResult.finalDomainsCount(),
+                            "domainsCount", syllabus.getDomains() == null ? 0 : syllabus.getDomains().size(),
+                            "experienceItemsCount", syllabus.getExperienceItems() == null ? 0 : syllabus.getExperienceItems().size()
+                    )
+            );
 
             // 5. 将考纲结果保存到 session
             @SuppressWarnings("unchecked")
-            Map<String, Object> syllabusMap = objectMapper.convertValue(plannerOutput, Map.class);
+            Map<String, Object> syllabusMap = objectMapper.convertValue(syllabus, Map.class);
             InterviewSession syllabusUpdate = new InterviewSession();
             syllabusUpdate.setId(sessionId);
             syllabusUpdate.setSyllabusJson(syllabusMap);
@@ -87,7 +130,7 @@ public class PlannerOrchestrationService {
             interviewSessionMapper.updateById(syllabusUpdate);
 
             // 6. 初始化状态账本 session_skill_states
-            Map<String, Object> ledger = stateLedgerInitService.initLedger(sessionId, plannerOutput, domains);
+            Map<String, Object> ledger = stateLedgerInitService.initLedger(sessionId, syllabus, domains);
 
             // 7. 生成第一道题目
             InterviewQuestion firstQuestion = firstQuestionGenerationService.generateAndSave(session, plannerOutput);
@@ -142,16 +185,16 @@ public class PlannerOrchestrationService {
 
         return PlannerInput.builder()
                 .interviewId(session.getId())
-                .questionId(null)
-                .variantId(null)
                 .positionCode(session.getTargetRole())
                 .positionName(resolvePositionName(session.getTargetRole()))
                 .experienceLevel(session.getExperienceLevel())
+                .roundType("")
                 .mode(session.getMode())
                 .jobDescription(session.getJobDescription())
                 .resumeText(resumeText)
                 .focusTopics(session.getFocusTopics())
                 .domains(domainInfos)
+                .historyInterviews(List.of())
                 .build();
     }
 
@@ -178,7 +221,6 @@ public class PlannerOrchestrationService {
         snapshot.put("domainName", domainName);
         snapshot.put("stem", q.getStem());
         snapshot.put("targetSkill", q.getTargetSkill());
-        snapshot.put("targetDepth", q.getTargetDepth());
         snapshot.put("aiResultStatus", resolveAiResultStatus(q));
         snapshot.put("hintAvailable", true);
         return snapshot;
@@ -198,27 +240,45 @@ public class PlannerOrchestrationService {
      * 这样可以保证后续流程不会因为空指针而中断（避免 NPE）。
      */
     private void validateAndFillPlannerOutput(PlannerOutput output, Long sessionId) {
-        if (output.getQuestionMixPlan() == null || output.getQuestionMixPlan().isEmpty()) {
-            log.warn("Planner 输出缺少 questionMixPlan，使用默认配比, sessionId={}", sessionId);
-            output.setQuestionMixPlan(Map.of(
-                    "INTRO", 1, "PRINCIPLE", 3, "SCENARIO", 2,
-                    "PROJECT_DEEP_DIVE", 2, "BEHAVIORAL", 1
-            ));
-        }
         if (output.getDomains() == null || output.getDomains().isEmpty()) {
             log.warn("Planner 输出缺少 domains，设为空列表, sessionId={}", sessionId);
             output.setDomains(Collections.emptyList());
         }
-        // 若某个知识域缺少 targetDepth，则默认设为 L3
-        output.getDomains().forEach(d -> {
-            if (d.getTargetDepth() == null || d.getTargetDepth().isBlank()) {
-                log.warn("知识域 {} targetDepth 缺失，默认设为 L3, sessionId={}", d.getDomainCode(), sessionId);
-                d.setTargetDepth("L3");
-            }
-        });
-        if (output.getProjects() == null) {
-            output.setProjects(Collections.emptyList());
+        if (output.getExperienceItems() == null) {
+            output.setExperienceItems(Collections.emptyList());
         }
+    }
+
+    private void recordPlannerNormalization(Long sessionId,
+                                            PlannerDomainNormalizationService.NormalizationResult normalizationResult) {
+        if (normalizationResult == null) {
+            return;
+        }
+        if (!normalizationResult.droppedDomains().isEmpty()) {
+            log.warn("Planner 输出包含跨岗位或非法知识域，已过滤, sessionId={}, droppedDomains={}",
+                    sessionId, normalizationResult.droppedDomains());
+        }
+        if (!normalizationResult.backfilledDomains().isEmpty()) {
+            log.info("Planner 输出知识域不足，已按岗位配置补齐, sessionId={}, backfilledDomains={}",
+                    sessionId, normalizationResult.backfilledDomains());
+        }
+        interviewDebugTraceService.recordPlannerStage(
+                sessionId,
+                "normalizedPlannerDomains",
+                Map.of(
+                        "rawDomainsCount", normalizationResult.rawDomainsCount(),
+                        "droppedDomains", normalizationResult.droppedDomains(),
+                        "backfilledDomains", normalizationResult.backfilledDomains(),
+                        "finalDomainsCount", normalizationResult.finalDomainsCount(),
+                        "normalizedDomains", normalizationResult.normalizedOutput().getDomains()
+                ),
+                Map.of(
+                        "rawDomainsCount", normalizationResult.rawDomainsCount(),
+                        "droppedDomains", normalizationResult.droppedDomains(),
+                        "backfilledDomains", normalizationResult.backfilledDomains(),
+                        "finalDomainsCount", normalizationResult.finalDomainsCount()
+                )
+        );
     }
 
     /** 根据岗位编码解析岗位中文名称，用于 Planner 输出标题展示。 */
@@ -232,5 +292,20 @@ public class PlannerOrchestrationService {
             case "DEVOPS" -> "DevOps Engineer";
             default -> targetRole;
         };
+    }
+
+    private Map<String, Object> buildPlannerDebugPayload(AiCallResult<PlannerOutput> plannerResult,
+                                                         PlannerOutput plannerOutput) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("promptCode", plannerResult.getPromptCode());
+        payload.put("promptVersion", plannerResult.getPromptVersion());
+        payload.put("promptTokens", plannerResult.getPromptTokens());
+        payload.put("responseTokens", plannerResult.getResponseTokens());
+        payload.put("latencyMs", plannerResult.getLatencyMs());
+        payload.put("systemPrompt", plannerResult.getSystemPrompt());
+        payload.put("userPrompt", plannerResult.getUserPrompt());
+        payload.put("rawResponse", plannerResult.getRawResponse());
+        payload.put("parsedOutput", plannerOutput);
+        return payload;
     }
 }

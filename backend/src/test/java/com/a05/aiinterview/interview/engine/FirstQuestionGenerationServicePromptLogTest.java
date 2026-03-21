@@ -152,7 +152,6 @@ class FirstQuestionGenerationServicePromptLogTest {
         existing.setQuestionNo(1);
         existing.setQuestionType("INTRO");
         existing.setStem("existing-intro");
-        existing.setTargetDepth("L1");
         existing.setGenerationContextJson(new LinkedHashMap<>());
         when(questionMapper.selectOne(any())).thenReturn(existing);
 

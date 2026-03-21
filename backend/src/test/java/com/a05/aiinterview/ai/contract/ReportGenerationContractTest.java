@@ -60,14 +60,12 @@ class ReportGenerationContractTest {
                       "domainCode": "jvm",
                       "domainName": "JVM 原理",
                       "score": 82.0,
-                      "achievedDepth": "L3",
                       "commentary": "对 GC 算法掌握较好，分代模型描述清晰。"
                     },
                     {
                       "domainCode": "concurrency",
                       "domainName": "并发编程",
                       "score": 70.0,
-                      "achievedDepth": "L2",
                       "commentary": "AQS 原理描述不够深入。"
                     }
                   ]

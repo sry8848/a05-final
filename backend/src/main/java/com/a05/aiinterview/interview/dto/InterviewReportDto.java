@@ -81,9 +81,6 @@ public class InterviewReportDto {
         @Schema(description = "该知识域得分（0~100）", example = "80.0")
         private BigDecimal score;
 
-        @Schema(description = "实际达到的深度等级", example = "L3")
-        private String achievedDepth;
-
         @Schema(description = "AI 定性点评")
         private String commentary;
     }
@@ -169,7 +166,6 @@ public class InterviewReportDto {
                         if (score instanceof Number n) {
                             s.setScore(BigDecimal.valueOf(n.doubleValue()));
                         }
-                        s.setAchievedDepth((String) m.get("achievedDepth"));
                         s.setCommentary((String) m.get("commentary"));
                         return s;
                     })

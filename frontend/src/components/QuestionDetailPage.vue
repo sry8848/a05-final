@@ -47,10 +47,6 @@
               <i class="fas fa-tag"></i>
               {{ detail.questionType }}
             </span>
-            <span class="meta-tag depth">
-              <i class="fas fa-sitemap"></i>
-              目标深度 {{ detail.targetDepth }}
-            </span>
             <span v-if="detail.answerStatus === 'skipped'" class="meta-tag skipped">
               <i class="fas fa-forward"></i>
               已跳过

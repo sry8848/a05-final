@@ -118,7 +118,6 @@ public class QuestionDetailEvaluationService {
                 .questionType(question.getQuestionType())
                 .domainCode(domainCode)
                 .domainName(domainName)
-                .targetDepth(question.getTargetDepth())
                 .answerText(attempt.getAnswerText())
                 .expectedPoints(question.getExpectedPoints())
                 .recentContext(buildRecentContext(session.getId(), session.getContextWindowSize()))

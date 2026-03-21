@@ -65,15 +65,15 @@ public class InterviewSession {
     private Map<String, Object> firstQuestionJson;
 
     /**
-     * Planner 生成的主考纲（JSON），包含题型配额、知识域目标深度、项目锚点。
-     * 格式参见 面试流程策略.md §3。
+     * Planner 生成的主考纲（JSON），包含规划推理、知识域与项目/实习条目。
+     * 格式参见当前 planner 新契约。
      */
     @TableField(typeHandler = JacksonTypeHandler.class)
     private Map<String, Object> syllabusJson;
 
     /**
-     * 状态账本（JSON），记录知识域覆盖进度、题型配额消耗、当前项目锚点等。
-     * 是后端唯一可信的过程状态，格式参见 面试流程策略.md §4。
+     * 状态账本（JSON），记录知识域覆盖、当前条目焦点与最近决策轨迹。
+     * 是后端唯一可信的过程状态。
      */
     @TableField(typeHandler = JacksonTypeHandler.class)
     private Map<String, Object> stateLedgerJson;
