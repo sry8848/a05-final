@@ -175,7 +175,7 @@
             <div class="progress-bar">
               <div class="progress-fill" :style="{ width: loadingProgress + '%' }"></div>
             </div>
-            <span class="progress-text">{{ loadingProgress }}%</span>
+            <span class="progress-text">{{ displayLoadingProgress }}%</span>
           </div>
 
           <div class="loading-steps">
@@ -647,6 +647,7 @@ import {
   shouldRenderTextInput,
   shouldShowInputModeToggle
 } from '../utils/interviewInputMode'
+import { formatLoadingProgress } from '../utils/interviewLoadingProgress'
 import { buildPendingInterviewResult } from '../utils/interviewResultState'
 import { buildInterviewCreatePayload } from '../utils/interviewSessionPayload'
 import {
@@ -900,6 +901,10 @@ export default {
         '即将开始面试...'
       ]
       return titles[Math.min(Math.floor(loadingProgress.value / 25), titles.length - 1)]
+    })
+
+    const displayLoadingProgress = computed(() => {
+      return formatLoadingProgress(loadingProgress.value)
     })
 
     const loadingSubtitle = computed(() => {
@@ -2459,6 +2464,7 @@ export default {
       isLoading,
       isDeviceTesting,
       loadingProgress,
+      displayLoadingProgress,
       currentStep,
       loadingSteps,
       loadingTips,

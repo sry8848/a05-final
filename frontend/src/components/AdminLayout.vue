@@ -202,28 +202,39 @@
         <div class="header-right">
           <div class="header-stats">
             <div class="stat-item">
-              <i class="fas fa-users"></i>
-              <span>在线用户: {{ onlineUsers }}</span>
+              <i class="fas fa-user-tie"></i>
+              <span>当前管理员: {{ currentAdminName }}</span>
             </div>
             <div class="stat-item">
-              <i class="fas fa-server"></i>
-              <span>系统状态: 正常</span>
+              <i class="fas fa-clock"></i>
+              <span>最近刷新: {{ lastDashboardRefreshLabel }}</span>
             </div>
           </div>
           <div class="header-actions">
             <button class="action-btn" @click="toggleDarkMode">
               <i :class="isDarkMode ? 'fas fa-sun' : 'fas fa-moon'"></i>
             </button>
-            <button class="action-btn">
-              <i class="fas fa-bell"></i>
-              <span class="badge">3</span>
+            <button
+              v-if="currentPage === 'dashboard'"
+              class="action-btn refresh-btn"
+              :disabled="dashboardRefreshMeta.loading"
+              @click="refreshDashboard"
+            >
+              <i :class="dashboardRefreshMeta.loading ? 'fas fa-spinner fa-spin' : 'fas fa-sync-alt'"></i>
+              <span>{{ dashboardRefreshMeta.loading ? '刷新中' : '刷新' }}</span>
             </button>
           </div>
         </div>
       </header>
 
       <div class="admin-page-content">
-        <AdminDashboard v-if="currentPage === 'dashboard'" />
+        <AdminDashboard
+          v-if="currentPage === 'dashboard'"
+          :refreshNonce="dashboardRefreshNonce"
+          :currentAdminName="currentAdminName"
+          @refresh-meta="handleDashboardRefreshMeta"
+          @auth-expired="handleAuthExpired"
+        />
         <PromptLab v-else-if="currentPage === 'prompt'" />
         <ModelRouting v-else-if="currentPage === 'model'" />
         <RagManagement v-else-if="currentPage === 'rag'" />
@@ -235,13 +246,40 @@
 </template>
 
 <script>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import AdminDashboard from './AdminDashboard.vue'
 import PromptLab from './PromptLab.vue'
 import ModelRouting from './ModelRouting.vue'
 import RagManagement from './RagManagement.vue'
 import SystemMonitor from './SystemMonitor.vue'
 import DataAnalysis from './DataAnalysis.vue'
+
+function formatRefreshTime(value) {
+  if (!value) {
+    return '未刷新'
+  }
+
+  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
+  if (match) {
+    return `${match[1]} ${match[2]}`
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return '未刷新'
+  }
+
+  return date
+    .toLocaleString('zh-CN', {
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+    .replace(/\//g, '-')
+}
 
 export default {
   name: 'AdminLayout',
@@ -266,7 +304,11 @@ export default {
   emits: ['logout', 'toggleDarkMode'],
   setup(props, { emit }) {
     const currentPage = ref('dashboard')
-    const onlineUsers = ref(128)
+    const dashboardRefreshNonce = ref(0)
+    const dashboardRefreshMeta = ref({
+      lastRefreshedAt: null,
+      loading: false
+    })
     const showProfileModal = ref(false)
 
     const profileForm = ref({
@@ -307,6 +349,12 @@ export default {
       return item ? item.icon : 'fas fa-tachometer-alt'
     })
 
+    const currentAdminName = computed(() => props.user?.name || '管理员')
+
+    const lastDashboardRefreshLabel = computed(() => (
+      formatRefreshTime(dashboardRefreshMeta.value.lastRefreshedAt)
+    ))
+
     const navigateTo = (page) => {
       currentPage.value = page
     }
@@ -319,21 +367,46 @@ export default {
       emit('toggleDarkMode')
     }
 
+    const refreshDashboard = () => {
+      dashboardRefreshNonce.value += 1
+    }
+
+    const handleDashboardRefreshMeta = (meta) => {
+      dashboardRefreshMeta.value = {
+        ...dashboardRefreshMeta.value,
+        ...meta
+      }
+    }
+
+    const handleAuthExpired = () => {
+      emit('logout')
+    }
+
     const saveProfile = () => {
       console.log('Saving profile:', profileForm.value)
       console.log('Password change:', passwordForm.value)
       showProfileModal.value = false
     }
 
+    watch(() => props.user?.name, (name) => {
+      profileForm.value.username = name || 'admin'
+    }, { immediate: true })
+
     return {
       currentPage,
-      onlineUsers,
+      currentAdminName,
+      dashboardRefreshMeta,
+      dashboardRefreshNonce,
+      handleAuthExpired,
+      handleDashboardRefreshMeta,
       mainNavItems,
       systemNavItems,
       currentPageTitle,
       currentPageIcon,
+      lastDashboardRefreshLabel,
       navigateTo,
       handleLogout,
+      refreshDashboard,
       toggleDarkMode,
       showProfileModal,
       profileForm,
@@ -597,19 +670,20 @@ export default {
   color: var(--primary-color);
 }
 
-.action-btn .badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  width: 18px;
-  height: 18px;
-  background: #ef4444;
-  border-radius: 50%;
-  font-size: 10px;
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.action-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.refresh-btn {
+  width: auto;
+  padding: 0 14px;
+  gap: 8px;
+}
+
+.refresh-btn span {
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .admin-page-content {

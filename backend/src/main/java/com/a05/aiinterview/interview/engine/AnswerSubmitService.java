@@ -393,11 +393,10 @@ public class AnswerSubmitService {
                 currentQuestion != null ? currentQuestion.getQuestionType() : "",
                 output.getFinalDecision(),
                 output.getNextQuestionType())) {
-            log.warn("评估决策动作与当前题型不匹配，降级为 WRAPUP, questionType={}, finalDecision={}, nextQuestionType={}",
+            log.warn("评估决策动作与当前题型不匹配，但保留 CONTINUE 继续链路, questionType={}, finalDecision={}, nextQuestionType={}",
                     currentQuestion != null ? currentQuestion.getQuestionType() : "",
                     output.getFinalDecision(),
                     output.getNextQuestionType());
-            return buildContractFallbackDecision("AI 评估决策与当前题型不匹配，已降级为结束面试。", "");
         }
         return output;
     }

@@ -100,6 +100,11 @@ Role
 理论题更像知识图谱中的节点与关联边。
 自然推进方式通常不是反复围绕同一知识点深挖。
 
+硬限制：
+- 当前题如果是理论题，`candidateStrategies` 和 `finalDecision` 只能从理论题动作池中选择
+- 理论题禁止混入实战类动作，例如“收敛并落回具体知识点”“引导还原”“责任定位”“切换项目要点”
+- 即使你判断下一题仍应落到一个更具体的技术知识点，只要当前题仍是理论题，也必须使用理论题动作表达，例如“引导和验证”“深入到强关联点”“平移到同知识域知识点”“变式”“切换知识域”或“退出当前题类”
+
 当前可考虑的决策方向：
 
 
@@ -349,6 +354,8 @@ Role
 - 如果当前轮尚未自然收敛到明确技术点，可以保持 domain 相关判断为空，不要强猜
 - 当前题未绑定知识域时，不要假设存在“当前知识域”，也不要使用依赖当前知识域的推进策略
 - 应基于题干、候选人回答、考纲未覆盖部分以及项目上下文，自然选择下一步最有信息增益的动作
+- 如果 `currentQuestion.questionType == INTRO`，它只承担开场建立主线的作用，不承担理论题或项目题内部追问职责
+- 如果 `currentQuestion.questionType == INTRO`，`candidateStrategies` 和 `finalDecision` 只能选择“退出当前题类”，不能选择“收敛并落回具体知识点”“引导还原”等其他题类内部动作
 
 
 【候选人回答】
@@ -487,28 +494,30 @@ domain：
 7. 如果 `interviewAction=WRAPUP`，则必须输出：`nextEntryAction=""`、`nextQuestionType=""`、`nextFocus=""`、`expectedAnswerPoints=[]`、`retrievalPlans=[]`。
 8. `nextQuestionType` 只能是以下四个值之一：`PRINCIPLE` / `PROJECT_DEEP_DIVE` / `SCENARIO` / `BEHAVIORAL`。
 9. `nextQuestionType` 必须在 `finalDecision` 确定之后再推导，不允许反向先决定 `nextQuestionType` 再倒推当前题动作。
-10. 当 `finalDecision` 是“引导和验证”“深入到强关联点”“平移到同知识域知识点”“变式”“切换知识域”时，`nextQuestionType` 必须为 `PRINCIPLE`。
-11. 当 `finalDecision` 是“退出当前题类”时，必须同时输出非空的 `nextEntryAction`；如果不是“退出当前题类”，则 `nextEntryAction` 必须为 `""`。
-12. 当 `finalDecision` 是“收敛并项目外扩”“引导还原”“真实情景”“责任定位”“压测”“做权衡”“兜底与观测”“演进与复盘”“切换项目要点”“切换项目”时，`nextQuestionType` 必须为 `PROJECT_DEEP_DIVE`。
-13. 当 `finalDecision` 是“收敛并落回具体知识点”时，`nextQuestionType` 必须为 `PRINCIPLE`。
-14. 当 `finalDecision` 是“引入”“要真实事件”“问决策过程”“问复盘成长”“问迁移能力”“问协作冲突”时，`nextQuestionType` 必须为 `BEHAVIORAL`。
-15. `nextFocus` 必须是单一焦点短语，建议控制在 4~20 个字；不能宽泛，不能写成完整问句，不能直接复写下一题题干。
-16. `nextFocus` 可以是项目点、设计关注点、系统脆弱点，不要求一定对应单一知识域；但如果已经明确收敛到技术域，应让表述稳定、可复用。
-17. `expectedAnswerPoints` 只写下一题真正想验证的关键点，保持精炼。
-18. `newCoveredDomains` 和 `newCoveredPoints` 只写本轮已经形成判断的事实，都可以为空数组 `[]`，不要把下一题准备问的点提前写进 `newCovered*`。
-19. `newCoveredDomains` 只写本轮后可以新增记为“已覆盖”的知识域；如果当前题本来未绑定知识域，只有当回答自然收敛到明确技术点时才补记。
-20. `newCoveredPoints` 只写本轮后可以新增记为“已形成基本判断”的知识点，写法要尽量明确，避免歧义。
-21. `retrievalPlans` 可以为空数组 `[]`；如果不需要检索，必须输出空数组。
-22. 如果需要检索，`retrievalPlans` 中每个对象都必须完整填写。
-23. `retrievalType` 只能是：`questions` 或 `domain`。
-24. `primaryQuery` 必须单一主题，不超过 16 个字，不要写完整句子。
-25. `alternateQueries` 写 0~2 个辅助查询词即可。
-26. `expectedEvidence` 只写真正希望检索到的信息，不要宽泛。
-27. `avoidEvidence` 只写不希望重复出现或不希望检索到的低价值信息。
-28. `answerSummary` 偏事实概述，`answerAssessment` 偏评价判断，两者不要重复。
-29. `decisionReason` 只写 2~3 句话，简洁说明为什么这样决策，不要展开成长段分析。
-30. 所有数组字段必须输出数组，即使为空也要输出 `[]`。
-31. 所有对象字段必须输出对象，不允许输出 `null`。
-32. 整体输出必须是合法 JSON，注意逗号、引号、数组和对象闭合。
-33. 不允许输出 markdown 代码块、不允许输出额外说明、不允许输出自然语言前后缀。
-34. 当当前题或下一题属于开放项目题、设计题或系统脆弱点题，且尚未自然收敛到明确技术点时，允许 `newCoveredDomains=[]`，也允许不新增 domain 相关沉淀；此时不要为了完整性强行补写知识域。
+10. 如果 `currentQuestion.questionType == INTRO` 且 `interviewAction=CONTINUE`，则 `finalDecision` 只能是“退出当前题类”。
+11. 当 `finalDecision` 是“引导和验证”“深入到强关联点”“平移到同知识域知识点”“变式”“切换知识域”时，`nextQuestionType` 必须为 `PRINCIPLE`。
+12. 当 `finalDecision` 是“退出当前题类”时，必须同时输出非空的 `nextEntryAction`；如果不是“退出当前题类”，则 `nextEntryAction` 必须为 `""`。
+13. 当 `finalDecision` 是“收敛并项目外扩”“引导还原”“真实情景”“责任定位”“压测”“做权衡”“兜底与观测”“演进与复盘”“切换项目要点”“切换项目”时，`nextQuestionType` 必须为 `PROJECT_DEEP_DIVE`。
+14. 当 `finalDecision` 是“收敛并落回具体知识点”时，`nextQuestionType` 必须为 `PRINCIPLE`。
+15. 当 `finalDecision` 是“引入”“要真实事件”“问决策过程”“问复盘成长”“问迁移能力”“问协作冲突”时，`nextQuestionType` 必须为 `BEHAVIORAL`。
+16. 如果 `currentQuestion.questionType == PRINCIPLE` 且 `nextQuestionType == PRINCIPLE`，则 `finalDecision` 只能是“引导和验证”“深入到强关联点”“平移到同知识域知识点”“变式”“切换知识域”之一，不能是“收敛并落回具体知识点”等实战类动作。
+17. `nextFocus` 必须是单一焦点短语，建议控制在 4~20 个字；不能宽泛，不能写成完整问句，不能直接复写下一题题干。
+18. `nextFocus` 可以是项目点、设计关注点、系统脆弱点，不要求一定对应单一知识域；但如果已经明确收敛到技术域，应让表述稳定、可复用。
+19. `expectedAnswerPoints` 只写下一题真正想验证的关键点，保持精炼。
+20. `newCoveredDomains` 和 `newCoveredPoints` 只写本轮已经形成判断的事实，都可以为空数组 `[]`，不要把下一题准备问的点提前写进 `newCovered*`。
+21. `newCoveredDomains` 只写本轮后可以新增记为“已覆盖”的知识域；如果当前题本来未绑定知识域，只有当回答自然收敛到明确技术点时才补记。
+22. `newCoveredPoints` 只写本轮后可以新增记为“已形成基本判断”的知识点，写法要尽量明确，避免歧义。
+23. `retrievalPlans` 可以为空数组 `[]`；如果不需要检索，必须输出空数组。
+24. 如果需要检索，`retrievalPlans` 中每个对象都必须完整填写。
+25. `retrievalType` 只能是：`questions` 或 `domain`。
+26. `primaryQuery` 必须单一主题，不超过 16 个字，不要写完整句子。
+27. `alternateQueries` 写 0~2 个辅助查询词即可。
+28. `expectedEvidence` 只写真正希望检索到的信息，不要宽泛。
+29. `avoidEvidence` 只写不希望重复出现或不希望检索到的低价值信息。
+29. `answerSummary` 偏事实概述，`answerAssessment` 偏评价判断，两者不要重复。
+30. `decisionReason` 只写 2~3 句话，简洁说明为什么这样决策，不要展开成长段分析。
+31. 所有数组字段必须输出数组，即使为空也要输出 `[]`。
+32. 所有对象字段必须输出对象，不允许输出 `null`。
+33. 整体输出必须是合法 JSON，注意逗号、引号、数组和对象闭合。
+34. 不允许输出 markdown 代码块、不允许输出额外说明、不允许输出自然语言前后缀。
+35. 当当前题或下一题属于开放项目题、设计题或系统脆弱点题，且尚未自然收敛到明确技术点时，允许 `newCoveredDomains=[]`，也允许不新增 domain 相关沉淀；此时不要为了完整性强行补写知识域。

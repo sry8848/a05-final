@@ -109,8 +109,8 @@ class AnswerSubmitServiceEvaluationInputTest {
     }
 
     @Test
-    @DisplayName("normalizeEvaluationOutput should downgrade when decision does not match current question type")
-    void normalizeEvaluationOutput_shouldDowngradeWhenDecisionDoesNotMatchCurrentQuestionType() {
+    @DisplayName("normalizeEvaluationOutput should keep continue when decision does not match current question type")
+    void normalizeEvaluationOutput_shouldKeepContinueWhenDecisionDoesNotMatchCurrentQuestionType() {
         AnswerSubmitService service = new AnswerSubmitService(
                 mock(AiClient.class),
                 mock(InterviewSessionMapper.class),
@@ -144,7 +144,8 @@ class AnswerSubmitServiceEvaluationInputTest {
                 output
         );
 
-        assertThat(normalized.getInterviewAction()).isEqualTo("WRAPUP");
-        assertThat(normalized.getFinalDecision()).isEqualTo("结束面试");
+        assertThat(normalized.getInterviewAction()).isEqualTo("CONTINUE");
+        assertThat(normalized.getFinalDecision()).isEqualTo("引导还原");
+        assertThat(normalized.getNextQuestionType()).isEqualTo("PROJECT_DEEP_DIVE");
     }
 }

@@ -85,6 +85,9 @@ class PromptTemplateCoverageTest {
                 .contains("请先做一个简短的自我介绍。")
                 .contains("历史问题、回答概要、回答评价")
                 .contains("开放项目题、设计题、系统脆弱点题，不强制绑定单一知识域")
+                .contains("如果 `currentQuestion.questionType == INTRO`")
+                .contains("只能选择“退出当前题类”")
+                .contains("如果 `currentQuestion.questionType == PRINCIPLE` 且 `nextQuestionType == PRINCIPLE`")
                 .contains("nextFocus 必须是单一焦点短语")
                 .contains("nextEntryAction")
                 .contains("退出当前题类")
@@ -96,6 +99,8 @@ class PromptTemplateCoverageTest {
                 .doesNotContain("possibleNextMoves=[]")
                 .doesNotContain("`possibleNextMoves`")
                 .doesNotContain("`newCandidatePointsByDomain`");
+        assertThat(rendered.getSystemPrompt())
+                .contains("理论题禁止混入实战类动作");
     }
 
     @Test
