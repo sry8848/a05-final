@@ -24,6 +24,7 @@ public class EvaluationDecisionOutput {
     private String decisionReason;
     private List<String> candidateStrategies;
     private String finalDecision;
+    private String nextEntryAction;
     /** PRINCIPLE / PROJECT_DEEP_DIVE / SCENARIO / BEHAVIORAL */
     private String nextQuestionType;
     private String nextFocus;

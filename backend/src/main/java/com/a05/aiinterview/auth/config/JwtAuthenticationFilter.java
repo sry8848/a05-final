@@ -1,17 +1,19 @@
 package com.a05.aiinterview.auth.config;
 
+import com.a05.aiinterview.admin.security.AdminPrincipal;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Collections;
+import java.util.List;
 
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -30,10 +32,26 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String token = authHeader.substring(7);
             var claims = jwtUtil.parseToken(token);
             if (claims != null) {
-                Long userId = jwtUtil.getUserIdFromClaims(claims);
-                if (userId != null) {
-                    var auth = new UsernamePasswordAuthenticationToken(userId, null, Collections.emptyList());
-                    SecurityContextHolder.getContext().setAuthentication(auth);
+                String actorType = jwtUtil.getActorTypeFromClaims(claims);
+                if (JwtUtil.ACTOR_TYPE_ADMIN.equals(actorType)) {
+                    String username = jwtUtil.getUsernameFromClaims(claims);
+                    String displayName = jwtUtil.getDisplayNameFromClaims(claims);
+                    if (StringUtils.hasText(username)) {
+                        var auth = new UsernamePasswordAuthenticationToken(
+                                new AdminPrincipal(username, displayName),
+                                null,
+                                List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
+                        SecurityContextHolder.getContext().setAuthentication(auth);
+                    }
+                } else {
+                    Long userId = jwtUtil.getUserIdFromClaims(claims);
+                    if (userId != null) {
+                        var auth = new UsernamePasswordAuthenticationToken(
+                                userId,
+                                null,
+                                List.of(new SimpleGrantedAuthority("ROLE_USER")));
+                        SecurityContextHolder.getContext().setAuthentication(auth);
+                    }
                 }
             }
         }

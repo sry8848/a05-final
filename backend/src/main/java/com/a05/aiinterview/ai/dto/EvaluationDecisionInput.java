@@ -86,7 +86,10 @@ public class EvaluationDecisionInput {
         private LimitCounter sameDomainContinue;
         private LimitCounter sameProjectPointContinue;
         private LimitCounter sameProjectContinue;
-        private LimitCounter sameTypeTotal;
+        private LimitCounter principleTotal;
+        private LimitCounter projectTotal;
+        private LimitCounter scenarioTotal;
+        private LimitCounter behavioralTotal;
     }
 
     @Data

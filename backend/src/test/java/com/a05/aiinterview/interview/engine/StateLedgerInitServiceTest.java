@@ -55,6 +55,16 @@ class StateLedgerInitServiceTest {
         assertThat(ledger.get("covered_domains")).isEqualTo(List.of());
         assertThat(ledger.get("covered_points")).isEqualTo(List.of());
         assertThat(ledger.get("recent_question_families")).isEqualTo(List.of());
+        assertThat(ledger.get("quota_state")).isEqualTo(Map.of(
+                "samePointContinue", 0,
+                "sameDomainContinue", 0,
+                "sameProjectPointContinue", 0,
+                "sameProjectContinue", 0,
+                "principleTotal", 0,
+                "projectTotal", 0,
+                "scenarioTotal", 0,
+                "behavioralTotal", 0
+        ));
         assertThat(ledger.get("domain_states")).isEqualTo(List.of(Map.of(
                 "domainId", 1L,
                 "domainCode", "java_core",

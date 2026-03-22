@@ -250,6 +250,7 @@ public class StateLedgerPatchService {
         summary.put("active_item_key", ledger.get("active_item_key"));
         summary.put("covered_domains", ledger.get("covered_domains"));
         summary.put("covered_points", ledger.get("covered_points"));
+        summary.put("quota_state", ledger.get("quota_state"));
         return summary;
     }
 

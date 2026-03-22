@@ -90,8 +90,9 @@ public class AiOutputContractValidator {
         output.setAnswerSummary(defaultString(output.getAnswerSummary(), ""));
         output.setAnswerAssessment(defaultString(output.getAnswerAssessment(), ""));
         output.setDecisionReason(defaultString(output.getDecisionReason(), ""));
-        output.setCandidateStrategies(sanitizeStringList(output.getCandidateStrategies()));
+        output.setCandidateStrategies(sanitizeActionList(output.getCandidateStrategies()));
         output.setFinalDecision(defaultString(output.getFinalDecision(), ""));
+        output.setNextEntryAction(defaultString(output.getNextEntryAction(), ""));
         output.setNextQuestionType(normalizeNextQuestionType(output.getNextQuestionType()));
         output.setNextFocus(defaultString(output.getNextFocus(), ""));
         output.setExpectedAnswerPoints(sanitizeStringList(output.getExpectedAnswerPoints()));
@@ -115,23 +116,48 @@ public class AiOutputContractValidator {
             return buildFallbackEvaluationDecisionOutput();
         }
 
-        if (output.getCandidateStrategies().isEmpty()) {
-            output.setCandidateStrategies(List.of(output.getInterviewAction().equals("WRAPUP") ? "结束面试" : "继续提问"));
-        }
-        if (isBlank(output.getFinalDecision())) {
-            output.setFinalDecision(output.getCandidateStrategies().getFirst());
-        }
-
         if ("WRAPUP".equals(output.getInterviewAction())) {
+            output.setCandidateStrategies(List.of(EvaluationDecisionActionCatalog.END_INTERVIEW));
+            output.setFinalDecision(EvaluationDecisionActionCatalog.END_INTERVIEW);
             output.setNextQuestionType("");
             output.setNextFocus("");
+            output.setNextEntryAction("");
             output.setExpectedAnswerPoints(new ArrayList<>());
             output.setRetrievalPlans(new ArrayList<>());
             return output;
         }
 
+        if (output.getCandidateStrategies().isEmpty()) {
+            if (EvaluationDecisionActionCatalog.isAllowedAction(output.getFinalDecision())) {
+                output.setCandidateStrategies(List.of(output.getFinalDecision()));
+            } else {
+                log.warn("[契约] EvaluationDecision.candidateStrategies 为空且 finalDecision 非法，降级为 WRAPUP");
+                return buildFallbackEvaluationDecisionOutput();
+            }
+        }
+        if (isBlank(output.getFinalDecision())) {
+            output.setFinalDecision(output.getCandidateStrategies().getFirst());
+        }
+        if (!EvaluationDecisionActionCatalog.isAllowedAction(output.getFinalDecision())) {
+            log.warn("[契约] EvaluationDecision.finalDecision 非法，降级为 WRAPUP");
+            return buildFallbackEvaluationDecisionOutput();
+        }
+        if (!output.getCandidateStrategies().contains(output.getFinalDecision())) {
+            log.warn("[契约] EvaluationDecision.finalDecision 不在 candidateStrategies 中，降级为 WRAPUP");
+            return buildFallbackEvaluationDecisionOutput();
+        }
+
         if (!ALLOWED_NEXT_QUESTION_TYPES.contains(output.getNextQuestionType())) {
             log.warn("[契约] EvaluationDecision.nextQuestionType 非法，降级为 WRAPUP");
+            return buildFallbackEvaluationDecisionOutput();
+        }
+        if (EvaluationDecisionActionCatalog.isExitAction(output.getFinalDecision())) {
+            if (isBlank(output.getNextEntryAction())) {
+                log.warn("[契约] EvaluationDecision.nextEntryAction 缺失，降级为 WRAPUP");
+                return buildFallbackEvaluationDecisionOutput();
+            }
+        } else if (!isBlank(output.getNextEntryAction())) {
+            log.warn("[契约] EvaluationDecision.nextEntryAction 仅允许在退出当前题类时填写，降级为 WRAPUP");
             return buildFallbackEvaluationDecisionOutput();
         }
         if (isBlank(output.getNextFocus())) {
@@ -209,6 +235,7 @@ public class AiOutputContractValidator {
                 .decisionReason("")
                 .candidateStrategies(List.of("结束面试"))
                 .finalDecision("结束面试")
+                .nextEntryAction("")
                 .nextQuestionType("")
                 .nextFocus("")
                 .expectedAnswerPoints(new ArrayList<>())
@@ -237,6 +264,18 @@ public class AiOutputContractValidator {
         return values.stream()
                 .filter(value -> value != null && !value.isBlank())
                 .map(String::trim)
+                .distinct()
+                .toList();
+    }
+
+    private List<String> sanitizeActionList(List<String> values) {
+        if (values == null) {
+            return new ArrayList<>();
+        }
+        return values.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(String::trim)
+                .filter(EvaluationDecisionActionCatalog::isAllowedAction)
                 .distinct()
                 .toList();
     }

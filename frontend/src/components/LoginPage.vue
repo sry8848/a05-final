@@ -190,15 +190,6 @@ export default {
         } else {
           data = await loginByEmailCode(codeForm.email, codeForm.code)
         }
-        if (data && data.token) {
-          localStorage.setItem('aiInterviewToken', data.token)
-          if (data.nickname) {
-            const settings = JSON.parse(localStorage.getItem('aiInterviewSettings') || '{}')
-            settings.user = { name: data.nickname }
-            settings.isLoggedIn = true
-            localStorage.setItem('aiInterviewSettings', JSON.stringify(settings))
-          }
-        }
         emit('loginSuccess', data)
       } catch (e) {
         alert(e.message || '登录失败')

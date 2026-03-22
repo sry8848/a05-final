@@ -4,6 +4,7 @@ import com.a05.aiinterview.ai.AiClient;
 import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionInput;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
+import com.a05.aiinterview.ai.contract.EvaluationDecisionActionCatalog;
 import com.a05.aiinterview.interview.dto.SubmitAttemptRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptResponse;
 import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
@@ -73,7 +74,7 @@ public class AnswerSubmitService {
         EvaluationDecisionOutput evalOutput;
         AiCallResult<EvaluationDecisionOutput> evalCallResult = null;
         if (shouldForceEndByMaxQuestions(session)) {
-            evalOutput = buildForcedEndDecision();
+                evalOutput = buildForcedEndDecision();
         } else {
             EvaluationDecisionInput evalInput = buildEvaluationInput(
                     session, currentQuestion, allQuestions, allAttempts, request.getAnswerText());
@@ -97,7 +98,7 @@ public class AnswerSubmitService {
             }
         }
 
-        EvaluationDecisionOutput normalized = normalizeEvaluationOutput(evalOutput);
+        EvaluationDecisionOutput normalized = normalizeEvaluationOutput(currentQuestion, evalOutput);
         interviewDebugTraceService.recordQuestionStage(
                 sessionId,
                 currentQuestion.getId(),
@@ -145,7 +146,7 @@ public class AnswerSubmitService {
                 .projectAndInternshipSummary(buildProjectAndInternshipSummary(session))
                 .interviewGoalSummary(buildInterviewGoalSummary(session))
                 .coveredKnowledgeSummary(buildCoveredKnowledgeSummary(session))
-                .quotaSummary(buildQuotaSummary(currentQuestion, allQuestions))
+                .quotaSummary(buildQuotaSummary(session, allQuestions))
                 .currentQuestion(buildCurrentQuestionContext(session, currentQuestion))
                 .answerText(answerText)
                 .expectedPoints(safeStringList(currentQuestion.getExpectedPoints()))
@@ -220,35 +221,27 @@ public class AnswerSubmitService {
                 : null);
     }
 
-    private EvaluationDecisionInput.QuotaSummary buildQuotaSummary(InterviewQuestion currentQuestion,
+    private EvaluationDecisionInput.QuotaSummary buildQuotaSummary(InterviewSession session,
                                                                    List<InterviewQuestion> allQuestions) {
-        String currentFocus = resolveFocusPoint(currentQuestion);
-        String currentDomainCode = resolveDomainCode(currentQuestion);
-        String currentItemKey = resolveActiveItemKey(currentQuestion);
-        String currentType = currentQuestion.getQuestionType();
-
-        int samePointContinue = countTrailingMatches(allQuestions, q -> Objects.equals(currentFocus, resolveFocusPoint(q)));
-        int sameDomainContinue = countTrailingMatches(allQuestions, q -> Objects.equals(currentDomainCode, resolveDomainCode(q)));
-        int sameProjectPointContinue = countTrailingMatches(allQuestions, q ->
-                Objects.equals(currentItemKey, resolveActiveItemKey(q))
-                        && Objects.equals(currentFocus, resolveFocusPoint(q)));
-        int sameProjectContinue = countTrailingMatches(allQuestions, q -> Objects.equals(currentItemKey, resolveActiveItemKey(q)));
-        int sameTypeTotal = (int) allQuestions.stream()
-                .filter(question -> Objects.equals(currentType, question.getQuestionType()))
-                .count();
-
+        Map<String, Object> quotaState = QuotaStateSupport.ensureQuotaState(
+                session.getStateLedgerJson(),
+                allQuestions
+        );
         return EvaluationDecisionInput.QuotaSummary.builder()
-                .samePointContinue(limitCounter(samePointContinue))
-                .sameDomainContinue(limitCounter(sameDomainContinue))
-                .sameProjectPointContinue(limitCounter(sameProjectPointContinue))
-                .sameProjectContinue(limitCounter(sameProjectContinue))
-                .sameTypeTotal(limitCounter(sameTypeTotal))
+                .samePointContinue(limitCounter(quotaState.get(QuotaStateSupport.SAME_POINT_CONTINUE)))
+                .sameDomainContinue(limitCounter(quotaState.get(QuotaStateSupport.SAME_DOMAIN_CONTINUE)))
+                .sameProjectPointContinue(limitCounter(quotaState.get(QuotaStateSupport.SAME_PROJECT_POINT_CONTINUE)))
+                .sameProjectContinue(limitCounter(quotaState.get(QuotaStateSupport.SAME_PROJECT_CONTINUE)))
+                .principleTotal(limitCounter(quotaState.get(QuotaStateSupport.PRINCIPLE_TOTAL)))
+                .projectTotal(limitCounter(quotaState.get(QuotaStateSupport.PROJECT_TOTAL)))
+                .scenarioTotal(limitCounter(quotaState.get(QuotaStateSupport.SCENARIO_TOTAL)))
+                .behavioralTotal(limitCounter(quotaState.get(QuotaStateSupport.BEHAVIORAL_TOTAL)))
                 .build();
     }
 
-    private EvaluationDecisionInput.LimitCounter limitCounter(int count) {
+    private EvaluationDecisionInput.LimitCounter limitCounter(Object count) {
         return EvaluationDecisionInput.LimitCounter.builder()
-                .count(count)
+                .count(QuotaStateSupport.toInt(count))
                 .maxCount(MAX_QUOTA_COUNT)
                 .build();
     }
@@ -338,6 +331,7 @@ public class AnswerSubmitService {
                 .decisionReason("已达到当前会话允许的最大题量，结束本场面试。")
                 .candidateStrategies(List.of("结束面试"))
                 .finalDecision("结束面试")
+                .nextEntryAction("")
                 .nextQuestionType("")
                 .nextFocus("")
                 .expectedAnswerPoints(List.of())
@@ -347,9 +341,28 @@ public class AnswerSubmitService {
                 .build();
     }
 
-    private EvaluationDecisionOutput normalizeEvaluationOutput(EvaluationDecisionOutput output) {
+    private EvaluationDecisionOutput buildContractFallbackDecision(String answerAssessment, String decisionReason) {
+        return EvaluationDecisionOutput.builder()
+                .interviewAction("WRAPUP")
+                .answerSummary("")
+                .answerAssessment(answerAssessment)
+                .decisionReason(decisionReason)
+                .candidateStrategies(List.of("结束面试"))
+                .finalDecision("结束面试")
+                .nextEntryAction("")
+                .nextQuestionType("")
+                .nextFocus("")
+                .expectedAnswerPoints(List.of())
+                .newCoveredDomains(List.of())
+                .newCoveredPoints(List.of())
+                .retrievalPlans(List.of())
+                .build();
+    }
+
+    private EvaluationDecisionOutput normalizeEvaluationOutput(InterviewQuestion currentQuestion,
+                                                               EvaluationDecisionOutput output) {
         if (output == null) {
-            return buildForcedEndDecision();
+            return buildContractFallbackDecision("AI 评估决策解析失败，已降级为结束面试。", "");
         }
         if (output.getInterviewAction() == null || output.getInterviewAction().isBlank()) {
             output.setInterviewAction("WRAPUP");
@@ -357,6 +370,11 @@ public class AnswerSubmitService {
         output.setInterviewAction(output.getInterviewAction().trim().toUpperCase(Locale.ROOT));
         if (output.getCandidateStrategies() == null) {
             output.setCandidateStrategies(List.of());
+        }
+        if (output.getNextEntryAction() == null) {
+            output.setNextEntryAction("");
+        } else {
+            output.setNextEntryAction(output.getNextEntryAction().trim());
         }
         if (output.getExpectedAnswerPoints() == null) {
             output.setExpectedAnswerPoints(List.of());
@@ -369,6 +387,17 @@ public class AnswerSubmitService {
         }
         if (output.getRetrievalPlans() == null) {
             output.setRetrievalPlans(List.of());
+        }
+        if ("CONTINUE".equalsIgnoreCase(output.getInterviewAction())
+                && !EvaluationDecisionActionCatalog.isValidContinueDecision(
+                currentQuestion != null ? currentQuestion.getQuestionType() : "",
+                output.getFinalDecision(),
+                output.getNextQuestionType())) {
+            log.warn("评估决策动作与当前题型不匹配，降级为 WRAPUP, questionType={}, finalDecision={}, nextQuestionType={}",
+                    currentQuestion != null ? currentQuestion.getQuestionType() : "",
+                    output.getFinalDecision(),
+                    output.getNextQuestionType());
+            return buildContractFallbackDecision("AI 评估决策与当前题型不匹配，已降级为结束面试。", "");
         }
         return output;
     }
@@ -456,18 +485,6 @@ public class AnswerSubmitService {
         return result;
     }
 
-    private int countTrailingMatches(List<InterviewQuestion> questions, java.util.function.Predicate<InterviewQuestion> predicate) {
-        int count = 0;
-        for (int i = questions.size() - 1; i >= 0; i--) {
-            InterviewQuestion question = questions.get(i);
-            if (!predicate.test(question)) {
-                break;
-            }
-            count += 1;
-        }
-        return count;
-    }
-
     private String summarizeAnswer(String answerText) {
         if (answerText == null || answerText.isBlank() || "[skip]".equals(answerText)) {
             return "";
@@ -504,13 +521,6 @@ public class AnswerSubmitService {
             }
         }
         return domainCode;
-    }
-
-    private String resolveFocusPoint(InterviewQuestion question) {
-        if (question.getGenerationContextJson() == null) {
-            return firstNonBlank(question.getTargetSkill(), "");
-        }
-        return firstNonBlank(asString(question.getGenerationContextJson().get("focusPoint")), question.getTargetSkill(), "");
     }
 
     private String resolveActiveItemKey(InterviewQuestion question) {

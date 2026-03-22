@@ -91,6 +91,7 @@ public class AnswerSubmitPersistenceService {
         evaluationJson.put("decisionReason", evalOutput.getDecisionReason());
         evaluationJson.put("candidateStrategies", evalOutput.getCandidateStrategies());
         evaluationJson.put("finalDecision", evalOutput.getFinalDecision());
+        evaluationJson.put("nextEntryAction", evalOutput.getNextEntryAction());
         evaluationJson.put("nextQuestionType", evalOutput.getNextQuestionType());
         evaluationJson.put("nextFocus", evalOutput.getNextFocus());
         evaluationJson.put("expectedAnswerPoints", evalOutput.getExpectedAnswerPoints());

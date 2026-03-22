@@ -42,10 +42,12 @@ public class SecurityConfig {
                         // 鉴权接口：注册、登录、验证码发送无需登录
                         .requestMatchers("/auth/register").permitAll()
                         .requestMatchers("/auth/login/**").permitAll()
+                        .requestMatchers("/auth/admin/login").permitAll()
                         .requestMatchers("/auth/email-code/send").permitAll()
-                        .requestMatchers("/auth/me", "/auth/logout").authenticated()
+                        .requestMatchers("/auth/me", "/auth/logout").hasRole("USER")
+                        .requestMatchers("/auth/admin/me", "/auth/admin/logout").hasRole("ADMIN")
                         // 简历接口：需要登录
-                        .requestMatchers("/resumes/**").authenticated()
+                        .requestMatchers("/resumes/**").hasRole("USER")
                         // 岗位与知识域：公开数据，无需登录
                         .requestMatchers("/positions/**").permitAll()
                         // 系统探针：无需登录
@@ -53,17 +55,18 @@ public class SecurityConfig {
                         // ASR 停顿阈值配置：公开静态数据，无需登录
                         .requestMatchers("/config/asr-pause-thresholds").permitAll()
                         // ASR 凭证接口：需要登录（避免 API Key 被匿名获取）
-                        .requestMatchers("/asr/token").authenticated()
+                        .requestMatchers("/asr/token").hasRole("USER")
                         // ASR 代理 WebSocket：通过 ticket 校验，不走 JWT
                         .requestMatchers("/asr/stream").permitAll()
                         // 面试会话接口：需要登录
-                        .requestMatchers("/interviews/**").authenticated()
+                        .requestMatchers("/interviews/**").hasRole("USER")
                         // 面试偏好接口：需要登录
-                        .requestMatchers("/interview-preferences/**").authenticated()
+                        .requestMatchers("/interview-preferences/**").hasRole("USER")
                         // 用户档案：需要登录
-                        .requestMatchers("/profile/**").authenticated()
+                        .requestMatchers("/profile/**").hasRole("USER")
                         // 问答库：需要登录
-                        .requestMatchers("/question-bank/**").authenticated()
+                        .requestMatchers("/question-bank/**").hasRole("USER")
+                        .requestMatchers("/admin/**").hasRole("ADMIN")
                         .anyRequest().permitAll()
                 )
                 .exceptionHandling(e -> e
@@ -76,6 +79,17 @@ public class SecurityConfig {
                             res.setHeader(TraceContext.TRACE_ID_HEADER, traceId);
                             res.setHeader(TraceContext.REQUEST_ID_HEADER, requestId);
                             res.getWriter().write("{\"code\":401,\"message\":\"未登录\",\"data\":null,\"traceId\":\""
+                                    + traceId + "\"}");
+                        })
+                        .accessDeniedHandler((req, res, ex) -> {
+                            res.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            res.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                            res.setCharacterEncoding(StandardCharsets.UTF_8.name());
+                            String traceId = TraceContext.getOrCreateTraceId();
+                            String requestId = TraceContext.getOrCreateRequestId();
+                            res.setHeader(TraceContext.TRACE_ID_HEADER, traceId);
+                            res.setHeader(TraceContext.REQUEST_ID_HEADER, requestId);
+                            res.getWriter().write("{\"code\":403,\"message\":\"无权限访问\",\"data\":null,\"traceId\":\""
                                     + traceId + "\"}");
                         })
                 )

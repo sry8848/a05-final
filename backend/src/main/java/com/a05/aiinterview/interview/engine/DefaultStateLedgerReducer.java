@@ -130,6 +130,7 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
         copy.put("covered_domains", new ArrayList<>(toStringList(copy.get("covered_domains"))));
         copy.put("covered_points", new ArrayList<>(toStringList(copy.get("covered_points"))));
         copy.put("recent_question_families", new ArrayList<>(toStringList(copy.get("recent_question_families"))));
+        copy.put("quota_state", new LinkedHashMap<>(QuotaStateSupport.ensureQuotaState(copy, List.of())));
         Object domainStates = copy.get("domain_states");
         if (domainStates instanceof List<?> rawDomainStates) {
             List<Map<String, Object>> cloned = new ArrayList<>();

@@ -11,6 +11,7 @@ import com.a05.aiinterview.interview.dto.SseDoneEvent;
 import com.a05.aiinterview.interview.dto.SseErrorEvent;
 import com.a05.aiinterview.interview.dto.SseStartEvent;
 import com.a05.aiinterview.interview.dto.SseTtsReadyEvent;
+import com.a05.aiinterview.interview.engine.QuotaStateSupport;
 import com.a05.aiinterview.interview.entity.InterviewAttempt;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
@@ -222,6 +223,7 @@ public class QuestionStreamService {
                         error -> onGenerationError(
                                 attemptId,
                                 session,
+                                currentQuestionId,
                                 plan,
                                 chunkIndex.get() > 0 || fullText.length() > 0,
                                 error),
@@ -296,7 +298,7 @@ public class QuestionStreamService {
         }
 
         try {
-            InterviewQuestion question = saveQuestion(session, plan, finalStem);
+            InterviewQuestion question = saveQuestion(session, currentQuestionId, attemptId, plan, finalStem);
             String questionIdKey = String.format(KEY_QUESTION_ID, attemptId);
             redisTemplate.opsForValue().set(questionIdKey, String.valueOf(question.getId()),
                     cacheTtlSeconds, TimeUnit.SECONDS);
@@ -309,12 +311,13 @@ public class QuestionStreamService {
             redisTemplate.opsForValue().set(statusKey, STATUS_DONE, cacheTtlSeconds, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.error("题目流式生成后保存失败, attemptId={}", attemptId, e);
-            onGenerationError(attemptId, session, plan, true, e);
+            onGenerationError(attemptId, session, currentQuestionId, plan, true, e);
         }
     }
 
     private void onGenerationError(String attemptId,
                                    InterviewSession session,
+                                   Long currentQuestionId,
                                    NextQuestionPlan plan,
                                    boolean hasPartialStream,
                                    Throwable error) {
@@ -323,7 +326,7 @@ public class QuestionStreamService {
         String statusKey = String.format(KEY_STATUS, attemptId);
         if (!hasPartialStream && session != null && plan != null && shouldUseFallbackQuestionGeneration(error)) {
             try {
-                completeGenerationWithFallbackQuestion(session, plan, attemptId, statusKey);
+                completeGenerationWithFallbackQuestion(session, currentQuestionId, plan, attemptId, statusKey);
                 return;
             } catch (Exception fallbackError) {
                 log.error("程序兜底出题失败, sessionId={}, attemptId={}", sessionId, attemptId, fallbackError);
@@ -338,6 +341,7 @@ public class QuestionStreamService {
 
     private void completeGenerationWithFallbackQuestion(
             InterviewSession session,
+            Long currentQuestionId,
             NextQuestionPlan plan,
             String attemptId,
             String statusKey) {
@@ -349,7 +353,7 @@ public class QuestionStreamService {
                 firstNonBlank(plan.getNextFocus(), resolvedDomain.domainName(), "核心技术能力"),
                 session.getTargetRole());
 
-        InterviewQuestion question = saveQuestion(session, plan, fallbackStem);
+        InterviewQuestion question = saveQuestion(session, currentQuestionId, attemptId, plan, fallbackStem);
         String chunksKey = String.format(KEY_CHUNKS, attemptId);
         String questionIdKey = String.format(KEY_QUESTION_ID, attemptId);
         redisTemplate.opsForList().rightPush(chunksKey, fallbackStem);
@@ -568,6 +572,8 @@ public class QuestionStreamService {
 
         return NextQuestionPlan.builder()
                 .interviewAction("CONTINUE")
+                .finalDecision(toStr(evalJson.get("finalDecision")))
+                .nextEntryAction(toStr(evalJson.get("nextEntryAction")))
                 .nextQuestionType(toStr(evalJson.get("nextQuestionType")))
                 .nextFocus(toStr(evalJson.get("nextFocus")))
                 .expectedAnswerPoints(toStringList(evalJson.get("expectedAnswerPoints")))
@@ -634,7 +640,7 @@ public class QuestionStreamService {
                 .nextQuestionGoal(QuestionGenerationInput.NextQuestionGoal.builder()
                         .questionType(firstNonBlank(plan.getNextQuestionType(), "PRINCIPLE"))
                         .nextFocus(plan.getNextFocus())
-                        .goalSummary("围绕「" + firstNonBlank(plan.getNextFocus(), "当前主题") + "」继续形成判断。")
+                        .goalSummary(buildGoalSummary(plan))
                         .relatedDomainId(resolvedDomain.domainId)
                         .relatedDomainCode(resolvedDomain.domainCode)
                         .relatedDomainName(resolvedDomain.domainName)
@@ -659,8 +665,15 @@ public class QuestionStreamService {
      * 将生成的题目文本持久化到数据库，并更新 session.currentQuestionNo。
      */
     private InterviewQuestion saveQuestion(InterviewSession session,
+                                           Long currentQuestionId,
+                                           String attemptId,
                                            NextQuestionPlan plan,
                                            String stem) {
+        List<InterviewQuestion> existingQuestions = interviewQuestionMapper.selectList(
+                new LambdaQueryWrapper<InterviewQuestion>()
+                        .eq(InterviewQuestion::getSessionId, session.getId())
+                        .orderByAsc(InterviewQuestion::getQuestionNo)
+        );
         int nextQuestionNo = (session.getCurrentQuestionNo() != null
                 ? session.getCurrentQuestionNo() : 0) + 1;
         ResolvedDomain resolvedDomain = resolveRelatedDomain(session, plan.getNextFocus());
@@ -695,9 +708,25 @@ public class QuestionStreamService {
         question.setUpdatedAt(LocalDateTime.now());
         interviewQuestionMapper.insert(question);
 
+        Map<String, Object> nextLedger = session.getStateLedgerJson() != null
+                ? new LinkedHashMap<>(session.getStateLedgerJson())
+                : new LinkedHashMap<>();
+        Map<String, Object> quotaState = QuotaStateSupport.ensureQuotaState(nextLedger, existingQuestions);
+        InterviewQuestion currentQuestion = currentQuestionId == null ? null : interviewQuestionMapper.selectById(currentQuestionId);
+        quotaState = QuotaStateSupport.advance(
+                quotaState,
+                currentQuestion != null ? currentQuestion.getQuestionType() : "",
+                plan.getFinalDecision(),
+                questionType
+        );
+        nextLedger.put(QuotaStateSupport.LEDGER_KEY, quotaState);
+        session.setStateLedgerJson(nextLedger);
+        session.setCurrentQuestionNo(nextQuestionNo);
+
         InterviewSession update = new InterviewSession();
         update.setId(session.getId());
         update.setCurrentQuestionNo(nextQuestionNo);
+        update.setStateLedgerJson(nextLedger);
         update.setUpdatedAt(LocalDateTime.now());
         interviewSessionMapper.updateById(update);
 
@@ -718,6 +747,8 @@ public class QuestionStreamService {
                 "nextQuestionPlan",
                 plan,
                 Map.of(
+                        "finalDecision", firstNonBlank(plan.getFinalDecision(), ""),
+                        "nextEntryAction", firstNonBlank(plan.getNextEntryAction(), ""),
                         "nextQuestionType", plan.getNextQuestionType(),
                         "nextFocus", firstNonBlank(plan.getNextFocus(), "")
                 )
@@ -729,6 +760,8 @@ public class QuestionStreamService {
                 "questionGenerationInput",
                 genInput,
                 Map.of(
+                        "finalDecision", firstNonBlank(plan.getFinalDecision(), ""),
+                        "nextEntryAction", firstNonBlank(plan.getNextEntryAction(), ""),
                         "nextQuestionType", plan.getNextQuestionType(),
                         "nextFocus", firstNonBlank(plan.getNextFocus(), "")
                 )
@@ -747,6 +780,8 @@ public class QuestionStreamService {
                 "questionGenerationOutput",
                 Map.of("finalStem", finalStem == null ? "" : finalStem),
                 Map.of(
+                        "finalDecision", firstNonBlank(plan.getFinalDecision(), ""),
+                        "nextEntryAction", firstNonBlank(plan.getNextEntryAction(), ""),
                         "nextQuestionType", plan.getNextQuestionType(),
                         "nextFocus", firstNonBlank(plan.getNextFocus(), ""),
                         "stemPreview", finalStem == null ? "" : finalStem
@@ -1034,6 +1069,15 @@ public class QuestionStreamService {
         return values == null ? List.of() : values;
     }
 
+    private String buildGoalSummary(NextQuestionPlan plan) {
+        String focus = firstNonBlank(plan.getNextFocus(), "当前主题");
+        String nextEntryAction = firstNonBlank(plan.getNextEntryAction(), "");
+        if (nextEntryAction.isBlank()) {
+            return "围绕「" + focus + "」继续形成判断。";
+        }
+        return "以「" + nextEntryAction + "」作为入口，围绕「" + focus + "」继续形成判断。";
+    }
+
     private List<String> toStringList(Object value) {
         if (!(value instanceof List<?> rawList)) {
             return List.of();
@@ -1139,6 +1183,8 @@ public class QuestionStreamService {
     @lombok.AllArgsConstructor
     static class NextQuestionPlan {
         private String interviewAction;
+        private String finalDecision;
+        private String nextEntryAction;
         private String nextQuestionType;
         private String nextFocus;
         private List<String> expectedAnswerPoints;

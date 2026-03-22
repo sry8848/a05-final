@@ -35,6 +35,8 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doAnswer;
 
 class QuestionStreamServiceBuildInputTest {
 
@@ -347,6 +349,96 @@ class QuestionStreamServiceBuildInputTest {
         assertThat(payload.getQuestion().getQuestionType()).isEqualTo("BEHAVIORAL");
         assertThat(payload.getQuestion().getDomainName()).isEqualTo("协作沟通");
         assertThat(payload.getQuestion().getTargetSkill()).isEqualTo("跨团队协作");
+    }
+
+    @Test
+    void saveQuestion_shouldAdvanceQuotaStateAfterQuestionIsPersisted() throws Exception {
+        AiClient aiClient = mock(AiClient.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        RagRetrievalService ragService = mock(RagRetrievalService.class);
+        TtsService ttsService = mock(TtsService.class);
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+
+        InterviewQuestion currentQuestion = new InterviewQuestion();
+        currentQuestion.setId(900L);
+        currentQuestion.setSessionId(500L);
+        currentQuestion.setQuestionNo(1);
+        currentQuestion.setQuestionType("PRINCIPLE");
+
+        when(questionMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(currentQuestion));
+        when(questionMapper.selectById(900L)).thenReturn(currentQuestion);
+        doAnswer(invocation -> {
+            InterviewQuestion inserted = invocation.getArgument(0, InterviewQuestion.class);
+            inserted.setId(901L);
+            return 1;
+        }).when(questionMapper).insert(org.mockito.ArgumentMatchers.any(InterviewQuestion.class));
+
+        QuestionStreamService service = new QuestionStreamService(
+                aiClient,
+                sessionMapper,
+                questionMapper,
+                attemptMapper,
+                ragService,
+                ttsService,
+                redisTemplate,
+                new InterviewDebugTraceService(new ObjectMapper()),
+                new ObjectMapper()
+        );
+
+        InterviewSession session = new InterviewSession();
+        session.setId(500L);
+        session.setCurrentQuestionNo(1);
+        session.setStateLedgerJson(new LinkedHashMap<>(Map.of(
+                "quota_state", new LinkedHashMap<>(Map.of(
+                        "samePointContinue", 1,
+                        "sameDomainContinue", 2,
+                        "sameProjectPointContinue", 0,
+                        "sameProjectContinue", 0,
+                        "principleTotal", 1,
+                        "projectTotal", 0,
+                        "scenarioTotal", 0,
+                        "behavioralTotal", 0
+                ))
+        )));
+
+        QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
+                .interviewAction("CONTINUE")
+                .finalDecision("退出当前题类")
+                .nextEntryAction("直接从项目中的缓存一致性点切入")
+                .nextQuestionType("PROJECT_DEEP_DIVE")
+                .nextFocus("订单系统里的缓存一致性设计")
+                .expectedAnswerPoints(List.of("双删", "延迟消息"))
+                .build();
+
+        Method method = QuestionStreamService.class.getDeclaredMethod(
+                "saveQuestion",
+                InterviewSession.class,
+                Long.class,
+                String.class,
+                QuestionStreamService.NextQuestionPlan.class,
+                String.class
+        );
+        method.setAccessible(true);
+
+        InterviewQuestion saved = (InterviewQuestion) method.invoke(
+                service,
+                session,
+                900L,
+                "attempt-900",
+                plan,
+                "请结合订单系统，讲讲缓存一致性你是怎么设计和落地的？"
+        );
+
+        assertThat(saved.getId()).isEqualTo(901L);
+        assertThat(session.getCurrentQuestionNo()).isEqualTo(2);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> quotaState = (Map<String, Object>) session.getStateLedgerJson().get("quota_state");
+        assertThat(quotaState).containsEntry("samePointContinue", 0)
+                .containsEntry("sameDomainContinue", 0)
+                .containsEntry("projectTotal", 1)
+                .containsEntry("principleTotal", 1);
     }
 
     private QuestionStreamService newService() {

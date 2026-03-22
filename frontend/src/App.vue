@@ -137,6 +137,12 @@ import InterviewReportGeneratingPage from './components/InterviewReportGeneratin
 import AdminLoginPage from './components/AdminLoginPage.vue'
 import AdminLayout from './components/AdminLayout.vue'
 import ResumesPage from './components/ResumesPage.vue'
+import {
+  getCurrentAdmin,
+  getCurrentUser,
+  logoutAdmin,
+  logoutUser
+} from './api/auth'
 import { createQuestionBankItem, getInterviewQuestionDetail, getInterviewReport } from './api/resume'
 import {
   applyReadyReportToInterviewRecord,
@@ -144,6 +150,18 @@ import {
   normalizeDisplayReportStatus,
   upsertReadyInterviewRecord
 } from './utils/growthHistoryState'
+import {
+  resolveLogoutViewState,
+  resolveUserLoginViewState
+} from './utils/authViewState'
+import {
+  ADMIN_TOKEN_KEY,
+  USER_TOKEN_KEY,
+  clearPersistedAuthSession,
+  persistAdminSession,
+  persistUserSession,
+  restoreAuthSession
+} from './utils/authSession'
 import { mergeInterviewResultWithReport as mergeResultWithReport } from './utils/interviewResultState'
 import { withQuestionRedoState } from './utils/questionRedoState'
 
@@ -639,24 +657,50 @@ export default {
     }
 
     const handleLoginSuccess = (userData) => {
+      const nextViewState = resolveUserLoginViewState()
+      if (userData?.token) {
+        persistUserSession(localStorage, userData)
+      }
       if (userData && userData.nickname) {
         user.name = userData.nickname
       }
-      isLoggedIn.value = true
-      showRegister.value = false
+      isLoggedIn.value = nextViewState.isLoggedIn
+      isAdmin.value = nextViewState.isAdmin
+      showAdminLogin.value = nextViewState.showAdminLogin
+      showRegister.value = nextViewState.showRegister
       showNotification('登录成功，欢迎回来！', 'success')
     }
 
     const handleRegisterSuccess = (userData) => {
+      const nextViewState = resolveLogoutViewState()
       user.name = userData.username
-      isLoggedIn.value = true
+      isLoggedIn.value = nextViewState.isLoggedIn
+      isAdmin.value = nextViewState.isAdmin
+      showAdminLogin.value = nextViewState.showAdminLogin
+      currentPage.value = nextViewState.currentPage
       showRegister.value = false
-      showNotification('注册成功，欢迎加入！', 'success')
+      showNotification('注册成功，请登录后继续', 'success')
     }
 
-    const handleLogout = () => {
-      isLoggedIn.value = false
-      currentPage.value = 'growth'
+    const handleLogout = async () => {
+      const nextViewState = resolveLogoutViewState()
+      const adminToken = localStorage.getItem(ADMIN_TOKEN_KEY)
+      const userToken = localStorage.getItem(USER_TOKEN_KEY)
+      try {
+        if (isAdmin.value && adminToken) {
+          await logoutAdmin(adminToken)
+        } else if (!isAdmin.value && userToken) {
+          await logoutUser(userToken)
+        }
+      } catch (error) {
+        console.warn('[App] logout request failed', error)
+      }
+      clearPersistedAuthSession(localStorage)
+      isLoggedIn.value = nextViewState.isLoggedIn
+      isAdmin.value = nextViewState.isAdmin
+      showAdminLogin.value = nextViewState.showAdminLogin
+      showRegister.value = false
+      currentPage.value = nextViewState.currentPage
       isInterviewRunning.value = false
       showReportGeneratingPage.value = false
       pendingGeneratingResult.value = null
@@ -711,10 +755,14 @@ export default {
     }
 
     const handleAdminLoginSuccess = (userData) => {
+      if (userData?.token) {
+        persistAdminSession(localStorage, userData)
+      }
       isLoggedIn.value = true
       isAdmin.value = true
       showAdminLogin.value = false
-      user.name = userData.username || '管理员'
+      showRegister.value = false
+      user.name = userData.displayName || userData.username || '管理员'
       showNotification('管理端登录成功！', 'success')
     }
 
@@ -1151,8 +1199,9 @@ export default {
         try {
           const settings = JSON.parse(saved)
           isDarkMode.value = settings.isDarkMode || false
-          isLoggedIn.value = settings.isLoggedIn || false
-          Object.assign(user, settings.user)
+          if (settings.user) {
+            Object.assign(user, settings.user)
+          }
           
           if (isDarkMode.value) {
             document.documentElement.setAttribute('data-theme', 'dark')
@@ -1160,6 +1209,26 @@ export default {
         } catch (e) {
           console.warn('加载设置失败:', e)
         }
+      }
+    }
+
+    const restoreStoredAuthSession = async () => {
+      try {
+        const restored = await restoreAuthSession({
+          storage: localStorage,
+          getCurrentAdmin,
+          getCurrentUser
+        })
+        isLoggedIn.value = restored.isLoggedIn
+        isAdmin.value = restored.isAdmin
+        if (restored.userName) {
+          user.name = restored.userName
+        }
+      } catch (error) {
+        console.warn('[App] auth session restore failed', error)
+        clearPersistedAuthSession(localStorage)
+        isLoggedIn.value = false
+        isAdmin.value = false
       }
     }
 
@@ -1182,6 +1251,9 @@ export default {
 
     onMounted(() => {
       loadUserSettings()
+      restoreStoredAuthSession().catch((error) => {
+        console.warn('[App] restoreStoredAuthSession failed', error)
+      })
       loadHistoryUnreadFlag()
       startReportPolling()
       pollGeneratingReports().catch((error) => {

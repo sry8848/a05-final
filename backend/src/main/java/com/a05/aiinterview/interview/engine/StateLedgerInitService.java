@@ -90,6 +90,7 @@ public class StateLedgerInitService {
         ledger.put("covered_domains", new ArrayList<>());
         ledger.put("covered_points", new ArrayList<>());
         ledger.put("recent_question_families", new ArrayList<>());
+        ledger.put(QuotaStateSupport.LEDGER_KEY, QuotaStateSupport.initialQuotaState());
 
         List<Map<String, Object>> domainStates = new ArrayList<>();
         if (syllabus.getDomains() != null) {

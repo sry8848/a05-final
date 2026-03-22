@@ -14,6 +14,9 @@ const BASE = '/api/v1'
 async function request(path, options = {}) {
   const url = BASE + path
   const headers = { 'Content-Type': 'application/json', ...options.headers }
+  if (options.authToken) {
+    headers.Authorization = `Bearer ${options.authToken}`
+  }
   let body = options.body
   if (body && typeof body === 'object' && !(body instanceof FormData)) {
     body = JSON.stringify(body)
@@ -65,6 +68,47 @@ export function loginByEmailCode(email, code) {
   return request('/auth/login/email-code', {
     method: 'POST',
     body: { email: email.trim(), code: code.trim() }
+  })
+}
+
+/**
+ * 管理员账号 + 密码登录
+ * @param {string} username
+ * @param {string} password
+ * @returns {Promise<{ token: string, username: string, displayName: string }>}
+ */
+export function loginAdmin(username, password) {
+  return request('/auth/admin/login', {
+    method: 'POST',
+    body: { username: username.trim(), password }
+  })
+}
+
+export function getCurrentUser(token) {
+  return request('/auth/me', {
+    method: 'GET',
+    authToken: token
+  })
+}
+
+export function getCurrentAdmin(token) {
+  return request('/auth/admin/me', {
+    method: 'GET',
+    authToken: token
+  })
+}
+
+export function logoutUser(token) {
+  return request('/auth/logout', {
+    method: 'POST',
+    authToken: token
+  })
+}
+
+export function logoutAdmin(token) {
+  return request('/auth/admin/logout', {
+    method: 'POST',
+    authToken: token
   })
 }
 

@@ -37,6 +37,7 @@ class StateLedgerPatchServiceUpdatedLedgerTest {
         assertThat(newLedger.get("active_item_type")).isEqualTo("PROJECT");
         assertThat(newLedger.get("active_item_name")).isEqualTo("订单系统");
         assertThat(newLedger.get("recent_question_families")).isEqualTo(List.of("INTRO.订单项目"));
+        assertThat(newLedger.get("quota_state")).isEqualTo(oldLedger.get("quota_state"));
     }
 
     @Test
@@ -103,6 +104,16 @@ class StateLedgerPatchServiceUpdatedLedgerTest {
         ledger.put("covered_domains", List.of());
         ledger.put("covered_points", List.of());
         ledger.put("recent_question_families", List.of());
+        ledger.put("quota_state", new LinkedHashMap<>(Map.of(
+                "samePointContinue", 0,
+                "sameDomainContinue", 0,
+                "sameProjectPointContinue", 0,
+                "sameProjectContinue", 0,
+                "principleTotal", 1,
+                "projectTotal", 0,
+                "scenarioTotal", 0,
+                "behavioralTotal", 0
+        )));
         ledger.put("domain_states", List.of(
                 new LinkedHashMap<>(Map.of(
                         "domainId", 6L,
