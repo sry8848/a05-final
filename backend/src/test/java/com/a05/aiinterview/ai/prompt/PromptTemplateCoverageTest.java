@@ -35,7 +35,10 @@ class PromptTemplateCoverageTest {
                 .contains("负责高并发订单系统研发");
         assertThat(rendered.getSystemPrompt())
                 .contains("5~8 个")
-                .contains("只能从输入提供的岗位知识域列表中选择");
+                .contains("只能从输入提供的岗位知识域列表中选择")
+                .contains("coveredKnowledgePoints")
+                .contains("不要把整个 domain 删掉")
+                .contains("如果历史 discussedItems 为空，不要臆造项目去重信息");
     }
 
     @Test

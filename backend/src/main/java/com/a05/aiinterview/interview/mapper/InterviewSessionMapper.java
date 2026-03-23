@@ -39,4 +39,11 @@ public interface InterviewSessionMapper extends BaseMapper<InterviewSession> {
                       @Param("targetRole") String targetRole,
                       @Param("dateFrom") LocalDateTime dateFrom,
                       @Param("dateTo") LocalDateTime dateTo);
+
+    List<InterviewSession> selectPlannerRecentSessions(@Param("userId") Long userId,
+                                                       @Param("targetRole") String targetRole,
+                                                       @Param("statuses") List<String> statuses,
+                                                       @Param("dateFrom") LocalDateTime dateFrom,
+                                                       @Param("excludeSessionId") Long excludeSessionId,
+                                                       @Param("limit") Integer limit);
 }

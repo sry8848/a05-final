@@ -105,4 +105,23 @@
         FROM interview_sessions s
         WHERE <include refid="historyWhere"/>
     </select>
+
+    <select id="selectPlannerRecentSessions" resultMap="InterviewSessionResultMap">
+        SELECT *
+        FROM interview_sessions
+        WHERE user_id = #{userId}
+          AND target_role = #{targetRole}
+          AND COALESCE(finished_at, updated_at, created_at) &gt;= #{dateFrom}
+          <if test="excludeSessionId != null">
+              AND id != #{excludeSessionId}
+          </if>
+          <if test="statuses != null and statuses.size() &gt; 0">
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                  #{status}
+              </foreach>
+          </if>
+        ORDER BY COALESCE(finished_at, updated_at, created_at) DESC, id DESC
+        LIMIT #{limit}
+    </select>
 </mapper>

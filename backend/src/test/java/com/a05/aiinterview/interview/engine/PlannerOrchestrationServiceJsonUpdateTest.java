@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,7 +64,9 @@ class PlannerOrchestrationServiceJsonUpdateTest {
                 aiClient,
                 ledgerInitService,
                 firstQuestionGenerationService,
+                new PlannerHistoryBuilderService(sessionMapper),
                 new PlannerDomainNormalizationService(),
+                new PlannerHistoryDedupService(),
                 new InterviewSyllabusAssembler(),
                 new InterviewDebugTraceService(new ObjectMapper()),
                 new ObjectMapper()
@@ -136,7 +139,9 @@ class PlannerOrchestrationServiceJsonUpdateTest {
                 aiClient,
                 ledgerInitService,
                 firstQuestionGenerationService,
+                new PlannerHistoryBuilderService(sessionMapper),
                 new PlannerDomainNormalizationService(),
+                new PlannerHistoryDedupService(),
                 new InterviewSyllabusAssembler(),
                 new InterviewDebugTraceService(new ObjectMapper()),
                 new ObjectMapper()
@@ -157,6 +162,81 @@ class PlannerOrchestrationServiceJsonUpdateTest {
                         && "in_progress".equals(s.getStatus())
                         && s.getFirstQuestionJson() != null
                         && s.getStateLedgerJson() == ledger
+        ));
+    }
+
+    @Test
+    @DisplayName("runAsync should pass recent covered knowledge points to planner history input")
+    void runAsync_shouldPassRecentHistoryIntoPlannerInput() {
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        ResumeMapper resumeMapper = mock(ResumeMapper.class);
+        PositionService positionService = mock(PositionService.class);
+        AiClient aiClient = mock(AiClient.class);
+        StateLedgerInitService ledgerInitService = mock(StateLedgerInitService.class);
+        FirstQuestionGenerationService firstQuestionGenerationService = mock(FirstQuestionGenerationService.class);
+
+        InterviewSession session = buildSession();
+        PositionSkillDomain domain = buildDomain();
+        PlannerOutput plannerOutput = buildPlannerOutput();
+        Map<String, Object> ledger = new LinkedHashMap<>();
+        ledger.put("overall_status", "IN_PROGRESS");
+        InterviewQuestion firstQuestion = buildFirstQuestion();
+
+        InterviewSession historySession = new InterviewSession();
+        historySession.setId(7L);
+        historySession.setStatus("completed");
+        historySession.setFinishedAt(LocalDateTime.of(2026, 3, 20, 12, 0));
+        historySession.setStateLedgerJson(new LinkedHashMap<>(Map.of(
+                "covered_points", List.of("Redis / 缓存击穿", "MySQL / 索引优化")
+        )));
+
+        when(sessionMapper.selectById(8L)).thenReturn(session);
+        when(sessionMapper.selectPlannerRecentSessions(
+                eq(1L),
+                eq("JAVA_BACKEND"),
+                eq(List.of("completed", "report_generating")),
+                any(LocalDateTime.class),
+                eq(8L),
+                eq(3)
+        )).thenReturn(List.of(historySession));
+        when(positionService.listSkillDomainEntities("JAVA_BACKEND")).thenReturn(List.of(domain));
+        when(aiClient.callPlanner(argThat(input ->
+                input != null
+                        && input.getHistoryInterviews() != null
+                        && input.getHistoryInterviews().size() == 1
+                        && input.getHistoryInterviews().get(0).getCoveredKnowledgePoints()
+                        .containsAll(List.of("Redis / 缓存击穿", "MySQL / 索引优化"))
+        ))).thenReturn(AiCallResult.<PlannerOutput>builder()
+                .output(plannerOutput)
+                .build());
+        when(ledgerInitService.initLedger(eq(8L), any(InterviewSyllabus.class), eq(List.of(domain)))).thenReturn(ledger);
+        when(firstQuestionGenerationService.generateAndSave(any(InterviewSession.class), any())).thenReturn(firstQuestion);
+        when(sessionMapper.updateById(any(InterviewSession.class))).thenReturn(1);
+
+        PlannerOrchestrationService service = new PlannerOrchestrationService(
+                sessionMapper,
+                resumeMapper,
+                positionService,
+                aiClient,
+                ledgerInitService,
+                firstQuestionGenerationService,
+                new PlannerHistoryBuilderService(sessionMapper),
+                new PlannerDomainNormalizationService(),
+                new PlannerHistoryDedupService(),
+                new InterviewSyllabusAssembler(),
+                new InterviewDebugTraceService(new ObjectMapper()),
+                new ObjectMapper()
+        );
+
+        service.runAsync(8L);
+
+        verify(aiClient).callPlanner(argThat(input ->
+                input != null
+                        && input.getHistoryInterviews() != null
+                        && input.getHistoryInterviews().size() == 1
+                        && input.getHistoryInterviews().get(0).getDiscussedItems().isEmpty()
+                        && input.getHistoryInterviews().get(0).getStrongPoints().isEmpty()
+                        && input.getHistoryInterviews().get(0).getWeakPoints().isEmpty()
         ));
     }
 

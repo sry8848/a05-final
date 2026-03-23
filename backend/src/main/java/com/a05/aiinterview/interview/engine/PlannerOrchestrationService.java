@@ -50,7 +50,9 @@ public class PlannerOrchestrationService {
     private final AiClient aiClient;
     private final StateLedgerInitService stateLedgerInitService;
     private final FirstQuestionGenerationService firstQuestionGenerationService;
+    private final PlannerHistoryBuilderService plannerHistoryBuilderService;
     private final PlannerDomainNormalizationService plannerDomainNormalizationService;
+    private final PlannerHistoryDedupService plannerHistoryDedupService;
     private final InterviewSyllabusAssembler interviewSyllabusAssembler;
     private final InterviewDebugTraceService interviewDebugTraceService;
     private final ObjectMapper objectMapper;
@@ -105,6 +107,11 @@ public class PlannerOrchestrationService {
                     plannerDomainNormalizationService.normalize(plannerOutput, domains);
             plannerOutput = normalizationResult.normalizedOutput();
             recordPlannerNormalization(sessionId, normalizationResult);
+            plannerOutput = plannerHistoryDedupService.deduplicate(
+                    plannerOutput,
+                    domains,
+                    plannerInput.getHistoryInterviews()
+            );
             InterviewSyllabus syllabus = interviewSyllabusAssembler.assemble(plannerOutput, domains);
             interviewDebugTraceService.recordPlannerStage(
                     sessionId,
@@ -194,7 +201,7 @@ public class PlannerOrchestrationService {
                 .resumeText(resumeText)
                 .focusTopics(session.getFocusTopics())
                 .domains(domainInfos)
-                .historyInterviews(List.of())
+                .historyInterviews(plannerHistoryBuilderService.buildRecentHistory(session))
                 .build();
     }
 
