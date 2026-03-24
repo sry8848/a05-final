@@ -9,7 +9,7 @@ import java.util.List;
 
 /**
  * 评估决策 AI 调用入参。
- * 使用结构化契约向 prompt 提供候选人上下文、考纲状态、限额状态与本场历史。
+ * 使用结构化契约向 prompt 提供候选人上下文、剩余目标域、策略池与本场历史。
  */
 @Data
 @Builder
@@ -25,15 +25,18 @@ public class EvaluationDecisionInput {
 
     private InterviewMeta interview;
     private List<ProjectAndInternshipItem> projectAndInternshipSummary;
-    private InterviewGoalSummary interviewGoalSummary;
+    private List<RemainingTargetDomain> remainingTargetDomains;
     private List<String> coveredKnowledgeSummary;
-    private QuotaSummary quotaSummary;
+    private List<AvailableStrategy> availableStrategies;
     private CurrentQuestionContext currentQuestion;
     private String answerText;
     private List<String> expectedPoints;
-    private List<String> possibleFutureDirections;
     private List<RetrievedMaterial> retrievedMaterials;
     private List<RecentInterviewMemoryItem> recentInterviewMemory;
+    private Boolean repairMode;
+    private Integer repairAttemptNo;
+    private String rawDecisionOutput;
+    private List<String> validationErrors;
 
     @Data
     @Builder
@@ -60,45 +63,23 @@ public class EvaluationDecisionInput {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class InterviewGoalSummary {
-        private List<GoalDomainItem> domains;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class GoalDomainItem {
-        private Long domainId;
+    public static class RemainingTargetDomain {
         private String domainCode;
         private String domainName;
         private List<String> focusPoints;
-        /** 仅暴露给 prompt 的状态：UNASKED / COVERED */
-        private String status;
     }
 
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class QuotaSummary {
-        private LimitCounter samePointContinue;
-        private LimitCounter sameDomainContinue;
-        private LimitCounter sameProjectPointContinue;
-        private LimitCounter sameProjectContinue;
-        private LimitCounter principleTotal;
-        private LimitCounter projectTotal;
-        private LimitCounter scenarioTotal;
-        private LimitCounter behavioralTotal;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class LimitCounter {
-        private Integer count;
-        private Integer maxCount;
+    public static class AvailableStrategy {
+        private String strategyCode;
+        private String label;
+        private String description;
+        private String applicableWhen;
+        private String moveType;
+        private Boolean requiresTargetDomain;
     }
 
     @Data
@@ -109,6 +90,7 @@ public class EvaluationDecisionInput {
         private String stem;
         private String questionType;
         private Long domainId;
+        private String domainCode;
         private String domainName;
         private String currentFocus;
         private String relatedItemKey;

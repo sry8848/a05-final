@@ -113,19 +113,30 @@
             </defs>
             <path :d="trendAreaPath" fill="url(#trendGrad)" class="trend-area" />
             <path :d="trendLinePath" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="trend-line" />
-            <circle
+            <g
               v-for="(p, i) in trendChartPoints"
               :key="'tc-' + i"
-              :cx="p.x"
-              :cy="p.y"
-              r="5"
-              fill="#10b981"
-              stroke="white"
-              stroke-width="2"
-            />
+              class="trend-point-group"
+            >
+              <title>{{ trendPointTooltips[i] }}</title>
+              <circle
+                :cx="p.x"
+                :cy="p.y"
+                r="5"
+                fill="#10b981"
+                stroke="white"
+                stroke-width="2"
+              />
+            </g>
           </svg>
-          <div class="trend-x-labels">
-            <span v-for="(lb, i) in trendXLabels" :key="'xl-' + i">{{ lb }}</span>
+          <div class="trend-x-labels" style="--axis-side-padding: 20px;">
+            <span
+              v-for="(lb, i) in trendAxisLabels"
+              :key="'xl-' + i"
+              :title="lb ? trendFullXLabels[i] : ''"
+            >
+              {{ lb }}
+            </span>
           </div>
         </div>
       </div>
@@ -241,19 +252,30 @@
             </defs>
             <path :d="domainTrendAreaPath" fill="url(#domainTrendGrad)" class="trend-area" />
             <path :d="domainTrendLinePath" fill="none" stroke="#3b5998" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="trend-line" />
-            <circle
+            <g
               v-for="(p, i) in domainTrendChartPoints"
               :key="'dc-' + i"
-              :cx="p.x"
-              :cy="p.y"
-              r="5"
-              fill="#3b5998"
-              stroke="white"
-              stroke-width="2"
-            />
+              class="trend-point-group"
+            >
+              <title>{{ domainTrendPointTooltips[i] }}</title>
+              <circle
+                :cx="p.x"
+                :cy="p.y"
+                r="5"
+                fill="#3b5998"
+                stroke="white"
+                stroke-width="2"
+              />
+            </g>
           </svg>
-          <div class="trend-x-labels">
-            <span v-for="(lb, i) in domainTrendXLabels" :key="'dx-' + i">{{ lb }}</span>
+          <div class="trend-x-labels" style="--axis-side-padding: 26px;">
+            <span
+              v-for="(lb, i) in domainTrendAxisLabels"
+              :key="'dx-' + i"
+              :title="lb ? domainTrendFullXLabels[i] : ''"
+            >
+              {{ lb }}
+            </span>
           </div>
         </div>
 
@@ -270,6 +292,10 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { getProfile, getProfileSkillOverview, getProfileStatistics } from '../api/resume'
 import CustomSelect from './CustomSelect.vue'
 import { getGrowthRequestPositionCodes } from '../utils/growthHistoryState'
+import {
+  buildSparseDateAxisLabels,
+  formatTrendTooltipDate
+} from '../utils/growthTrendAxis'
 
 const RADAR_DIMENSIONS = [
   { key: 'fundamentals', label: '基础原理掌握' },
@@ -340,7 +366,12 @@ export default {
       { value: 'all', label: '综合评分' }
     ]
     const trendSeries = computed(() => trendPoints.value.map((item) => Number(item.score || 0)))
-    const trendXLabels = computed(() => trendPoints.value.map((item) => String(item.date || '').slice(5)))
+    const trendFullXLabels = computed(() =>
+      trendPoints.value.map((item) => formatTrendTooltipDate(item?.date))
+    )
+    const trendAxisLabels = computed(() =>
+      buildSparseDateAxisLabels(trendPoints.value.map((item) => item?.date), 5)
+    )
 
     const trendChartPoints = computed(() => {
       const data = trendSeries.value
@@ -454,8 +485,25 @@ export default {
     )
 
     const domainTrendSeries = computed(() => selectedRankTrendItem.value?.recentScores || [])
-    const domainTrendXLabels = computed(() =>
-      domainTrendSeries.value.map((item) => String(item?.date || '').slice(5))
+    const domainTrendFullXLabels = computed(() =>
+      domainTrendSeries.value.map((item) => formatTrendTooltipDate(item?.date))
+    )
+    const domainTrendAxisLabels = computed(() =>
+      buildSparseDateAxisLabels(domainTrendSeries.value.map((item) => item?.date), 6)
+    )
+
+    function buildTrendPointTooltip(item) {
+      const dateText = formatTrendTooltipDate(item?.date)
+      const score = Number(item?.score)
+      const scoreText = Number.isFinite(score) ? `${Math.round(score)} 分` : '暂无评分'
+      return dateText ? `${dateText} · ${scoreText}` : scoreText
+    }
+
+    const trendPointTooltips = computed(() =>
+      trendPoints.value.map((item) => buildTrendPointTooltip(item))
+    )
+    const domainTrendPointTooltips = computed(() =>
+      domainTrendSeries.value.map((item) => buildTrendPointTooltip(item))
     )
     const domainTrendChartPoints = computed(() => {
       const data = domainTrendSeries.value.map((item) => Number(item?.score || 0))
@@ -564,7 +612,9 @@ export default {
       trendChartPoints,
       trendLinePath,
       trendAreaPath,
-      trendXLabels,
+      trendAxisLabels,
+      trendFullXLabels,
+      trendPointTooltips,
       selectedPosition,
       positionOptions,
       topStrengths,
@@ -576,7 +626,9 @@ export default {
       domainTrendChartPoints,
       domainTrendLinePath,
       domainTrendAreaPath,
-      domainTrendXLabels,
+      domainTrendAxisLabels,
+      domainTrendFullXLabels,
+      domainTrendPointTooltips,
       formatDelta,
       goToInterview
     }
@@ -731,12 +783,22 @@ export default {
   transition: all 0.3s ease;
 }
 
+.trend-point-group {
+  cursor: default;
+}
+
 .trend-x-labels {
   display: flex;
-  justify-content: space-between;
-  padding: 8px 0 0;
+  padding: 8px var(--axis-side-padding, 0) 0;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.trend-x-labels span {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .section-header-row {

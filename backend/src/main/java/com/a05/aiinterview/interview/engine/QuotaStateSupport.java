@@ -1,5 +1,9 @@
 package com.a05.aiinterview.interview.engine;
 
+import com.a05.aiinterview.ai.contract.StrategyCatalog;
+import com.a05.aiinterview.ai.contract.StrategyCode;
+import com.a05.aiinterview.ai.contract.StrategyDefinition;
+import com.a05.aiinterview.ai.contract.StrategyLimit;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 
 import java.util.LinkedHashMap;
@@ -62,80 +66,66 @@ public final class QuotaStateSupport {
 
     public static Map<String, Object> advance(Map<String, Object> existingQuotaState,
                                               String currentQuestionType,
-                                              String finalDecision,
-                                              String nextQuestionType) {
+                                              StrategyCode strategyCode,
+                                              String targetQuestionType) {
         Map<String, Object> quotaState = normalize(existingQuotaState);
 
         String currentType = normalizeQuestionType(currentQuestionType);
-        String decision = finalDecision == null ? "" : finalDecision.trim();
+        StrategyDefinition strategy = strategyCode == null
+                ? null
+                : StrategyCatalog.find(strategyCode.code()).orElse(null);
 
         switch (currentType) {
-            case "PRINCIPLE" -> {
-                clearProjectCounters(quotaState);
-                applyPrincipleCounters(quotaState, decision);
-            }
-            case "PROJECT_DEEP_DIVE" -> {
-                clearPrincipleCounters(quotaState);
-                applyProjectCounters(quotaState, decision);
-            }
-            case "SCENARIO", "BEHAVIORAL", "INTRO" -> {
-                clearPrincipleCounters(quotaState);
-                clearProjectCounters(quotaState);
-                // 连续计数在这些题型下统一清零。
-            }
+            case "PRINCIPLE" -> clearProjectCounters(quotaState);
+            case "PROJECT_DEEP_DIVE" -> clearPrincipleCounters(quotaState);
             default -> {
                 clearPrincipleCounters(quotaState);
                 clearProjectCounters(quotaState);
-                // 未知题型不推进连续计数，只保留总额更新。
             }
         }
 
-        incrementTypeTotal(quotaState, normalizeQuestionType(nextQuestionType));
+        if (strategy != null) {
+            applyQuotaPolicy(quotaState, currentType, strategy);
+            return quotaState;
+        }
+
+        incrementTypeTotal(quotaState, normalizeQuestionType(targetQuestionType));
         return quotaState;
     }
 
-    private static void applyPrincipleCounters(Map<String, Object> quotaState, String decision) {
-        switch (decision) {
-            case "引导和验证", "变式" -> {
-                increment(quotaState, SAME_POINT_CONTINUE);
-                increment(quotaState, SAME_DOMAIN_CONTINUE);
-            }
-            case "深入到强关联点", "平移到同知识域知识点" -> {
-                quotaState.put(SAME_POINT_CONTINUE, 0);
-                increment(quotaState, SAME_DOMAIN_CONTINUE);
-            }
-            default -> {
-                quotaState.put(SAME_POINT_CONTINUE, 0);
-                quotaState.put(SAME_DOMAIN_CONTINUE, 0);
-            }
-        }
-    }
-
-    private static void applyProjectCounters(Map<String, Object> quotaState, String decision) {
-        switch (decision) {
-            case "引导还原", "真实情景", "责任定位", "压测", "做权衡", "兜底与观测", "演进与复盘" -> {
-                increment(quotaState, SAME_PROJECT_POINT_CONTINUE);
-                increment(quotaState, SAME_PROJECT_CONTINUE);
-            }
-            case "收敛并项目外扩", "切换项目要点" -> {
-                quotaState.put(SAME_PROJECT_POINT_CONTINUE, 0);
-                increment(quotaState, SAME_PROJECT_CONTINUE);
-            }
-            default -> {
-                quotaState.put(SAME_PROJECT_POINT_CONTINUE, 0);
-                quotaState.put(SAME_PROJECT_CONTINUE, 0);
-            }
-        }
-    }
-
-    private static void incrementTypeTotal(Map<String, Object> quotaState, String nextQuestionType) {
-        switch (nextQuestionType) {
+    private static void incrementTypeTotal(Map<String, Object> quotaState, String targetQuestionType) {
+        switch (targetQuestionType) {
             case "PRINCIPLE" -> increment(quotaState, PRINCIPLE_TOTAL);
             case "PROJECT_DEEP_DIVE" -> increment(quotaState, PROJECT_TOTAL);
             case "SCENARIO" -> increment(quotaState, SCENARIO_TOTAL);
             case "BEHAVIORAL" -> increment(quotaState, BEHAVIORAL_TOTAL);
             default -> {
                 // WRAPUP or unknown types do not advance totals.
+            }
+        }
+    }
+
+    private static void applyQuotaPolicy(Map<String, Object> quotaState,
+                                         String currentQuestionType,
+                                         StrategyDefinition strategy) {
+        if (strategy.quotaUpdatePolicy().clearSourceContinuousCounters()) {
+            clearContinuousCountersForSource(quotaState, currentQuestionType);
+        }
+        for (StrategyLimit limit : strategy.quotaUpdatePolicy().resets()) {
+            quotaState.put(limit.ledgerKey(), 0);
+        }
+        for (StrategyLimit limit : strategy.quotaUpdatePolicy().increments()) {
+            increment(quotaState, limit.ledgerKey());
+        }
+    }
+
+    private static void clearContinuousCountersForSource(Map<String, Object> quotaState, String currentQuestionType) {
+        switch (currentQuestionType) {
+            case "PRINCIPLE" -> clearPrincipleCounters(quotaState);
+            case "PROJECT_DEEP_DIVE" -> clearProjectCounters(quotaState);
+            default -> {
+                clearPrincipleCounters(quotaState);
+                clearProjectCounters(quotaState);
             }
         }
     }

@@ -70,40 +70,65 @@ class PromptTemplateCoverageTest {
                 Map.entry("positionCode", "JAVA_BACKEND"),
                 Map.entry("experienceLevel", "SENIOR"),
                 Map.entry("roundType", ""),
-                Map.entry("currentQuestion", "{\"stem\":\"请先做一个简短的自我介绍。\",\"questionType\":\"INTRO\",\"domainId\":null,\"domainName\":\"\",\"currentFocus\":\"\",\"relatedItemKey\":\"\",\"relatedItemType\":\"\",\"relatedItemName\":\"\"}"),
+                Map.entry("availableStrategies", """
+1. 压测（StrategyCode: S_J_PRESSURE）：
+- 意图：在真实工程链路中增加压力条件，考察候选人的边界判断与应对能力。
+- 适用条件：
+  当前点已具备继续加压的高信息增益。
+2. 进入项目题（StrategyCode: S_ENTER_PROJECT）：
+- 意图：进入项目主线，建立真实工程画像。
+- 适用条件：
+  项目仍然是当前信息密度最高的入口。
+"""),
+                Map.entry("remainingTargetDomains", """
+1. Redis 缓存（domainCode: DOMAIN_REDIS）
+- 关联知识点：缓存击穿、缓存一致性
+2. MySQL 数据库（domainCode: DOMAIN_MYSQL）
+- 关联知识点：幻读与间隙锁、覆盖索引
+"""),
+                Map.entry("currentQuestion", "{\"stem\":\"你刚才提到 Seata AT 模式，那具体讲讲全局事务和本地事务的边界。\",\"questionType\":\"PRINCIPLE\",\"domainCode\":\"DOMAIN_SPRING\",\"domainName\":\"Spring 框架\",\"currentFocus\":\"Seata AT事务边界\",\"relatedItemKey\":\"\",\"relatedItemType\":\"\",\"relatedItemName\":\"\"}"),
                 Map.entry("answerText", "回答内容"),
                 Map.entry("expectedPoints", "- 参数含义\n- 调优思路"),
                 Map.entry("projectAndInternshipSummary", "[{\"itemType\":\"PROJECT\",\"itemName\":\"订单系统\",\"resumeDescription\":\"负责订单链路\",\"techHooks\":[\"线程池调优\"]}]"),
-                Map.entry("interviewGoalSummary", "{\"domains\":[{\"domainId\":1,\"domainCode\":\"concurrency\",\"domainName\":\"并发编程\",\"focusPoints\":[\"线程池参数\"],\"status\":\"UNASKED\"}]}"),
                 Map.entry("coveredKnowledgeSummary", "[\"Java / 锁升级\"]"),
-                Map.entry("quotaSummary", "{\"samePointContinue\":{\"count\":1,\"maxCount\":20},\"sameDomainContinue\":{\"count\":1,\"maxCount\":20},\"sameProjectPointContinue\":{\"count\":0,\"maxCount\":20},\"sameProjectContinue\":{\"count\":0,\"maxCount\":20},\"principleTotal\":{\"count\":1,\"maxCount\":20},\"projectTotal\":{\"count\":0,\"maxCount\":20},\"scenarioTotal\":{\"count\":0,\"maxCount\":20},\"behavioralTotal\":{\"count\":0,\"maxCount\":20}}"),
-                Map.entry("possibleFutureDirections", "[\"PRINCIPLE: 线程池拒绝策略\",\"PROJECT_DEEP_DIVE: 回到订单系统线程池调优\"]"),
                 Map.entry("retrievedMaterials", "[]"),
                 Map.entry("recentInterviewMemory", "[]"),
-                Map.entry("outputSchema", "{\"type\":\"object\"}")
+                Map.entry("repairMode", "false"),
+                Map.entry("repairAttemptNo", ""),
+                Map.entry("rawDecisionOutput", ""),
+                Map.entry("validationErrors", "[]")
         ));
 
         assertThat(rendered.getPromptCode()).isEqualTo("evaluation_decision");
         assertThat(rendered.getUserPrompt())
-                .contains("请先做一个简短的自我介绍。")
+                .contains("Seata AT 模式")
+                .contains("主考纲剩余待考察域（菜单）")
+                .contains("DOMAIN_REDIS")
+                .contains("S_J_PRESSURE")
+                .contains("S_ENTER_PROJECT")
                 .contains("历史问题、回答概要、回答评价")
-                .contains("开放项目题、设计题、系统脆弱点题，不强制绑定单一知识域")
-                .contains("如果 `currentQuestion.questionType == INTRO`")
-                .contains("只能选择“退出当前题类”")
-                .contains("如果 `currentQuestion.questionType == PRINCIPLE` 且 `nextQuestionType == PRINCIPLE`")
-                .contains("nextFocus 必须是单一焦点短语")
-                .contains("nextEntryAction")
-                .contains("退出当前题类")
-                .contains("不能写成完整问句")
-                .contains("只写本轮已经形成判断的事实")
-                .contains("不要把下一题准备问的点提前写进")
+                .doesNotContain("知识域及知识点状态")
                 .doesNotContain("\"possibleNextMoves\"")
                 .doesNotContain("\"newCandidatePointsByDomain\"")
                 .doesNotContain("possibleNextMoves=[]")
                 .doesNotContain("`possibleNextMoves`")
-                .doesNotContain("`newCandidatePointsByDomain`");
+                .doesNotContain("`newCandidatePointsByDomain`")
+                .doesNotContain("interviewGoalSummary")
+                .doesNotContain("nextEntryAction")
+                .doesNotContain("nextQuestionType");
         assertThat(rendered.getSystemPrompt())
-                .contains("理论题禁止混入实战类动作");
+                .contains("StrategyCode")
+                .contains("只能从当前注入的策略池中选择一个 `finalDecision`")
+                .contains("nextFocus")
+                .contains("`targetDomainCode` 必须从【主考纲剩余待考察域（菜单）】中选择一个合法的 `domainCode`")
+                .contains("绝不能写成完整问句")
+                .contains("绝不允许把下一题准备问的知识点提前预支写进去")
+                .contains("\"domainCode\": \"DOMAIN_REDIS\"")
+                .doesNotContain("candidateStrategies")
+                .doesNotContain("expectedAnswerPoints")
+                .doesNotContain("nextQuestionType")
+                .doesNotContain("nextEntryAction")
+                .doesNotContain("\"domainId\":");
     }
 
     @Test

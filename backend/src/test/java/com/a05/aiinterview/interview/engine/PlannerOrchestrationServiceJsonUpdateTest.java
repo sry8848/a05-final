@@ -85,6 +85,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
         verify(sessionMapper).updateById(argThatSession(s ->
                 s.getId().equals(8L)
                         && s.getStateLedgerJson() == ledger
+                        && Integer.valueOf(1).equals(s.getStateLedgerJson().get("asked_total"))
                         && s.getFirstQuestionJson() != null
                         && s.getCurrentQuestionNo().equals(1)
                         && "in_progress".equals(s.getStatus())
@@ -160,6 +161,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
         verify(sessionMapper).updateById(argThatSession(s ->
                 s.getId().equals(8L)
                         && "in_progress".equals(s.getStatus())
+                        && Integer.valueOf(1).equals(s.getStateLedgerJson().get("asked_total"))
                         && s.getFirstQuestionJson() != null
                         && s.getStateLedgerJson() == ledger
         ));

@@ -1,6 +1,7 @@
 package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.AiClient;
+import com.a05.aiinterview.ai.contract.StrategyCode;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionInput;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
@@ -24,128 +25,238 @@ import static org.mockito.Mockito.mock;
 class AnswerSubmitServiceEvaluationInputTest {
 
     @Test
-    @DisplayName("buildCurrentQuestionContext should keep domain and focus empty for intro question without explicit binding")
-    void buildCurrentQuestionContext_shouldKeepDomainAndFocusEmptyForIntro() {
-        AnswerSubmitService service = new AnswerSubmitService(
-                mock(AiClient.class),
-                mock(InterviewSessionMapper.class),
-                mock(InterviewQuestionMapper.class),
-                mock(InterviewAttemptMapper.class),
-                mock(AnswerSubmitPersistenceService.class),
-                mock(ReportGenerationService.class),
-                new InterviewDebugTraceService(new ObjectMapper())
-        );
+    @DisplayName("buildCurrentQuestionContext should include domainCode for principle question")
+    void buildCurrentQuestionContext_shouldIncludeDomainCodeForPrincipleQuestion() {
+        AnswerSubmitService service = buildService();
 
         InterviewSession session = new InterviewSession();
         session.setId(65L);
         session.setTargetRole("JAVA_BACKEND");
-        session.setSyllabusJson(Map.of("domains", java.util.List.of()));
+        session.setSyllabusJson(Map.of(
+                "domains", List.of(
+                        Map.of(
+                                "domainCode", "DOMAIN_SPRING",
+                                "domainName", "Spring 框架",
+                                "focusPoints", List.of("Seata AT 模式边界")
+                        )
+                )
+        ));
         session.setStateLedgerJson(Map.of());
 
         InterviewQuestion question = new InterviewQuestion();
         question.setId(101L);
-        question.setQuestionType("INTRO");
-        question.setStem("请先做一个简短的自我介绍。");
-        question.setTargetSkill("沟通表达与项目概述");
+        question.setQuestionType("PRINCIPLE");
+        question.setDomainId(4L);
+        question.setStem("请解释 Seata AT 的边界。");
+        question.setTargetSkill("Seata AT 模式边界");
+        question.setGenerationContextJson(Map.of(
+                "domainCode", "DOMAIN_SPRING",
+                "focusPoint", "Seata AT模式边界"
+        ));
 
         EvaluationDecisionInput.CurrentQuestionContext currentQuestion =
                 ReflectionTestUtils.invokeMethod(service, "buildCurrentQuestionContext", session, question);
 
-        assertThat(currentQuestion.getQuestionType()).isEqualTo("INTRO");
-        assertThat(currentQuestion.getDomainId()).isNull();
-        assertThat(currentQuestion.getDomainName()).isBlank();
-        assertThat(currentQuestion.getCurrentFocus()).isBlank();
+        assertThat(currentQuestion.getQuestionType()).isEqualTo("PRINCIPLE");
+        assertThat(currentQuestion.getDomainCode()).isEqualTo("DOMAIN_SPRING");
+        assertThat(currentQuestion.getDomainName()).isEqualTo("Spring 框架");
+        assertThat(currentQuestion.getCurrentFocus()).isEqualTo("Seata AT模式边界");
     }
 
     @Test
-    @DisplayName("buildQuotaSummary should read quota_state from ledger instead of replaying question history")
-    void buildQuotaSummary_shouldReadQuotaStateFromLedger() {
-        AnswerSubmitService service = new AnswerSubmitService(
-                mock(AiClient.class),
-                mock(InterviewSessionMapper.class),
-                mock(InterviewQuestionMapper.class),
-                mock(InterviewAttemptMapper.class),
-                mock(AnswerSubmitPersistenceService.class),
-                mock(ReportGenerationService.class),
-                new InterviewDebugTraceService(new ObjectMapper())
-        );
+    @DisplayName("remaining domain menu builder should only keep uncovered domains")
+    void remainingDomainMenuBuilder_shouldOnlyKeepUncoveredDomains() {
+        RemainingDomainMenuBuilder builder = new RemainingDomainMenuBuilder();
 
         InterviewSession session = new InterviewSession();
-        session.setId(88L);
         session.setStateLedgerJson(Map.of(
-                "quota_state", Map.of(
-                        "samePointContinue", 4,
-                        "sameDomainContinue", 3,
-                        "sameProjectPointContinue", 2,
-                        "sameProjectContinue", 1,
-                        "principleTotal", 5,
-                        "projectTotal", 6,
-                        "scenarioTotal", 1,
-                        "behavioralTotal", 2
+                "domain_states", List.of(
+                        Map.of("domainCode", "DOMAIN_SPRING", "status", "COVERED"),
+                        Map.of("domainCode", "DOMAIN_REDIS", "status", "UNASKED")
+                )
+        ));
+        session.setSyllabusJson(Map.of(
+                "domains", List.of(
+                        Map.of(
+                                "domainCode", "DOMAIN_SPRING",
+                                "domainName", "Spring 框架",
+                                "focusPoints", List.of("事务传播")
+                        ),
+                        Map.of(
+                                "domainCode", "DOMAIN_REDIS",
+                                "domainName", "Redis 缓存",
+                                "focusPoints", List.of("缓存一致性")
+                        )
                 )
         ));
 
-        InterviewQuestion q1 = new InterviewQuestion();
-        q1.setId(1L);
-        q1.setQuestionType("PRINCIPLE");
-        q1.setTargetSkill("缓存击穿");
+        List<EvaluationDecisionInput.RemainingTargetDomain> remaining = builder.build(session);
 
-        InterviewQuestion q2 = new InterviewQuestion();
-        q2.setId(2L);
-        q2.setQuestionType("PRINCIPLE");
-        q2.setTargetSkill("缓存一致性");
-
-        EvaluationDecisionInput.QuotaSummary quotaSummary =
-                ReflectionTestUtils.invokeMethod(service, "buildQuotaSummary", session, List.of(q1, q2));
-
-        assertThat(quotaSummary.getSamePointContinue().getCount()).isEqualTo(4);
-        assertThat(quotaSummary.getSameDomainContinue().getCount()).isEqualTo(3);
-        assertThat(quotaSummary.getSameProjectPointContinue().getCount()).isEqualTo(2);
-        assertThat(quotaSummary.getSameProjectContinue().getCount()).isEqualTo(1);
-        assertThat(quotaSummary.getPrincipleTotal().getCount()).isEqualTo(5);
-        assertThat(quotaSummary.getProjectTotal().getCount()).isEqualTo(6);
-        assertThat(quotaSummary.getScenarioTotal().getCount()).isEqualTo(1);
-        assertThat(quotaSummary.getBehavioralTotal().getCount()).isEqualTo(2);
+        assertThat(remaining).hasSize(1);
+        assertThat(remaining.getFirst().getDomainCode()).isEqualTo("DOMAIN_REDIS");
+        assertThat(remaining.getFirst().getDomainName()).isEqualTo("Redis 缓存");
     }
 
     @Test
-    @DisplayName("normalizeEvaluationOutput should keep continue when decision does not match current question type")
-    void normalizeEvaluationOutput_shouldKeepContinueWhenDecisionDoesNotMatchCurrentQuestionType() {
-        AnswerSubmitService service = new AnswerSubmitService(
-                mock(AiClient.class),
+    @DisplayName("buildEvaluationInput should source remaining domains and strategies from dedicated builders")
+    void buildEvaluationInput_shouldSourceRemainingDomainsAndStrategiesFromDedicatedBuilders() {
+        AnswerSubmitService service = buildService();
+
+        InterviewSession session = new InterviewSession();
+        session.setId(77L);
+        session.setTargetRole("JAVA_BACKEND");
+        session.setStateLedgerJson(Map.of(
+                "quota_state", QuotaStateSupport.initialQuotaState(),
+                "domain_states", List.of(
+                        Map.of("domainCode", "DOMAIN_SPRING", "status", "COVERED"),
+                        Map.of("domainCode", "DOMAIN_REDIS", "status", "UNASKED")
+                )
+        ));
+        session.setSyllabusJson(Map.of(
+                "domains", List.of(
+                        Map.of(
+                                "domainCode", "DOMAIN_SPRING",
+                                "domainName", "Spring 框架",
+                                "focusPoints", List.of("事务传播")
+                        ),
+                        Map.of(
+                                "domainCode", "DOMAIN_REDIS",
+                                "domainName", "Redis 缓存",
+                                "focusPoints", List.of("缓存一致性")
+                        )
+                ),
+                "experienceItems", List.of(
+                        Map.of(
+                                "itemType", "PROJECT",
+                                "itemName", "Chabst",
+                                "resumeDescription", "项目描述",
+                                "techHooks", List.of("Redis")
+                        )
+                )
+        ));
+
+        InterviewQuestion currentQuestion = new InterviewQuestion();
+        currentQuestion.setQuestionType("PRINCIPLE");
+        currentQuestion.setId(900L);
+        currentQuestion.setStem("请解释缓存击穿。");
+        currentQuestion.setExpectedPoints(List.of("定义"));
+        currentQuestion.setGenerationContextJson(Map.of(
+                "domainCode", "DOMAIN_REDIS",
+                "focusPoint", "缓存击穿"
+        ));
+
+        EvaluationDecisionInput input = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildEvaluationInput",
+                session,
+                currentQuestion,
+                List.of(currentQuestion),
+                List.of(),
+                "回答"
+        );
+
+        assertThat(input.getRemainingTargetDomains())
+                .extracting(EvaluationDecisionInput.RemainingTargetDomain::getDomainCode)
+                .containsExactly("DOMAIN_REDIS");
+        assertThat(input.getAvailableStrategies())
+                .extracting(EvaluationDecisionInput.AvailableStrategy::getStrategyCode)
+                .contains(
+                        StrategyCode.S_P_VERIFY.code(),
+                        StrategyCode.S_ENTER_PROJECT.code(),
+                        StrategyCode.S_ENTER_SCENARIO.code(),
+                        StrategyCode.S_WRAPUP.code()
+                );
+    }
+
+    @Test
+    @DisplayName("buildRecentInterviewMemory should derive answerAssessment from decisionReason")
+    void buildRecentInterviewMemory_shouldDeriveAnswerAssessmentFromDecisionReason() {
+        AnswerSubmitService service = buildService();
+
+        InterviewSession session = new InterviewSession();
+        session.setId(98L);
+        session.setStateLedgerJson(Map.of());
+
+        InterviewQuestion question = new InterviewQuestion();
+        question.setId(1L);
+        question.setQuestionNo(1);
+        question.setQuestionType("PRINCIPLE");
+        question.setStem("题目");
+        question.setGenerationContextJson(Map.of());
+
+        com.a05.aiinterview.interview.entity.InterviewAttempt attempt = new com.a05.aiinterview.interview.entity.InterviewAttempt();
+        attempt.setQuestionId(1L);
+        attempt.setAnswerText("我先解释原理，再补充边界。");
+        attempt.setIsFinal(true);
+        attempt.setEvaluationJson(Map.of(
+                "decisionReason", "回答覆盖了主线原理，但边界条件还需要继续核实。"
+        ));
+
+        List<EvaluationDecisionInput.RecentInterviewMemoryItem> memory = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildRecentInterviewMemory",
+                session,
+                List.of(question),
+                List.of(attempt)
+        );
+
+        assertThat(memory).hasSize(1);
+        assertThat(memory.getFirst().getAnswerSummary()).isEqualTo("我先解释原理，再补充边界。");
+        assertThat(memory.getFirst().getAnswerAssessment()).isEqualTo("回答覆盖了主线原理，但边界条件还需要继续核实。");
+    }
+
+    @Test
+    @DisplayName("buildRecentInterviewMemory should strip fallback diagnostics")
+    void buildRecentInterviewMemory_shouldStripFallbackDiagnostics() {
+        AnswerSubmitService service = buildService();
+
+        InterviewSession session = new InterviewSession();
+        session.setId(99L);
+        session.setStateLedgerJson(Map.of());
+
+        InterviewQuestion question = new InterviewQuestion();
+        question.setId(1L);
+        question.setQuestionNo(1);
+        question.setQuestionType("BEHAVIORAL");
+        question.setStem("题目");
+        question.setGenerationContextJson(Map.of());
+
+        com.a05.aiinterview.interview.entity.InterviewAttempt attempt = new com.a05.aiinterview.interview.entity.InterviewAttempt();
+        attempt.setQuestionId(1L);
+        attempt.setAnswerText("我当时先调研，再拍板。");
+        attempt.setIsFinal(true);
+        attempt.setEvaluationJson(Map.of(
+                "effectiveDecisionSource", "SYSTEM_FALLBACK",
+                "decisionReason", "系统降级为行为题继续建立真实事件画像。"
+        ));
+
+        List<EvaluationDecisionInput.RecentInterviewMemoryItem> memory = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildRecentInterviewMemory",
+                session,
+                List.of(question),
+                List.of(attempt)
+        );
+
+        assertThat(memory).hasSize(1);
+        assertThat(memory.getFirst().getAnswerAssessment()).isEmpty();
+    }
+
+    private AnswerSubmitService buildService() {
+        AiClient aiClient = mock(AiClient.class);
+        return new AnswerSubmitService(
+                aiClient,
                 mock(InterviewSessionMapper.class),
                 mock(InterviewQuestionMapper.class),
                 mock(InterviewAttemptMapper.class),
                 mock(AnswerSubmitPersistenceService.class),
                 mock(ReportGenerationService.class),
-                new InterviewDebugTraceService(new ObjectMapper())
+                new InterviewDebugTraceService(new ObjectMapper()),
+                new RemainingDomainMenuBuilder(),
+                new AvailableStrategyAssembler(),
+                new DecisionExecutionPlanBuilder(),
+                new DecisionRepairOrchestrator(aiClient, new DecisionExecutionPlanBuilder()),
+                new SystemFallbackPlanBuilder()
         );
-
-        InterviewQuestion currentQuestion = new InterviewQuestion();
-        currentQuestion.setQuestionType("PRINCIPLE");
-
-        EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
-                .interviewAction("CONTINUE")
-                .candidateStrategies(List.of("引导还原"))
-                .finalDecision("引导还原")
-                .nextEntryAction("")
-                .nextQuestionType("PROJECT_DEEP_DIVE")
-                .nextFocus("订单系统里的缓存一致性")
-                .expectedAnswerPoints(List.of("双删"))
-                .newCoveredDomains(List.of())
-                .newCoveredPoints(List.of())
-                .retrievalPlans(List.of())
-                .build();
-
-        EvaluationDecisionOutput normalized = ReflectionTestUtils.invokeMethod(
-                service,
-                "normalizeEvaluationOutput",
-                currentQuestion,
-                output
-        );
-
-        assertThat(normalized.getInterviewAction()).isEqualTo("CONTINUE");
-        assertThat(normalized.getFinalDecision()).isEqualTo("引导还原");
-        assertThat(normalized.getNextQuestionType()).isEqualTo("PROJECT_DEEP_DIVE");
     }
 }

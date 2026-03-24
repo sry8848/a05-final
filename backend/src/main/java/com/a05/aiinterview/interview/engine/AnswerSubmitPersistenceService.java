@@ -42,20 +42,22 @@ public class AnswerSubmitPersistenceService {
     public PersistedAttemptResult persist(Long sessionId,
                                           InterviewQuestion currentQuestion,
                                           SubmitAttemptRequest request,
-                                          EvaluationDecisionOutput evalOutput) {
+                                          DecisionResolution resolution) {
+        EvaluationDecisionOutput evalOutput = resolution.getEffectiveOutput();
         StateLedgerPatchService.ReductionAudit reductionAudit = stateLedgerPatchService.applyReduction(
                 sessionId,
                 evalOutput,
+                resolution.getEffectivePlan(),
                 currentQuestion,
                 request.getAttemptId(),
                 currentQuestion.getId(),
                 request.getAnswerText()
         );
 
-        InterviewAttempt attempt = saveAttempt(sessionId, currentQuestion.getId(), request, evalOutput, reductionAudit);
+        InterviewAttempt attempt = saveAttempt(sessionId, currentQuestion.getId(), request, resolution, reductionAudit);
         markQuestionStatus(currentQuestion.getId(), request.getAnswerText());
 
-        boolean shouldEnd = "WRAPUP".equalsIgnoreCase(evalOutput.getInterviewAction());
+        boolean shouldEnd = "WRAPUP".equalsIgnoreCase(resolution.getEffectivePlan().getInterviewAction());
         if (shouldEnd) {
             markSessionFinishing(sessionId);
         }
@@ -75,29 +77,38 @@ public class AnswerSubmitPersistenceService {
                 .attemptId(attempt.getAttemptId())
                 .isFinal(isFinal)
                 .shouldEnd(shouldEnd)
-                .decision(evalOutput.getInterviewAction())
+                .decision(resolution.getEffectivePlan().getInterviewAction())
                 .build();
     }
 
     private InterviewAttempt saveAttempt(Long sessionId,
                                          Long questionId,
                                          SubmitAttemptRequest request,
-                                         EvaluationDecisionOutput evalOutput,
+                                         DecisionResolution resolution,
                                          StateLedgerPatchService.ReductionAudit reductionAudit) {
+        EvaluationDecisionOutput evalOutput = resolution.getEffectiveOutput();
         Map<String, Object> evaluationJson = new LinkedHashMap<>();
         evaluationJson.put("interviewAction", evalOutput.getInterviewAction());
-        evaluationJson.put("answerSummary", evalOutput.getAnswerSummary());
-        evaluationJson.put("answerAssessment", evalOutput.getAnswerAssessment());
         evaluationJson.put("decisionReason", evalOutput.getDecisionReason());
-        evaluationJson.put("candidateStrategies", evalOutput.getCandidateStrategies());
         evaluationJson.put("finalDecision", evalOutput.getFinalDecision());
-        evaluationJson.put("nextEntryAction", evalOutput.getNextEntryAction());
-        evaluationJson.put("nextQuestionType", evalOutput.getNextQuestionType());
         evaluationJson.put("nextFocus", evalOutput.getNextFocus());
-        evaluationJson.put("expectedAnswerPoints", evalOutput.getExpectedAnswerPoints());
         evaluationJson.put("newCoveredDomains", evalOutput.getNewCoveredDomains());
         evaluationJson.put("newCoveredPoints", evalOutput.getNewCoveredPoints());
         evaluationJson.put("retrievalPlans", evalOutput.getRetrievalPlans());
+        evaluationJson.put("rawAiOutput", resolution.getRawOutput());
+        evaluationJson.put("decisionValidation", resolution.getValidationAudit());
+        evaluationJson.put("decisionRepairAudit", buildRepairAudit(resolution));
+        evaluationJson.put("effectiveDecisionPlan", resolution.getEffectivePlan());
+        evaluationJson.put("effectiveDecisionSource", resolution.getEffectivePlan() != null
+                ? String.valueOf(resolution.getEffectivePlan().getEffectiveDecisionSource())
+                : "");
+        evaluationJson.put("terminationSource", resolution.getEffectivePlan() != null && resolution.getEffectivePlan().getTerminationSource() != null
+                ? String.valueOf(resolution.getEffectivePlan().getTerminationSource())
+                : "");
+        evaluationJson.put("terminationReason", resolution.getEffectivePlan() != null && resolution.getEffectivePlan().getTerminationReason() != null
+                ? String.valueOf(resolution.getEffectivePlan().getTerminationReason())
+                : "");
+        evaluationJson.put("repairAttempts", resolution.getRepairAttempts());
         if (reductionAudit != null) {
             evaluationJson.put("ledgerDiff", reductionAudit.getDiff());
             evaluationJson.put("reducedLedger", reductionAudit.getNewLedger());
@@ -121,6 +132,15 @@ public class AnswerSubmitPersistenceService {
         attempt.setCreatedAt(LocalDateTime.now());
         interviewAttemptMapper.insert(attempt);
         return attempt;
+    }
+
+    private Map<String, Object> buildRepairAudit(DecisionResolution resolution) {
+        Map<String, Object> audit = new LinkedHashMap<>();
+        audit.put("repairAttempts", resolution.getRepairAttempts());
+        audit.put("repairInput", resolution.getRepairInput());
+        audit.put("repairOutput", resolution.getRepairedOutput());
+        audit.put("repairErrors", resolution.getRepairErrors());
+        return audit;
     }
 
     private void markQuestionStatus(Long questionId, String answerText) {

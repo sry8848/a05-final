@@ -22,11 +22,6 @@ import java.util.Locale;
 public class AiOutputContractValidator {
 
     private static final List<String> ALLOWED_INTERVIEW_ACTIONS = List.of("CONTINUE", "WRAPUP");
-    private static final List<String> ALLOWED_NEXT_QUESTION_TYPES = List.of(
-            "PRINCIPLE",
-            "PROJECT_DEEP_DIVE",
-            "SCENARIO",
-            "BEHAVIORAL");
     private static final String DEFAULT_PLANNING_REASONING = "按岗位、简历与真实经历规划本次考纲。";
 
     private final ObjectMapper objectMapper;
@@ -87,85 +82,60 @@ public class AiOutputContractValidator {
             return buildFallbackEvaluationDecisionOutput();
         }
 
-        output.setAnswerSummary(defaultString(output.getAnswerSummary(), ""));
-        output.setAnswerAssessment(defaultString(output.getAnswerAssessment(), ""));
         output.setDecisionReason(defaultString(output.getDecisionReason(), ""));
-        output.setCandidateStrategies(sanitizeActionList(output.getCandidateStrategies()));
         output.setFinalDecision(defaultString(output.getFinalDecision(), ""));
-        output.setNextEntryAction(defaultString(output.getNextEntryAction(), ""));
-        output.setNextQuestionType(normalizeNextQuestionType(output.getNextQuestionType()));
         output.setNextFocus(defaultString(output.getNextFocus(), ""));
-        output.setExpectedAnswerPoints(sanitizeStringList(output.getExpectedAnswerPoints()));
-        output.setNewCoveredDomains(sanitizeCoveredDomains(output.getNewCoveredDomains()));
+        output.setTargetDomainCode(defaultString(output.getTargetDomainCode(), ""));
+        List<EvaluationDecisionOutput.CoveredDomain> rawCoveredDomains = output.getNewCoveredDomains();
+        output.setNewCoveredDomains(sanitizeCoveredDomains(rawCoveredDomains));
         output.setNewCoveredPoints(sanitizeStringList(output.getNewCoveredPoints()));
         output.setRetrievalPlans(sanitizeRetrievalPlans(output.getRetrievalPlans()));
 
         String normalizedInterviewAction = normalizeInterviewAction(output.getInterviewAction());
         if (normalizedInterviewAction == null) {
-            normalizedInterviewAction = inferInterviewAction(output);
-            if (normalizedInterviewAction == null) {
-                log.warn("[契约] EvaluationDecision.interviewAction 非法，降级为 WRAPUP");
-                return buildFallbackEvaluationDecisionOutput();
-            }
-            log.warn("[契约] EvaluationDecision.interviewAction 非法，已根据下一题计划推断为 {}", normalizedInterviewAction);
+            log.warn("[契约] EvaluationDecision.interviewAction 非法，降级为 WRAPUP");
+            return buildFallbackEvaluationDecisionOutput();
         }
         output.setInterviewAction(normalizedInterviewAction);
 
-        if (isBlank(output.getAnswerAssessment())) {
-            log.warn("[契约] EvaluationDecision.answerAssessment 为空，降级为 WRAPUP");
+        if (!StrategyCatalog.isAllowed(output.getFinalDecision())) {
+            log.warn("[契约] EvaluationDecision.finalDecision 非法，降级为 WRAPUP");
             return buildFallbackEvaluationDecisionOutput();
         }
 
         if ("WRAPUP".equals(output.getInterviewAction())) {
-            output.setCandidateStrategies(List.of(EvaluationDecisionActionCatalog.END_INTERVIEW));
-            output.setFinalDecision(EvaluationDecisionActionCatalog.END_INTERVIEW);
-            output.setNextQuestionType("");
+            output.setFinalDecision(StrategyCode.S_WRAPUP.code());
             output.setNextFocus("");
-            output.setNextEntryAction("");
-            output.setExpectedAnswerPoints(new ArrayList<>());
+            output.setTargetDomainCode("");
             output.setRetrievalPlans(new ArrayList<>());
             return output;
         }
 
-        if (output.getCandidateStrategies().isEmpty()) {
-            if (EvaluationDecisionActionCatalog.isAllowedAction(output.getFinalDecision())) {
-                output.setCandidateStrategies(List.of(output.getFinalDecision()));
-            } else {
-                log.warn("[契约] EvaluationDecision.candidateStrategies 为空且 finalDecision 非法，降级为 WRAPUP");
-                return buildFallbackEvaluationDecisionOutput();
-            }
-        }
-        if (isBlank(output.getFinalDecision())) {
-            output.setFinalDecision(output.getCandidateStrategies().getFirst());
-        }
-        if (!EvaluationDecisionActionCatalog.isAllowedAction(output.getFinalDecision())) {
-            log.warn("[契约] EvaluationDecision.finalDecision 非法，降级为 WRAPUP");
-            return buildFallbackEvaluationDecisionOutput();
-        }
-        if (!output.getCandidateStrategies().contains(output.getFinalDecision())) {
-            log.warn("[契约] EvaluationDecision.finalDecision 不在 candidateStrategies 中，降级为 WRAPUP");
-            return buildFallbackEvaluationDecisionOutput();
-        }
-
-        if (!ALLOWED_NEXT_QUESTION_TYPES.contains(output.getNextQuestionType())) {
-            log.warn("[契约] EvaluationDecision.nextQuestionType 非法，降级为 WRAPUP");
-            return buildFallbackEvaluationDecisionOutput();
-        }
-        if (EvaluationDecisionActionCatalog.isExitAction(output.getFinalDecision())) {
-            if (isBlank(output.getNextEntryAction())) {
-                log.warn("[契约] EvaluationDecision.nextEntryAction 缺失，降级为 WRAPUP");
-                return buildFallbackEvaluationDecisionOutput();
-            }
-        } else if (!isBlank(output.getNextEntryAction())) {
-            log.warn("[契约] EvaluationDecision.nextEntryAction 仅允许在退出当前题类时填写，降级为 WRAPUP");
+        if (StrategyCatalog.isWrapup(output.getFinalDecision())) {
+            log.warn("[契约] EvaluationDecision.CONTINUE 不允许使用 S_WRAPUP，降级为 WRAPUP");
             return buildFallbackEvaluationDecisionOutput();
         }
         if (isBlank(output.getNextFocus())) {
             log.warn("[契约] EvaluationDecision.nextFocus 为空，降级为 WRAPUP");
             return buildFallbackEvaluationDecisionOutput();
         }
-        if (output.getExpectedAnswerPoints() == null) {
-            output.setExpectedAnswerPoints(new ArrayList<>());
+        if (rawCoveredDomains != null && !rawCoveredDomains.isEmpty()
+                && output.getNewCoveredDomains().size() != rawCoveredDomains.size()) {
+            log.warn("[契约] EvaluationDecision.newCoveredDomains 必须使用 domainCode，降级为 WRAPUP");
+            return buildFallbackEvaluationDecisionOutput();
+        }
+        if (StrategyCatalog.requiresTargetDomain(output.getFinalDecision())) {
+            if (isBlank(output.getTargetDomainCode())) {
+                log.warn("[契约] EvaluationDecision.targetDomainCode 缺失，降级为 WRAPUP");
+                return buildFallbackEvaluationDecisionOutput();
+            }
+        } else {
+            output.setTargetDomainCode("");
+        }
+
+        if (isBlank(StrategyCatalog.targetQuestionType(output.getFinalDecision()))) {
+            log.warn("[契约] EvaluationDecision.finalDecision 无法映射为下一题题型，降级为 WRAPUP");
+            return buildFallbackEvaluationDecisionOutput();
         }
         return output;
     }
@@ -230,15 +200,10 @@ public class AiOutputContractValidator {
     private EvaluationDecisionOutput buildFallbackEvaluationDecisionOutput() {
         return EvaluationDecisionOutput.builder()
                 .interviewAction("WRAPUP")
-                .answerSummary("")
-                .answerAssessment("AI 评估决策解析失败，已降级为结束面试。")
                 .decisionReason("")
-                .candidateStrategies(List.of("结束面试"))
-                .finalDecision("结束面试")
-                .nextEntryAction("")
-                .nextQuestionType("")
+                .finalDecision(StrategyCode.S_WRAPUP.code())
                 .nextFocus("")
-                .expectedAnswerPoints(new ArrayList<>())
+                .targetDomainCode("")
                 .newCoveredDomains(new ArrayList<>())
                 .newCoveredPoints(new ArrayList<>())
                 .retrievalPlans(new ArrayList<>())
@@ -268,27 +233,15 @@ public class AiOutputContractValidator {
                 .toList();
     }
 
-    private List<String> sanitizeActionList(List<String> values) {
-        if (values == null) {
-            return new ArrayList<>();
-        }
-        return values.stream()
-                .filter(value -> value != null && !value.isBlank())
-                .map(String::trim)
-                .filter(EvaluationDecisionActionCatalog::isAllowedAction)
-                .distinct()
-                .toList();
-    }
-
     private List<EvaluationDecisionOutput.CoveredDomain> sanitizeCoveredDomains(
             List<EvaluationDecisionOutput.CoveredDomain> values) {
         if (values == null) {
             return new ArrayList<>();
         }
         return values.stream()
-                .filter(item -> item != null && item.getDomainId() != null && !isBlank(item.getDomainName()))
+                .filter(item -> item != null && !isBlank(item.getDomainCode()) && !isBlank(item.getDomainName()))
                 .map(item -> EvaluationDecisionOutput.CoveredDomain.builder()
-                        .domainId(item.getDomainId())
+                        .domainCode(item.getDomainCode().trim())
                         .domainName(item.getDomainName().trim())
                         .build())
                 .toList();
@@ -319,33 +272,6 @@ public class AiOutputContractValidator {
         }
         String normalized = action.trim().toUpperCase(Locale.ROOT);
         return ALLOWED_INTERVIEW_ACTIONS.contains(normalized) ? normalized : null;
-    }
-
-    private String inferInterviewAction(EvaluationDecisionOutput output) {
-        boolean hasCompleteNextPlan = ALLOWED_NEXT_QUESTION_TYPES.contains(output.getNextQuestionType())
-                && !isBlank(output.getNextFocus())
-                && output.getExpectedAnswerPoints() != null
-                && !output.getExpectedAnswerPoints().isEmpty();
-        if (hasCompleteNextPlan) {
-            return "CONTINUE";
-        }
-
-        boolean hasNoNextPlan = isBlank(output.getNextQuestionType())
-                && isBlank(output.getNextFocus())
-                && (output.getExpectedAnswerPoints() == null || output.getExpectedAnswerPoints().isEmpty())
-                && (output.getRetrievalPlans() == null || output.getRetrievalPlans().isEmpty());
-        if (hasNoNextPlan) {
-            return "WRAPUP";
-        }
-        return null;
-    }
-
-    private String normalizeNextQuestionType(String questionType) {
-        if (questionType == null || questionType.isBlank()) {
-            return "";
-        }
-        String normalized = questionType.trim().toUpperCase(Locale.ROOT);
-        return ALLOWED_NEXT_QUESTION_TYPES.contains(normalized) ? normalized : "";
     }
 
     private String normalizeRetrievalType(String retrievalType) {

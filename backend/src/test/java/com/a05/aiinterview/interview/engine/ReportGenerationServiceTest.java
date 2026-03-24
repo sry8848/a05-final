@@ -24,6 +24,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -156,5 +157,64 @@ class ReportGenerationServiceTest {
         ArgumentCaptor<InterviewReport> reportCaptor = ArgumentCaptor.forClass(InterviewReport.class);
         verify(reportMapper).insert(reportCaptor.capture());
         assertNull(reportCaptor.getValue().getComprehensiveRadarScores());
+    }
+
+    @Test
+    void generateAsync_shouldStripFallbackSystemDiagnosticsFromQaPairs() {
+        AiClient aiClient = mock(AiClient.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
+        ReportGenerationService service = new ReportGenerationService(
+                aiClient, sessionMapper, questionMapper, attemptMapper, reportMapper, statusService
+        );
+
+        InterviewSession session = new InterviewSession();
+        session.setId(3L);
+        session.setMode("practice");
+        session.setTargetRole("JAVA_BACKEND");
+        session.setExperienceLevel("JUNIOR");
+        when(sessionMapper.selectById(3L)).thenReturn(session);
+        when(reportMapper.selectBySessionId(3L)).thenReturn(null);
+
+        InterviewQuestion question = new InterviewQuestion();
+        question.setId(21L);
+        question.setQuestionNo(1);
+        question.setQuestionType("BEHAVIORAL");
+        question.setStem("请分享一次真实决策经历。");
+        question.setGenerationContextJson(Map.of("domainCode", "intro"));
+        when(questionMapper.selectList(any())).thenReturn(List.of(question));
+
+        InterviewAttempt attempt = new InterviewAttempt();
+        attempt.setQuestionId(21L);
+        attempt.setAnswerText("我当时先调研，再拍板。");
+        attempt.setIsFinal(true);
+        attempt.setCreatedAt(LocalDateTime.now());
+        attempt.setEvaluationJson(Map.of(
+                "effectiveDecisionSource", "SYSTEM_FALLBACK",
+                "answerAssessment", "伪造评语",
+                "decisionRepairAudit", Map.of("error", "bad json"),
+                "terminationReason", "SYSTEM_DECISION_ERROR"
+        ));
+        when(attemptMapper.selectList(any())).thenReturn(List.of(attempt));
+
+        ReportGenerationOutput output = ReportGenerationOutput.builder()
+                .overallScore(BigDecimal.valueOf(70))
+                .summary("ok")
+                .strengths(List.of())
+                .weaknesses(List.of())
+                .improvementSuggestions(List.of())
+                .skillDomainScores(List.of())
+                .build();
+        when(aiClient.callReportGeneration(any())).thenReturn(AiCallResult.<ReportGenerationOutput>builder().output(output).build());
+
+        service.generateAsync(3L);
+
+        ArgumentCaptor<ReportGenerationInput> inputCaptor = ArgumentCaptor.forClass(ReportGenerationInput.class);
+        verify(aiClient).callReportGeneration(inputCaptor.capture());
+        assertThat(inputCaptor.getValue().getQuestionAnswerPairs()).hasSize(1);
+        assertThat(inputCaptor.getValue().getQuestionAnswerPairs().getFirst().getAnswerText()).isEqualTo("我当时先调研，再拍板。");
     }
 }

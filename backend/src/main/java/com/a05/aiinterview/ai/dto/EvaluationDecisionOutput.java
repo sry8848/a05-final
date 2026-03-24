@@ -9,7 +9,7 @@ import java.util.List;
 
 /**
  * 评估决策 AI 输出。
- * 新契约区分机器动作（interviewAction）与自然语言策略描述（finalDecision）。
+ * 对外契约只保留：策略编码 + 焦点 + 域路由 + 沉淀 + 检索计划。
  */
 @Data
 @Builder
@@ -17,18 +17,13 @@ import java.util.List;
 @AllArgsConstructor
 public class EvaluationDecisionOutput {
 
+    private String decisionReason;
     /** CONTINUE / WRAPUP */
     private String interviewAction;
-    private String answerSummary;
-    private String answerAssessment;
-    private String decisionReason;
-    private List<String> candidateStrategies;
+    /** StrategyCode */
     private String finalDecision;
-    private String nextEntryAction;
-    /** PRINCIPLE / PROJECT_DEEP_DIVE / SCENARIO / BEHAVIORAL */
-    private String nextQuestionType;
     private String nextFocus;
-    private List<String> expectedAnswerPoints;
+    private String targetDomainCode;
     private List<CoveredDomain> newCoveredDomains;
     private List<String> newCoveredPoints;
     private List<RetrievalPlan> retrievalPlans;
@@ -38,7 +33,7 @@ public class EvaluationDecisionOutput {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class CoveredDomain {
-        private Long domainId;
+        private String domainCode;
         private String domainName;
     }
 

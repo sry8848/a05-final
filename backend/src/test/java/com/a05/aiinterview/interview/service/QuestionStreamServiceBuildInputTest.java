@@ -49,22 +49,24 @@ class QuestionStreamServiceBuildInputTest {
 
         InterviewAttempt attempt = new InterviewAttempt();
         attempt.setAttemptId("attempt-continue");
+        attempt.setAnswerText("候选人解释了延迟消息方案。");
         attempt.setEvaluationJson(new LinkedHashMap<>(Map.of(
-                "interviewAction", "CONTINUE",
-                "nextQuestionType", "PROJECT_DEEP_DIVE",
-                "nextFocus", "订单超时关闭链路的幂等与并发控制",
-                "expectedAnswerPoints", List.of("任务调度", "幂等", "并发冲突"),
-                "answerSummary", "候选人解释了延迟消息方案。",
-                "answerAssessment", "方案方向基本正确，但责任边界还不够清楚。",
-                "retrievalPlans", List.of(Map.of(
-                        "retrievalNeed", true,
-                        "retrievalGoal", "补充项目案例",
-                        "primaryQuery", "订单超时关闭 幂等 并发控制",
-                        "alternateQueries", List.of("延迟消息 订单关闭 并发"),
-                        "retrievalType", "questions",
-                        "expectedEvidence", List.of("项目案例"),
-                        "avoidEvidence", List.of("重复问法")
-                ))
+                "effectiveDecisionPlan", Map.of(
+                        "interviewAction", "CONTINUE",
+                        "strategyCode", "S_ENTER_PROJECT",
+                        "targetQuestionType", "PROJECT_DEEP_DIVE",
+                        "nextFocus", "订单超时关闭链路的幂等与并发控制",
+                        "decisionReason", "上一题已经建立基础认知，下一题应切回项目主线核实真实工程落地。",
+                        "retrievalPlans", List.of(Map.of(
+                                "retrievalNeed", true,
+                                "retrievalGoal", "补充项目案例",
+                                "primaryQuery", "订单超时关闭 幂等 并发控制",
+                                "alternateQueries", List.of("延迟消息 订单关闭 并发"),
+                                "retrievalType", "questions",
+                                "expectedEvidence", List.of("项目案例"),
+                                "avoidEvidence", List.of("重复问法")
+                        ))
+                )
         )));
 
         Method method = QuestionStreamService.class.getDeclaredMethod("extractNextQuestionPlan", InterviewAttempt.class);
@@ -75,11 +77,10 @@ class QuestionStreamServiceBuildInputTest {
 
         assertThat(plan).isNotNull();
         assertThat(plan.getInterviewAction()).isEqualTo("CONTINUE");
-        assertThat(plan.getNextQuestionType()).isEqualTo("PROJECT_DEEP_DIVE");
+        assertThat(plan.getTargetQuestionType()).isEqualTo("PROJECT_DEEP_DIVE");
         assertThat(plan.getNextFocus()).contains("订单超时关闭");
-        assertThat(plan.getExpectedAnswerPoints()).containsExactly("任务调度", "幂等", "并发冲突");
         assertThat(plan.getRetrievalPlans()).hasSize(1);
-        assertThat(plan.getAnswerSummary()).contains("延迟消息");
+        assertThat(plan.getDecisionReason()).contains("项目主线");
     }
 
     @Test
@@ -106,14 +107,13 @@ class QuestionStreamServiceBuildInputTest {
 
         InterviewAttempt attempt = new InterviewAttempt();
         attempt.setAttemptId("attempt-build");
+        attempt.setAnswerText("候选人给出了基础方案。");
 
         QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
                 .interviewAction("CONTINUE")
-                .nextQuestionType("PRINCIPLE")
+                .targetQuestionType("PRINCIPLE")
                 .nextFocus("缓存击穿")
-                .expectedAnswerPoints(List.of("互斥锁", "逻辑过期"))
-                .answerSummary("候选人给出了基础方案。")
-                .answerAssessment("需要继续补工程取舍。")
+                .decisionReason("回答覆盖了基础方案，但还需要继续核实工程取舍。")
                 .retrievalPlans(List.of(EvaluationDecisionOutput.RetrievalPlan.builder()
                         .retrievalNeed(true)
                         .retrievalGoal("补充缓存击穿案例")
@@ -151,7 +151,9 @@ class QuestionStreamServiceBuildInputTest {
         assertEquals("PRINCIPLE", input.getNextQuestionGoal().getQuestionType());
         assertEquals("缓存击穿", input.getNextQuestionGoal().getNextFocus());
         assertEquals("redis", input.getNextQuestionGoal().getRelatedDomainCode());
-        assertThat(input.getNextQuestionGoal().getExpectedAnswerPoints()).containsExactly("互斥锁", "逻辑过期");
+        assertThat(input.getNextQuestionGoal().getExpectedAnswerPoints()).isEmpty();
+        assertThat(input.getRecentContext().getLastAnswerSummary()).isEqualTo("候选人给出了基础方案。");
+        assertThat(input.getRecentContext().getRecentTurnsSummary()).isEqualTo("回答覆盖了基础方案，但还需要继续核实工程取舍。");
         assertThat(input.getRetrievalContext().getSummary()).contains("无外部参考资料");
         assertThat(input.getRetrievalContext().getRetrievalPlans()).hasSize(1);
         assertThat(input.getConstraints().getAvoidRepetitionFamilies()).isEmpty();
@@ -176,15 +178,14 @@ class QuestionStreamServiceBuildInputTest {
 
         InterviewAttempt attempt = new InterviewAttempt();
         attempt.setAttemptId("attempt-no-domain");
+        attempt.setAnswerText("候选人回答较泛。");
 
         QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
                 .interviewAction("CONTINUE")
-                .nextQuestionType("SCENARIO")
+                .targetQuestionType("SCENARIO")
                 .nextFocus("线程模型与调度策略")
-                .expectedAnswerPoints(List.of("调度", "线程切换"))
                 .retrievalPlans(List.of())
-                .answerSummary("候选人回答较泛。")
-                .answerAssessment("需要切到更明确的场景。")
+                .decisionReason("当前回答较泛，下一题需要切到更明确的场景。")
                 .build();
 
         Method method = QuestionStreamService.class.getDeclaredMethod(
@@ -235,15 +236,14 @@ class QuestionStreamServiceBuildInputTest {
         InterviewAttempt attempt = new InterviewAttempt();
         attempt.setAttemptId("attempt-200");
         attempt.setQuestionId(88L);
+        attempt.setAnswerText("候选人回答了基础概念。");
 
         QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
                 .interviewAction("CONTINUE")
-                .nextQuestionType("PRINCIPLE")
+                .targetQuestionType("PRINCIPLE")
                 .nextFocus("缓存击穿")
-                .expectedAnswerPoints(List.of())
                 .retrievalPlans(List.of())
-                .answerSummary("候选人回答了基础概念。")
-                .answerAssessment("还需要补边界。")
+                .decisionReason("回答覆盖了基础概念，但还需要补边界。")
                 .build();
 
         Method buildInput = QuestionStreamService.class.getDeclaredMethod(
@@ -293,7 +293,7 @@ class QuestionStreamServiceBuildInputTest {
         assertThat(root.path("stages").has("nextQuestionPlan")).isTrue();
         assertThat(root.path("stages").has("questionGenerationInput")).isTrue();
         assertThat(root.path("stages").has("questionGenerationOutput")).isTrue();
-        assertThat(root.path("stages").path("nextQuestionPlan").path("nextQuestionType").asText()).isEqualTo("PRINCIPLE");
+        assertThat(root.path("stages").path("nextQuestionPlan").path("targetQuestionType").asText()).isEqualTo("PRINCIPLE");
         assertThat(root.path("stages").path("questionGenerationOutput").path("finalStem").asText())
                 .contains("Redis 缓存击穿一般怎么处理");
     }
@@ -405,11 +405,9 @@ class QuestionStreamServiceBuildInputTest {
 
         QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
                 .interviewAction("CONTINUE")
-                .finalDecision("退出当前题类")
-                .nextEntryAction("直接从项目中的缓存一致性点切入")
-                .nextQuestionType("PROJECT_DEEP_DIVE")
+                .finalDecision("S_ENTER_PROJECT")
+                .targetQuestionType("PROJECT_DEEP_DIVE")
                 .nextFocus("订单系统里的缓存一致性设计")
-                .expectedAnswerPoints(List.of("双删", "延迟消息"))
                 .build();
 
         Method method = QuestionStreamService.class.getDeclaredMethod(
@@ -435,10 +433,99 @@ class QuestionStreamServiceBuildInputTest {
         assertThat(session.getCurrentQuestionNo()).isEqualTo(2);
         @SuppressWarnings("unchecked")
         Map<String, Object> quotaState = (Map<String, Object>) session.getStateLedgerJson().get("quota_state");
+        assertThat(session.getStateLedgerJson()).containsEntry("asked_total", 2);
         assertThat(quotaState).containsEntry("samePointContinue", 0)
                 .containsEntry("sameDomainContinue", 0)
                 .containsEntry("projectTotal", 1)
                 .containsEntry("principleTotal", 1);
+    }
+
+    @Test
+    void saveQuestion_shouldRejectPrincipleQuestionWithoutDomain() throws Exception {
+        AiClient aiClient = mock(AiClient.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        RagRetrievalService ragService = mock(RagRetrievalService.class);
+        TtsService ttsService = mock(TtsService.class);
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+
+        InterviewQuestion currentQuestion = new InterviewQuestion();
+        currentQuestion.setId(910L);
+        currentQuestion.setSessionId(510L);
+        currentQuestion.setQuestionNo(1);
+        currentQuestion.setQuestionType("PROJECT_DEEP_DIVE");
+        currentQuestion.setGenerationContextJson(Map.of());
+
+        when(questionMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(currentQuestion));
+        when(questionMapper.selectById(910L)).thenReturn(currentQuestion);
+
+        QuestionStreamService service = new QuestionStreamService(
+                aiClient,
+                sessionMapper,
+                questionMapper,
+                attemptMapper,
+                ragService,
+                ttsService,
+                redisTemplate,
+                new InterviewDebugTraceService(new ObjectMapper()),
+                new ObjectMapper()
+        );
+
+        InterviewSession session = new InterviewSession();
+        session.setId(510L);
+        session.setCurrentQuestionNo(1);
+        session.setSyllabusJson(Map.of("domains", List.of()));
+        session.setStateLedgerJson(new LinkedHashMap<>(Map.of(
+                "asked_total", 1,
+                "quota_state", new LinkedHashMap<>(Map.of(
+                        "samePointContinue", 0,
+                        "sameDomainContinue", 0,
+                        "sameProjectPointContinue", 0,
+                        "sameProjectContinue", 1,
+                        "principleTotal", 0,
+                        "projectTotal", 1,
+                        "scenarioTotal", 0,
+                        "behavioralTotal", 0
+                ))
+        )));
+
+        QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
+                .interviewAction("CONTINUE")
+                .finalDecision("S_ENTER_PRINCIPLE")
+                .targetQuestionType("PRINCIPLE")
+                .nextFocus("缓存一致性")
+                .targetDomainCode("")
+                .targetDomainName("")
+                .build();
+
+        Method method = QuestionStreamService.class.getDeclaredMethod(
+                "saveQuestion",
+                InterviewSession.class,
+                Long.class,
+                String.class,
+                QuestionStreamService.NextQuestionPlan.class,
+                String.class
+        );
+        method.setAccessible(true);
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> {
+            try {
+                method.invoke(
+                        service,
+                        session,
+                        910L,
+                        "attempt-910",
+                        plan,
+                        "请结合项目讲讲缓存一致性的关键设计。"
+                );
+            } catch (java.lang.reflect.InvocationTargetException ex) {
+                if (ex.getTargetException() instanceof IllegalStateException illegalStateException) {
+                    throw illegalStateException;
+                }
+                throw new RuntimeException(ex.getTargetException());
+            }
+        });
     }
 
     private QuestionStreamService newService() {

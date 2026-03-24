@@ -28,6 +28,7 @@ class AnswerSubmitServiceIdempotentTest {
         InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
         AnswerSubmitPersistenceService persistenceService = mock(AnswerSubmitPersistenceService.class);
         ReportGenerationService reportService = mock(ReportGenerationService.class);
+        DecisionExecutionPlanBuilder planBuilder = new DecisionExecutionPlanBuilder();
         AnswerSubmitService service = new AnswerSubmitService(
                 aiClient,
                 sessionMapper,
@@ -35,7 +36,12 @@ class AnswerSubmitServiceIdempotentTest {
                 attemptMapper,
                 persistenceService,
                 reportService,
-                new InterviewDebugTraceService(new ObjectMapper())
+                new InterviewDebugTraceService(new ObjectMapper()),
+                new RemainingDomainMenuBuilder(),
+                new AvailableStrategyAssembler(),
+                planBuilder,
+                new DecisionRepairOrchestrator(aiClient, planBuilder),
+                new SystemFallbackPlanBuilder()
         );
 
         InterviewAttempt existing = new InterviewAttempt();

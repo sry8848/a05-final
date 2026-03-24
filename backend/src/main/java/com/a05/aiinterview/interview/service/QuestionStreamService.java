@@ -1,6 +1,7 @@
 package com.a05.aiinterview.interview.service;
 
 import com.a05.aiinterview.ai.AiClient;
+import com.a05.aiinterview.ai.contract.StrategyCode;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
 import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
@@ -345,8 +346,8 @@ public class QuestionStreamService {
             NextQuestionPlan plan,
             String attemptId,
             String statusKey) {
-        ResolvedDomain resolvedDomain = resolveRelatedDomain(session, plan.getNextFocus());
-        String questionType = firstNonBlank(plan.getNextQuestionType(), "PRINCIPLE");
+        ResolvedDomain resolvedDomain = resolveRelatedDomain(session, plan);
+        String questionType = firstNonBlank(plan.getTargetQuestionType(), "PRINCIPLE");
         String fallbackStem = buildFallbackQuestionStem(
                 questionType,
                 resolvedDomain.domainName(),
@@ -565,23 +566,33 @@ public class QuestionStreamService {
         if (evalJson == null) {
             return null;
         }
-        String interviewAction = toStr(evalJson.get("interviewAction"));
+        Map<String, Object> effectivePlan = evalJson.get("effectiveDecisionPlan") instanceof Map<?, ?> rawPlan
+                ? new LinkedHashMap<>((Map<String, Object>) rawPlan)
+                : null;
+        String interviewAction = effectivePlan != null
+                ? toStr(effectivePlan.get("interviewAction"))
+                : null;
         if ("WRAPUP".equalsIgnoreCase(interviewAction)) {
+            return null;
+        }
+        if (effectivePlan == null) {
             return null;
         }
 
         return NextQuestionPlan.builder()
                 .interviewAction("CONTINUE")
-                .finalDecision(toStr(evalJson.get("finalDecision")))
-                .nextEntryAction(toStr(evalJson.get("nextEntryAction")))
-                .nextQuestionType(toStr(evalJson.get("nextQuestionType")))
-                .nextFocus(toStr(evalJson.get("nextFocus")))
-                .expectedAnswerPoints(toStringList(evalJson.get("expectedAnswerPoints")))
-                .retrievalPlans(evalJson.get("retrievalPlans") instanceof List<?> rawPlans
+                .effectiveDecisionSource(toStr(effectivePlan.get("effectiveDecisionSource")))
+                .finalDecision(toStr(effectivePlan.get("strategyCode")))
+                .targetQuestionType(toStr(effectivePlan.get("targetQuestionType")))
+                .nextFocus(toStr(effectivePlan.get("nextFocus")))
+                .targetDomainCode(toStr(effectivePlan.get("targetDomainCode")))
+                .targetDomainName(toStr(effectivePlan.get("targetDomainName")))
+                .decisionReason("SYSTEM_FALLBACK".equalsIgnoreCase(toStr(effectivePlan.get("effectiveDecisionSource")))
+                        ? ""
+                        : toStr(effectivePlan.get("decisionReason")))
+                .retrievalPlans(effectivePlan.get("retrievalPlans") instanceof List<?> rawPlans
                         ? new ArrayList<>((List<EvaluationDecisionOutput.RetrievalPlan>) rawPlans)
                         : List.of())
-                .answerSummary(toStr(evalJson.get("answerSummary")))
-                .answerAssessment(toStr(evalJson.get("answerAssessment")))
                 .build();
     }
 
@@ -605,7 +616,7 @@ public class QuestionStreamService {
         List<QuestionGenerationInput.AskedQuestion> asked =
                 buildAskedQuestionsForPrompt(historyQuestions, ASKED_QUESTIONS_MAX_CHARS);
 
-        ResolvedDomain resolvedDomain = resolveRelatedDomain(session, plan.getNextFocus());
+        ResolvedDomain resolvedDomain = resolveRelatedDomain(session, plan);
         ResolvedItem resolvedItem = resolveActiveItem(session);
 
         QuestionGenerationInput.RetrievalContext retrievalContext = QuestionGenerationInput.RetrievalContext.builder()
@@ -633,12 +644,12 @@ public class QuestionStreamService {
                         .build())
                 .recentContext(QuestionGenerationInput.RecentContext.builder()
                         .lastQuestion(historyQuestions.isEmpty() ? "" : historyQuestions.getLast().getStem())
-                        .lastAnswerSummary(plan.getAnswerSummary())
-                        .recentTurnsSummary(plan.getAnswerAssessment())
+                        .lastAnswerSummary(summarizeAnswer(attempt != null ? attempt.getAnswerText() : ""))
+                        .recentTurnsSummary(firstNonBlank(plan.getDecisionReason(), ""))
                         .lastAnswerHighlights(List.of())
                         .build())
                 .nextQuestionGoal(QuestionGenerationInput.NextQuestionGoal.builder()
-                        .questionType(firstNonBlank(plan.getNextQuestionType(), "PRINCIPLE"))
+                        .questionType(firstNonBlank(plan.getTargetQuestionType(), "PRINCIPLE"))
                         .nextFocus(plan.getNextFocus())
                         .goalSummary(buildGoalSummary(plan))
                         .relatedDomainId(resolvedDomain.domainId)
@@ -647,7 +658,7 @@ public class QuestionStreamService {
                         .relatedItemKey(resolvedItem.itemKey)
                         .relatedItemType(resolvedItem.itemType)
                         .relatedItemName(resolvedItem.itemName)
-                        .expectedAnswerPoints(safeList(plan.getExpectedAnswerPoints()))
+                        .expectedAnswerPoints(List.of())
                         .build())
                 .retrievalContext(retrievalContext)
                 .constraints(QuestionGenerationInput.Constraints.builder()
@@ -674,11 +685,16 @@ public class QuestionStreamService {
                         .eq(InterviewQuestion::getSessionId, session.getId())
                         .orderByAsc(InterviewQuestion::getQuestionNo)
         );
-        int nextQuestionNo = (session.getCurrentQuestionNo() != null
-                ? session.getCurrentQuestionNo() : 0) + 1;
-        ResolvedDomain resolvedDomain = resolveRelatedDomain(session, plan.getNextFocus());
+        InterviewQuestion currentQuestion = currentQuestionId == null ? null : interviewQuestionMapper.selectById(currentQuestionId);
+        int nextQuestionNo = existingQuestions.stream()
+                .map(InterviewQuestion::getQuestionNo)
+                .filter(Objects::nonNull)
+                .max(Integer::compareTo)
+                .orElse(0) + 1;
+        ResolvedDomain resolvedDomain = resolveRelatedDomain(session, plan);
         ResolvedItem resolvedItem = resolveActiveItem(session);
-        String questionType = firstNonBlank(plan.getNextQuestionType(), "PRINCIPLE");
+        String questionType = firstNonBlank(plan.getTargetQuestionType(), "PRINCIPLE");
+        resolvedDomain = ensureQuestionDomain(session, currentQuestion, questionType, resolvedDomain);
 
         InterviewQuestion question = new InterviewQuestion();
         question.setSessionId(session.getId());
@@ -687,7 +703,7 @@ public class QuestionStreamService {
         question.setDomainId(resolvedDomain.domainId);
         question.setStem(stem);
         question.setTargetSkill(firstNonBlank(plan.getNextFocus(), resolvedDomain.domainName));
-        question.setExpectedPoints(safeList(plan.getExpectedAnswerPoints()));
+        question.setExpectedPoints(List.of());
         question.setStatus("asked");
 
         Map<String, Object> ctx = new LinkedHashMap<>();
@@ -711,14 +727,16 @@ public class QuestionStreamService {
         Map<String, Object> nextLedger = session.getStateLedgerJson() != null
                 ? new LinkedHashMap<>(session.getStateLedgerJson())
                 : new LinkedHashMap<>();
+        nextLedger.put("asked_total", existingQuestions.size() + 1);
         Map<String, Object> quotaState = QuotaStateSupport.ensureQuotaState(nextLedger, existingQuestions);
-        InterviewQuestion currentQuestion = currentQuestionId == null ? null : interviewQuestionMapper.selectById(currentQuestionId);
-        quotaState = QuotaStateSupport.advance(
-                quotaState,
-                currentQuestion != null ? currentQuestion.getQuestionType() : "",
-                plan.getFinalDecision(),
-                questionType
-        );
+        if (!"SYSTEM_FALLBACK".equalsIgnoreCase(plan.getEffectiveDecisionSource())) {
+            quotaState = QuotaStateSupport.advance(
+                    quotaState,
+                    currentQuestion != null ? currentQuestion.getQuestionType() : "",
+                    StrategyCode.fromCode(plan.getFinalDecision()),
+                    questionType
+            );
+        }
         nextLedger.put(QuotaStateSupport.LEDGER_KEY, quotaState);
         session.setStateLedgerJson(nextLedger);
         session.setCurrentQuestionNo(nextQuestionNo);
@@ -735,6 +753,67 @@ public class QuestionStreamService {
         return question;
     }
 
+    private ResolvedDomain ensureQuestionDomain(InterviewSession session,
+                                                InterviewQuestion currentQuestion,
+                                                String questionType,
+                                                ResolvedDomain resolvedDomain) {
+        if (!"PRINCIPLE".equalsIgnoreCase(questionType)) {
+            return resolvedDomain;
+        }
+        if (resolvedDomain != null
+                && resolvedDomain.domainCode() != null && !resolvedDomain.domainCode().isBlank()
+                && resolvedDomain.domainName() != null && !resolvedDomain.domainName().isBlank()) {
+            return resolvedDomain;
+        }
+        ResolvedDomain recovered = recoverPrincipleDomain(currentQuestion, session);
+        if (recovered != null
+                && recovered.domainCode() != null && !recovered.domainCode().isBlank()
+                && recovered.domainName() != null && !recovered.domainName().isBlank()) {
+            return recovered;
+        }
+        throw new IllegalStateException("PRINCIPLE 题保存失败：缺少合法的 domainCode/domainName");
+    }
+
+    private ResolvedDomain recoverPrincipleDomain(InterviewQuestion currentQuestion, InterviewSession session) {
+        if (currentQuestion != null) {
+            String currentCode = resolveDomainCode(currentQuestion);
+            String currentName = currentQuestion.getGenerationContextJson() == null
+                    ? ""
+                    : toStr(currentQuestion.getGenerationContextJson().get("domainName"));
+            if (!currentCode.isBlank() && !currentName.isBlank()) {
+                return new ResolvedDomain(currentQuestion.getDomainId(), currentCode, currentName);
+            }
+            if (currentQuestion.getDomainId() != null) {
+                ResolvedDomain fromCode = resolveRelatedDomainFromCode(
+                        session,
+                        currentCode,
+                        currentName
+                );
+                if (!fromCode.domainCode().isBlank() && !fromCode.domainName().isBlank()) {
+                    return fromCode;
+                }
+                if (session != null && session.getSyllabusJson() != null) {
+                    Object rawDomains = session.getSyllabusJson().get("domains");
+                    if (rawDomains instanceof List<?> domains) {
+                        for (Object domainObj : domains) {
+                            if (!(domainObj instanceof Map<?, ?> domain)) {
+                                continue;
+                            }
+                            if (Objects.equals(currentQuestion.getDomainId(), toLong(domain.get("domainId")))) {
+                                return new ResolvedDomain(
+                                        currentQuestion.getDomainId(),
+                                        firstNonBlank(toStr(domain.get("domainCode")), currentCode),
+                                        firstNonBlank(toStr(domain.get("domainName")), currentName)
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     private void logQuestionGenerationDebugInput(Long sessionId,
                                                  Long questionId,
                                                  String attemptId,
@@ -748,8 +827,7 @@ public class QuestionStreamService {
                 plan,
                 Map.of(
                         "finalDecision", firstNonBlank(plan.getFinalDecision(), ""),
-                        "nextEntryAction", firstNonBlank(plan.getNextEntryAction(), ""),
-                        "nextQuestionType", plan.getNextQuestionType(),
+                        "targetQuestionType", plan.getTargetQuestionType(),
                         "nextFocus", firstNonBlank(plan.getNextFocus(), "")
                 )
         );
@@ -761,8 +839,7 @@ public class QuestionStreamService {
                 genInput,
                 Map.of(
                         "finalDecision", firstNonBlank(plan.getFinalDecision(), ""),
-                        "nextEntryAction", firstNonBlank(plan.getNextEntryAction(), ""),
-                        "nextQuestionType", plan.getNextQuestionType(),
+                        "targetQuestionType", plan.getTargetQuestionType(),
                         "nextFocus", firstNonBlank(plan.getNextFocus(), "")
                 )
         );
@@ -781,8 +858,7 @@ public class QuestionStreamService {
                 Map.of("finalStem", finalStem == null ? "" : finalStem),
                 Map.of(
                         "finalDecision", firstNonBlank(plan.getFinalDecision(), ""),
-                        "nextEntryAction", firstNonBlank(plan.getNextEntryAction(), ""),
-                        "nextQuestionType", plan.getNextQuestionType(),
+                        "targetQuestionType", plan.getTargetQuestionType(),
                         "nextFocus", firstNonBlank(plan.getNextFocus(), ""),
                         "stemPreview", finalStem == null ? "" : finalStem
                 )
@@ -1065,17 +1141,46 @@ public class QuestionStreamService {
         return value instanceof String str ? str : "";
     }
 
-    private List<String> safeList(List<String> values) {
-        return values == null ? List.of() : values;
-    }
-
     private String buildGoalSummary(NextQuestionPlan plan) {
         String focus = firstNonBlank(plan.getNextFocus(), "当前主题");
-        String nextEntryAction = firstNonBlank(plan.getNextEntryAction(), "");
-        if (nextEntryAction.isBlank()) {
-            return "围绕「" + focus + "」继续形成判断。";
+        return "围绕「" + focus + "」继续形成判断。";
+    }
+
+    private String summarizeAnswer(String answerText) {
+        if (answerText == null || answerText.isBlank() || "[skip]".equals(answerText)) {
+            return "";
         }
-        return "以「" + nextEntryAction + "」作为入口，围绕「" + focus + "」继续形成判断。";
+        String normalized = answerText.trim().replace("\r", " ").replace("\n", " ");
+        return normalized.length() <= 160 ? normalized : normalized.substring(0, 160);
+    }
+
+    private ResolvedDomain resolveRelatedDomain(InterviewSession session, NextQuestionPlan plan) {
+        if (plan != null && plan.getTargetDomainCode() != null && !plan.getTargetDomainCode().isBlank()) {
+            return resolveRelatedDomainFromCode(session, plan.getTargetDomainCode(), plan.getTargetDomainName());
+        }
+        return resolveRelatedDomain(session, plan != null ? plan.getNextFocus() : "");
+    }
+
+    @SuppressWarnings("unchecked")
+    private ResolvedDomain resolveRelatedDomainFromCode(InterviewSession session, String domainCode, String domainName) {
+        if (session != null && session.getSyllabusJson() != null) {
+            Object rawDomains = session.getSyllabusJson().get("domains");
+            if (rawDomains instanceof List<?> domains) {
+                for (Object domainObj : domains) {
+                    if (!(domainObj instanceof Map<?, ?> domain)) {
+                        continue;
+                    }
+                    if (Objects.equals(domainCode, toStr(domain.get("domainCode")))) {
+                        return new ResolvedDomain(
+                                toLong(domain.get("domainId")),
+                                firstNonBlank(toStr(domain.get("domainCode")), domainCode),
+                                firstNonBlank(toStr(domain.get("domainName")), domainName)
+                        );
+                    }
+                }
+            }
+        }
+        return new ResolvedDomain(null, firstNonBlank(domainCode, ""), firstNonBlank(domainName, ""));
     }
 
     private List<String> toStringList(Object value) {
@@ -1183,14 +1288,14 @@ public class QuestionStreamService {
     @lombok.AllArgsConstructor
     static class NextQuestionPlan {
         private String interviewAction;
+        private String effectiveDecisionSource;
         private String finalDecision;
-        private String nextEntryAction;
-        private String nextQuestionType;
+        private String targetQuestionType;
         private String nextFocus;
-        private List<String> expectedAnswerPoints;
+        private String targetDomainCode;
+        private String targetDomainName;
+        private String decisionReason;
         private List<EvaluationDecisionOutput.RetrievalPlan> retrievalPlans;
-        private String answerSummary;
-        private String answerAssessment;
     }
 
     private record ResolvedDomain(Long domainId, String domainCode, String domainName) {

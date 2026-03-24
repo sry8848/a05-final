@@ -19,31 +19,33 @@ class EvaluationDecisionContractTest {
     }
 
     @Test
-    @DisplayName("CONTINUE 输出应保留新契约字段")
+    @DisplayName("合法 CONTINUE 输出应保留新契约字段")
     void continueOutput_shouldKeepNewSchemaFields() {
         String json = """
                 {
+                  "decisionReason": "上一题回答具备继续追问的信息增益，因此进入项目链路验证真实工程深度。",
                   "interviewAction": "CONTINUE",
-                  "answerSummary": "候选人解释了缓存击穿的常见方案。",
-                  "answerAssessment": "基础概念正确，但工程取舍还不够具体。",
-                  "decisionReason": "继续追问仍有信息增益。",
-                  "candidateStrategies": ["引导和验证", "变式"],
-                  "finalDecision": "引导和验证",
-                  "nextEntryAction": "",
-                  "nextQuestionType": "PRINCIPLE",
-                  "nextFocus": "缓存击穿在高并发场景下的取舍",
-                  "expectedAnswerPoints": ["互斥锁", "逻辑过期", "热点 key 隔离"],
-                  "newCoveredDomains": [{"domainId": 6, "domainName": "Redis"}],
-                  "newCoveredPoints": ["Redis / 缓存击穿基础方案"],
+                  "finalDecision": "S_ENTER_PROJECT",
+                  "nextFocus": "Seata AT 事务边界落地",
+                  "targetDomainCode": "",
+                  "newCoveredDomains": [
+                    {
+                      "domainCode": "DOMAIN_SPRING",
+                      "domainName": "Spring 框架"
+                    }
+                  ],
+                  "newCoveredPoints": [
+                    "Seata AT 模式下全局事务与本地事务的协同边界"
+                  ],
                   "retrievalPlans": [
                     {
                       "retrievalNeed": true,
-                      "retrievalGoal": "补充缓存击穿案例",
-                      "primaryQuery": "缓存击穿 高并发 取舍",
-                      "alternateQueries": ["缓存击穿 互斥锁 逻辑过期"],
+                      "retrievalGoal": "补充 Seata AT 边界细节",
+                      "primaryQuery": "Seata AT 边界",
+                      "alternateQueries": ["AT 模式 本地事务", "Seata 分支事务注册"],
                       "retrievalType": "domain",
-                      "expectedEvidence": ["典型方案", "适用边界"],
-                      "avoidEvidence": ["重复定义题"]
+                      "expectedEvidence": ["事务边界", "分支事务注册"],
+                      "avoidEvidence": ["通用微服务定义"]
                     }
                   ]
                 }
@@ -52,40 +54,34 @@ class EvaluationDecisionContractTest {
         EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
 
         assertThat(output.getInterviewAction()).isEqualTo("CONTINUE");
-        assertThat(output.getNextQuestionType()).isEqualTo("PRINCIPLE");
-        assertThat(output.getNextFocus()).isEqualTo("缓存击穿在高并发场景下的取舍");
-        assertThat(output.getExpectedAnswerPoints()).containsExactly("互斥锁", "逻辑过期", "热点 key 隔离");
-        assertThat(output.getCandidateStrategies()).containsExactly("引导和验证", "变式");
-        assertThat(output.getFinalDecision()).isEqualTo("引导和验证");
-        assertThat(output.getNextEntryAction()).isEmpty();
+        assertThat(output.getFinalDecision()).isEqualTo("S_ENTER_PROJECT");
+        assertThat(output.getNextFocus()).isEqualTo("Seata AT 事务边界落地");
+        assertThat(output.getTargetDomainCode()).isEmpty();
         assertThat(output.getNewCoveredDomains()).hasSize(1);
-        assertThat(output.getNewCoveredDomains().getFirst().getDomainName()).isEqualTo("Redis");
+        assertThat(output.getNewCoveredDomains().getFirst().getDomainCode()).isEqualTo("DOMAIN_SPRING");
+        assertThat(output.getNewCoveredDomains().getFirst().getDomainName()).isEqualTo("Spring 框架");
+        assertThat(output.getNewCoveredPoints()).containsExactly("Seata AT 模式下全局事务与本地事务的协同边界");
         assertThat(output.getRetrievalPlans()).hasSize(1);
-        assertThat(output.getRetrievalPlans().getFirst().getPrimaryQuery()).contains("缓存击穿");
+        assertThat(output.getRetrievalPlans().getFirst().getPrimaryQuery()).isEqualTo("Seata AT 边界");
     }
 
     @Test
-    @DisplayName("WRAPUP 输出应清空下一题相关字段")
-    void wrapupOutput_shouldClearNextQuestionFields() {
+    @DisplayName("合法 WRAPUP 输出应清空下一题规划字段")
+    void wrapupOutput_shouldClearNextPlanFields() {
         String json = """
                 {
+                  "decisionReason": "本场面试已经形成足够能力画像，可以结束。",
                   "interviewAction": "WRAPUP",
-                  "answerSummary": "本场面试已获取足够信息。",
-                  "answerAssessment": "可以结束本场面试。",
-                  "decisionReason": "继续追问收益很低。",
-                  "candidateStrategies": ["结束面试"],
-                  "finalDecision": "结束面试",
-                  "nextEntryAction": "直接从另一个项目切入",
-                  "nextQuestionType": "PROJECT_DEEP_DIVE",
-                  "nextFocus": "订单超时关闭",
-                  "expectedAnswerPoints": ["任务调度"],
+                  "finalDecision": "S_WRAPUP",
+                  "nextFocus": "不应保留",
+                  "targetDomainCode": "DOMAIN_MYSQL",
                   "newCoveredDomains": [],
                   "newCoveredPoints": [],
                   "retrievalPlans": [
                     {
                       "retrievalNeed": true,
-                      "retrievalGoal": "无效数据",
-                      "primaryQuery": "should be removed",
+                      "retrievalGoal": "无效",
+                      "primaryQuery": "无效",
                       "alternateQueries": [],
                       "retrievalType": "domain",
                       "expectedEvidence": [],
@@ -98,156 +94,22 @@ class EvaluationDecisionContractTest {
         EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
 
         assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
-        assertThat(output.getNextQuestionType()).isEmpty();
+        assertThat(output.getFinalDecision()).isEqualTo("S_WRAPUP");
         assertThat(output.getNextFocus()).isEmpty();
-        assertThat(output.getNextEntryAction()).isEmpty();
-        assertThat(output.getExpectedAnswerPoints()).isEmpty();
+        assertThat(output.getTargetDomainCode()).isEmpty();
         assertThat(output.getRetrievalPlans()).isEmpty();
     }
 
     @Test
-    @DisplayName("非法 nextQuestionType 应降级为 WRAPUP")
-    void invalidNextQuestionType_shouldFallbackToWrapup() {
+    @DisplayName("非法策略编码应降级为 WRAPUP")
+    void invalidStrategyCode_shouldFallbackToWrapup() {
         EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
                 {
+                  "decisionReason": "测试非法策略编码。",
                   "interviewAction": "CONTINUE",
-                  "answerSummary": "回答一般。",
-                  "answerAssessment": "可以继续，但输出题型非法。",
-                  "decisionReason": "测试非法题型。",
-                  "candidateStrategies": ["引导和验证"],
-                  "finalDecision": "引导和验证",
-                  "nextEntryAction": "",
-                  "nextQuestionType": "INTRO",
-                  "nextFocus": "自我介绍补充",
-                  "expectedAnswerPoints": [],
-                  "newCoveredDomains": [],
-                  "newCoveredPoints": [],
-                  "retrievalPlans": []
-                }
-                """);
-
-        assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
-        assertThat(output.getAnswerAssessment()).contains("降级");
-        assertThat(output.getCandidateStrategies()).containsExactly("结束面试");
-    }
-
-    @Test
-    @DisplayName("缺少 answerAssessment 时应降级为 WRAPUP")
-    void missingAnswerAssessment_shouldFallbackToWrapup() {
-        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
-                {
-                  "interviewAction": "CONTINUE",
-                  "answerSummary": "只给了摘要",
-                  "candidateStrategies": ["引导和验证"],
-                  "finalDecision": "引导和验证",
-                  "nextEntryAction": "",
-                  "nextQuestionType": "PRINCIPLE",
-                  "nextFocus": "集合框架",
-                  "expectedAnswerPoints": [],
-                  "newCoveredDomains": [],
-                  "newCoveredPoints": [],
-                  "retrievalPlans": []
-                }
-                """);
-
-        assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
-        assertThat(output.getExpectedAnswerPoints()).isEmpty();
-        assertThat(output.getNewCoveredPoints()).isEmpty();
-        assertThat(output.getRetrievalPlans()).isEmpty();
-    }
-
-    @Test
-    @DisplayName("缺少或非法 interviewAction 但下一题计划完整时应推断为 CONTINUE")
-    void missingInterviewAction_withCompleteNextPlan_shouldInferContinue() {
-        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
-                {
-                  "interviewAction": "PROJECT",
-                  "answerSummary": "候选人自我介绍提到了 Redis 和秒杀项目。",
-                  "answerAssessment": "项目轮廓清楚，但缺少真实实现细节。",
-                  "decisionReason": "应继续追问项目真实性。",
-                  "candidateStrategies": ["引导还原", "责任定位"],
-                  "finalDecision": "引导还原",
-                  "nextEntryAction": "",
-                  "nextQuestionType": "PROJECT_DEEP_DIVE",
-                  "nextFocus": "Redisson 分布式锁在秒杀里的具体实现",
-                  "expectedAnswerPoints": ["锁 key 设计", "异常释放", "压测验证"],
-                  "newCoveredDomains": [],
-                  "newCoveredPoints": [],
-                  "retrievalPlans": []
-                }
-                """);
-
-        assertThat(output.getInterviewAction()).isEqualTo("CONTINUE");
-        assertThat(output.getNextQuestionType()).isEqualTo("PROJECT_DEEP_DIVE");
-        assertThat(output.getNextFocus()).isEqualTo("Redisson 分布式锁在秒杀里的具体实现");
-        assertThat(output.getExpectedAnswerPoints()).containsExactly("锁 key 设计", "异常释放", "压测验证");
-    }
-
-    @Test
-    @DisplayName("退出当前题类时缺少 nextEntryAction 应降级为 WRAPUP")
-    void exitDecisionWithoutNextEntryAction_shouldFallbackToWrapup() {
-        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
-                {
-                  "interviewAction": "CONTINUE",
-                  "answerSummary": "当前理论题已经形成基本判断。",
-                  "answerAssessment": "继续停留在理论题上的收益下降。",
-                  "decisionReason": "应退出当前题类并转入项目题。",
-                  "candidateStrategies": ["退出当前题类"],
-                  "finalDecision": "退出当前题类",
-                  "nextEntryAction": "",
-                  "nextQuestionType": "PROJECT_DEEP_DIVE",
-                  "nextFocus": "订单系统里的缓存一致性设计",
-                  "expectedAnswerPoints": ["缓存更新时机"],
-                  "newCoveredDomains": [],
-                  "newCoveredPoints": [],
-                  "retrievalPlans": []
-                }
-                """);
-
-        assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
-        assertThat(output.getFinalDecision()).isEqualTo("结束面试");
-    }
-
-    @Test
-    @DisplayName("非退出动作却填写 nextEntryAction 应降级为 WRAPUP")
-    void nonExitDecisionWithNextEntryAction_shouldFallbackToWrapup() {
-        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
-                {
-                  "interviewAction": "CONTINUE",
-                  "answerSummary": "当前理论题还值得继续。",
-                  "answerAssessment": "可继续做低成本澄清。",
-                  "decisionReason": "继续引导可以形成更稳定判断。",
-                  "candidateStrategies": ["引导和验证"],
-                  "finalDecision": "引导和验证",
-                  "nextEntryAction": "从项目里切一个点进入",
-                  "nextQuestionType": "PRINCIPLE",
-                  "nextFocus": "线程池拒绝策略",
-                  "expectedAnswerPoints": ["CallerRunsPolicy"],
-                  "newCoveredDomains": [],
-                  "newCoveredPoints": [],
-                  "retrievalPlans": []
-                }
-                """);
-
-        assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
-        assertThat(output.getFinalDecision()).isEqualTo("结束面试");
-    }
-
-    @Test
-    @DisplayName("非法 finalDecision 动作名应降级为 WRAPUP")
-    void invalidFinalDecision_shouldFallbackToWrapup() {
-        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
-                {
-                  "interviewAction": "CONTINUE",
-                  "answerSummary": "回答一般。",
-                  "answerAssessment": "输出了非法动作名。",
-                  "decisionReason": "测试非法动作。",
-                  "candidateStrategies": ["继续提问"],
-                  "finalDecision": "继续提问",
-                  "nextEntryAction": "",
-                  "nextQuestionType": "PRINCIPLE",
+                  "finalDecision": "S_FAKE_CODE",
                   "nextFocus": "缓存一致性",
-                  "expectedAnswerPoints": ["双删"],
+                  "targetDomainCode": "",
                   "newCoveredDomains": [],
                   "newCoveredPoints": [],
                   "retrievalPlans": []
@@ -255,6 +117,73 @@ class EvaluationDecisionContractTest {
                 """);
 
         assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
-        assertThat(output.getCandidateStrategies()).containsExactly("结束面试");
+        assertThat(output.getFinalDecision()).isEqualTo("S_WRAPUP");
+    }
+
+    @Test
+    @DisplayName("切换知识域缺少 targetDomainCode 应降级为 WRAPUP")
+    void switchDomainWithoutTargetDomain_shouldFallbackToWrapup() {
+        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
+                {
+                  "decisionReason": "当前域已经形成判断，应切换知识域。",
+                  "interviewAction": "CONTINUE",
+                  "finalDecision": "S_SWITCH_DOMAIN",
+                  "nextFocus": "分布式锁误删防御",
+                  "targetDomainCode": "",
+                  "newCoveredDomains": [],
+                  "newCoveredPoints": [],
+                  "retrievalPlans": []
+                }
+                """);
+
+        assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
+        assertThat(output.getFinalDecision()).isEqualTo("S_WRAPUP");
+    }
+
+    @Test
+    @DisplayName("进入理论题缺少 targetDomainCode 应降级为 WRAPUP")
+    void enterPrincipleWithoutTargetDomain_shouldFallbackToWrapup() {
+        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
+                {
+                  "decisionReason": "项目真实性已初步判断，转入理论题补齐知识掌握。",
+                  "interviewAction": "CONTINUE",
+                  "finalDecision": "S_ENTER_PRINCIPLE",
+                  "nextFocus": "AQS 独占锁 state 语义",
+                  "targetDomainCode": "",
+                  "newCoveredDomains": [],
+                  "newCoveredPoints": [],
+                  "retrievalPlans": []
+                }
+                """);
+
+        assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
+        assertThat(output.getFinalDecision()).isEqualTo("S_WRAPUP");
+    }
+
+    @Test
+    @DisplayName("newCoveredDomains 必须使用 domainCode")
+    void newCoveredDomains_shouldUseDomainCode() {
+        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
+                {
+                  "decisionReason": "当前 Redis 题已形成有效判断。",
+                  "interviewAction": "CONTINUE",
+                  "finalDecision": "S_P_VERIFY",
+                  "nextFocus": "缓存穿透过滤策略",
+                  "targetDomainCode": "",
+                  "newCoveredDomains": [
+                    {
+                      "domainId": 6,
+                      "domainName": "Redis 缓存"
+                    }
+                  ],
+                  "newCoveredPoints": [
+                    "缓存穿透基础方案"
+                  ],
+                  "retrievalPlans": []
+                }
+                """);
+
+        assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
+        assertThat(output.getFinalDecision()).isEqualTo("S_WRAPUP");
     }
 }

@@ -2,6 +2,8 @@ package com.a05.aiinterview.ai.impl;
 
 import com.a05.aiinterview.ai.AiClient;
 import com.a05.aiinterview.ai.config.PromptProperties;
+import com.a05.aiinterview.ai.contract.StrategyCatalog;
+import com.a05.aiinterview.ai.contract.StrategyCode;
 import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionInput;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
@@ -80,17 +82,13 @@ public class MockAiClient implements AiClient {
     public AiCallResult<EvaluationDecisionOutput> callEvaluationDecision(EvaluationDecisionInput input) {
         long startMs = System.currentTimeMillis();
         String nextFocus = input.getCurrentQuestion() != null ? input.getCurrentQuestion().getCurrentFocus() : "当前主题";
+        String strategyCode = StrategyCode.S_ENTER_PROJECT.code();
         EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
+                .decisionReason("当前继续提问仍有信息增益，因此进入项目主线继续建立真实工程画像。")
                 .interviewAction("CONTINUE")
-                .answerSummary("候选人完成了当前问题的基本回答。")
-                .answerAssessment("候选人有一定理解，但仍可通过下一题继续建立画像。")
-                .decisionReason("当前继续提问仍有信息增益，因此保持面试继续推进。")
-                .candidateStrategies(List.of("引导和验证"))
-                .finalDecision("引导和验证")
-                .nextEntryAction("")
-                .nextQuestionType("PRINCIPLE")
+                .finalDecision(strategyCode)
                 .nextFocus(nextFocus)
-                .expectedAnswerPoints(List.of("说明核心概念", "解释使用边界"))
+                .targetDomainCode("")
                 .newCoveredDomains(List.of())
                 .newCoveredPoints(List.of())
                 .retrievalPlans(List.of())

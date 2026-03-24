@@ -30,7 +30,7 @@ class StateLedgerPatchServiceUpdatedLedgerTest {
 
         Map<String, Object> newLedger = reducer.reduce(oldLedger, mutation, "attempt-intro-1", 100L);
 
-        assertThat(newLedger.get("asked_total")).isEqualTo(1);
+        assertThat(newLedger.get("asked_total")).isEqualTo(0);
         assertThat(newLedger.get("last_attempt_id")).isEqualTo("attempt-intro-1");
         assertThat(newLedger.get("current_focus")).isEqualTo("订单项目");
         assertThat(newLedger.get("active_item_key")).isEqualTo("item-order");
@@ -47,12 +47,11 @@ class StateLedgerPatchServiceUpdatedLedgerTest {
         LedgerMutation mutation = LedgerMutation.builder()
                 .questionType("PRINCIPLE")
                 .currentDomainCode("redis")
-                .currentDomainId(6L)
                 .currentFocus("缓存击穿")
                 .questionFamilyId("PRINCIPLE.缓存击穿")
                 .newCoveredDomains(List.of(
-                        EvaluationDecisionOutput.CoveredDomain.builder()
-                                .domainId(6L)
+                        LedgerMutation.CoveredDomainByCode.builder()
+                                .domainCode("redis")
                                 .domainName("Redis")
                                 .build()
                 ))
@@ -61,7 +60,10 @@ class StateLedgerPatchServiceUpdatedLedgerTest {
 
         Map<String, Object> newLedger = reducer.reduce(oldLedger, mutation, "attempt-redis-1", 22L);
 
-        assertThat(newLedger.get("covered_domains")).isEqualTo(List.of("Redis"));
+        assertThat(newLedger.get("covered_domains")).isEqualTo(List.of(Map.of(
+                "domainCode", "redis",
+                "domainName", "Redis"
+        )));
         assertThat(newLedger.get("covered_points")).isEqualTo(List.of("Redis / 缓存击穿基础方案"));
 
         @SuppressWarnings("unchecked")
@@ -78,7 +80,6 @@ class StateLedgerPatchServiceUpdatedLedgerTest {
         LedgerMutation mutation = LedgerMutation.builder()
                 .questionType("PRINCIPLE")
                 .currentDomainCode("redis")
-                .currentDomainId(6L)
                 .currentFocus("缓存击穿")
                 .build();
 

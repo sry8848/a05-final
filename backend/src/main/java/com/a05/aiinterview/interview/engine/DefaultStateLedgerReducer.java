@@ -23,7 +23,6 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
                                       String attemptId,
                                       Long evidenceQuestionId) {
         Map<String, Object> ledger = deepCopyLedger(oldLedger);
-        ledger.put("asked_total", toInt(ledger.get("asked_total")) + 1);
         ledger.put("last_attempt_id", attemptId);
 
         putIfNotBlank(ledger, "current_focus", firstNonBlank(mutation.getNextFocus(), mutation.getCurrentFocus()));
@@ -48,18 +47,21 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
     }
 
     private void mergeCoveredDomains(Map<String, Object> ledger,
-                                     List<com.a05.aiinterview.ai.dto.EvaluationDecisionOutput.CoveredDomain> coveredDomains) {
+                                     List<LedgerMutation.CoveredDomainByCode> coveredDomains) {
         if (coveredDomains == null || coveredDomains.isEmpty()) {
             return;
         }
-        LinkedHashSet<String> values = new LinkedHashSet<>(toStringList(ledger.get("covered_domains")));
-        for (com.a05.aiinterview.ai.dto.EvaluationDecisionOutput.CoveredDomain coveredDomain : coveredDomains) {
-            if (coveredDomain == null || coveredDomain.getDomainName() == null || coveredDomain.getDomainName().isBlank()) {
+        Map<String, Map<String, Object>> values = toCoveredDomainMap(ledger.get("covered_domains"));
+        for (LedgerMutation.CoveredDomainByCode coveredDomain : coveredDomains) {
+            if (coveredDomain == null || coveredDomain.getDomainCode() == null || coveredDomain.getDomainCode().isBlank()) {
                 continue;
             }
-            values.add(coveredDomain.getDomainName().trim());
+            values.put(coveredDomain.getDomainCode().trim(), buildCoveredDomainEntry(
+                    coveredDomain.getDomainCode(),
+                    coveredDomain.getDomainName()
+            ));
         }
-        ledger.put("covered_domains", new ArrayList<>(values));
+        ledger.put("covered_domains", new ArrayList<>(values.values()));
     }
 
     @SuppressWarnings("unchecked")
@@ -79,7 +81,6 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
 
         for (Map<String, Object> state : copiedStates) {
             String domainCode = asString(state.get("domainCode"));
-            Long domainId = toLong(state.get("domainId"));
 
             if (Objects.equals(domainCode, mutation.getCurrentDomainCode()) && evidenceQuestionId != null) {
                 LinkedHashSet<Long> refs = new LinkedHashSet<>(toLongList(state.get("evidenceRefs")));
@@ -94,12 +95,11 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
             if (mutation.getNewCoveredDomains() == null) {
                 continue;
             }
-            for (com.a05.aiinterview.ai.dto.EvaluationDecisionOutput.CoveredDomain coveredDomain : mutation.getNewCoveredDomains()) {
+            for (LedgerMutation.CoveredDomainByCode coveredDomain : mutation.getNewCoveredDomains()) {
                 if (coveredDomain == null) {
                     continue;
                 }
-                if (Objects.equals(domainId, coveredDomain.getDomainId())
-                        || Objects.equals(asString(state.get("domainName")), coveredDomain.getDomainName())) {
+                if (Objects.equals(domainCode, coveredDomain.getDomainCode())) {
                     state.put("status", DomainStatus.COVERED.getValue());
                     state.put("saturated", true);
                 }
@@ -127,10 +127,11 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
     @SuppressWarnings("unchecked")
     private Map<String, Object> deepCopyLedger(Map<String, Object> ledger) {
         Map<String, Object> copy = ledger == null ? new LinkedHashMap<>() : new LinkedHashMap<>(ledger);
-        copy.put("covered_domains", new ArrayList<>(toStringList(copy.get("covered_domains"))));
+        copy.put("covered_domains", new ArrayList<>(toCoveredDomainMap(copy.get("covered_domains")).values()));
         copy.put("covered_points", new ArrayList<>(toStringList(copy.get("covered_points"))));
         copy.put("recent_question_families", new ArrayList<>(toStringList(copy.get("recent_question_families"))));
         copy.put("quota_state", new LinkedHashMap<>(QuotaStateSupport.ensureQuotaState(copy, List.of())));
+        copy.put("decision_fallback_state", new LinkedHashMap<>(DecisionFallbackStateSupport.ensureState(copy)));
         Object domainStates = copy.get("domain_states");
         if (domainStates instanceof List<?> rawDomainStates) {
             List<Map<String, Object>> cloned = new ArrayList<>();
@@ -144,6 +145,38 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
             copy.put("domain_states", new ArrayList<>());
         }
         return copy;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Map<String, Object>> toCoveredDomainMap(Object value) {
+        Map<String, Map<String, Object>> result = new LinkedHashMap<>();
+        if (!(value instanceof List<?> rawList)) {
+            return result;
+        }
+        for (Object item : rawList) {
+            if (item instanceof Map<?, ?> rawMap) {
+                Map<String, Object> map = new LinkedHashMap<>((Map<String, Object>) rawMap);
+                String domainCode = asString(map.get("domainCode")).trim();
+                if (domainCode.isBlank()) {
+                    continue;
+                }
+                result.put(domainCode, buildCoveredDomainEntry(domainCode, asString(map.get("domainName"))));
+                continue;
+            }
+            String domainName = item == null ? "" : String.valueOf(item).trim();
+            if (domainName.isBlank()) {
+                continue;
+            }
+            result.putIfAbsent(domainName, buildCoveredDomainEntry(domainName, domainName));
+        }
+        return result;
+    }
+
+    private Map<String, Object> buildCoveredDomainEntry(String domainCode, String domainName) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("domainCode", domainCode == null ? "" : domainCode.trim());
+        entry.put("domainName", domainName == null ? "" : domainName.trim());
+        return entry;
     }
 
     private void putIfNotBlank(Map<String, Object> target, String key, String value) {

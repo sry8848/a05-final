@@ -1,5 +1,6 @@
 package com.a05.aiinterview.interview.engine;
 
+import com.a05.aiinterview.ai.contract.StrategyCode;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,7 +29,7 @@ class QuotaStateSupportTest {
                         "behavioralTotal", 0
                 ),
                 "PRINCIPLE",
-                "引导和验证",
+                StrategyCode.S_P_VERIFY,
                 "PRINCIPLE"
         );
 
@@ -45,7 +46,7 @@ class QuotaStateSupportTest {
         Map<String, Object> reduced = QuotaStateSupport.advance(
                 QuotaStateSupport.initialQuotaState(),
                 "PRINCIPLE",
-                "退出当前题类",
+                StrategyCode.S_ENTER_PROJECT,
                 "PROJECT_DEEP_DIVE"
         );
 
@@ -69,7 +70,7 @@ class QuotaStateSupportTest {
                         "behavioralTotal", 0
                 ),
                 "PROJECT_DEEP_DIVE",
-                "切换项目要点",
+                StrategyCode.S_J_SWITCH_POINT,
                 "PROJECT_DEEP_DIVE"
         );
 

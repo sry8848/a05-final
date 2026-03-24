@@ -1,10 +1,10 @@
 package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.AiClient;
+import com.a05.aiinterview.ai.contract.StrategyCode;
 import com.a05.aiinterview.ai.dto.AiCallResult;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionInput;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
-import com.a05.aiinterview.ai.contract.EvaluationDecisionActionCatalog;
 import com.a05.aiinterview.interview.dto.SubmitAttemptRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptResponse;
 import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
@@ -15,6 +15,7 @@ import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -38,7 +39,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AnswerSubmitService {
 
-    private static final int MAX_QUOTA_COUNT = 20;
     private static final int RECENT_MEMORY_LIMIT = 6;
 
     private final AiClient aiClient;
@@ -48,6 +48,11 @@ public class AnswerSubmitService {
     private final AnswerSubmitPersistenceService answerSubmitPersistenceService;
     private final ReportGenerationService reportGenerationService;
     private final InterviewDebugTraceService interviewDebugTraceService;
+    private final RemainingDomainMenuBuilder remainingDomainMenuBuilder;
+    private final AvailableStrategyAssembler availableStrategyAssembler;
+    private final DecisionExecutionPlanBuilder decisionExecutionPlanBuilder;
+    private final DecisionRepairOrchestrator decisionRepairOrchestrator;
+    private final SystemFallbackPlanBuilder systemFallbackPlanBuilder;
 
     public SubmitAttemptResponse submitAnswer(Long sessionId, Long userId, SubmitAttemptRequest request) {
         log.info("提交回答主链路开始, sessionId={}, questionId={}, attemptId={}",
@@ -71,10 +76,9 @@ public class AnswerSubmitService {
         );
         List<InterviewAttempt> allAttempts = interviewAttemptMapper.selectBySessionId(sessionId);
 
-        EvaluationDecisionOutput evalOutput;
-        AiCallResult<EvaluationDecisionOutput> evalCallResult = null;
+        DecisionResolution resolution;
         if (shouldForceEndByMaxQuestions(session)) {
-                evalOutput = buildForcedEndDecision();
+            resolution = buildForcedEndResolution();
         } else {
             EvaluationDecisionInput evalInput = buildEvaluationInput(
                     session, currentQuestion, allQuestions, allAttempts, request.getAnswerText());
@@ -90,31 +94,30 @@ public class AnswerSubmitService {
                     )
             );
             try {
-                evalCallResult = aiClient.callEvaluationDecision(evalInput);
-                evalOutput = evalCallResult.getOutput();
+                AiCallResult<EvaluationDecisionOutput> evalCallResult = aiClient.callEvaluationDecision(evalInput);
+                resolution = resolveDecision(session, currentQuestion, evalInput, evalCallResult);
             } catch (Exception e) {
                 log.error("评估决策 AI 调用失败, sessionId={}, attemptId={}", sessionId, request.getAttemptId(), e);
                 throw new RuntimeException("评估决策服务暂时不可用", e);
             }
         }
-
-        EvaluationDecisionOutput normalized = normalizeEvaluationOutput(currentQuestion, evalOutput);
         interviewDebugTraceService.recordQuestionStage(
                 sessionId,
                 currentQuestion.getId(),
                 request.getAttemptId(),
                 "evaluationOutput",
-                buildEvaluationDebugPayload(evalCallResult, normalized),
+                buildEvaluationDebugPayload(resolution),
                 Map.of(
-                        "action", normalized.getInterviewAction(),
-                        "nextQuestionType", normalized.getNextQuestionType(),
-                        "nextFocus", firstNonBlank(normalized.getNextFocus(), "")
+                        "action", resolution.getEffectivePlan().getInterviewAction(),
+                        "targetQuestionType", firstNonBlank(resolution.getEffectivePlan().getTargetQuestionType(), ""),
+                        "nextFocus", firstNonBlank(resolution.getEffectivePlan().getNextFocus(), ""),
+                        "source", resolution.getEffectivePlan().getEffectiveDecisionSource()
                 )
         );
         AnswerSubmitPersistenceService.PersistedAttemptResult persisted =
-                answerSubmitPersistenceService.persist(sessionId, currentQuestion, request, normalized);
+                answerSubmitPersistenceService.persist(sessionId, currentQuestion, request, resolution);
 
-        if ("WRAPUP".equalsIgnoreCase(normalized.getInterviewAction())) {
+        if ("WRAPUP".equalsIgnoreCase(resolution.getEffectivePlan().getInterviewAction())) {
             reportGenerationService.generateAsync(sessionId);
             InterviewSession endSession = interviewSessionMapper.selectById(sessionId);
             return SubmitAttemptResponse.builder()
@@ -139,18 +142,25 @@ public class AnswerSubmitService {
                                                          List<InterviewQuestion> allQuestions,
                                                          List<InterviewAttempt> allAttempts,
                                                          String answerText) {
+        List<EvaluationDecisionInput.ProjectAndInternshipItem> projectSummary = buildProjectAndInternshipSummary(session);
+        List<EvaluationDecisionInput.RemainingTargetDomain> remainingTargetDomains = remainingDomainMenuBuilder.build(session);
+        Map<String, Object> quotaState = QuotaStateSupport.ensureQuotaState(session.getStateLedgerJson(), allQuestions);
         return EvaluationDecisionInput.builder()
                 .interviewId(session.getId())
                 .currentQuestionId(currentQuestion.getId())
                 .interview(buildInterviewMeta(session))
-                .projectAndInternshipSummary(buildProjectAndInternshipSummary(session))
-                .interviewGoalSummary(buildInterviewGoalSummary(session))
+                .projectAndInternshipSummary(projectSummary)
+                .remainingTargetDomains(remainingTargetDomains)
                 .coveredKnowledgeSummary(buildCoveredKnowledgeSummary(session))
-                .quotaSummary(buildQuotaSummary(session, allQuestions))
+                .availableStrategies(availableStrategyAssembler.assemble(
+                        currentQuestion != null ? currentQuestion.getQuestionType() : "",
+                        !projectSummary.isEmpty(),
+                        remainingTargetDomains,
+                        quotaState
+                ))
                 .currentQuestion(buildCurrentQuestionContext(session, currentQuestion))
                 .answerText(answerText)
                 .expectedPoints(safeStringList(currentQuestion.getExpectedPoints()))
-                .possibleFutureDirections(buildPossibleFutureDirections(session))
                 .retrievedMaterials(List.of())
                 .recentInterviewMemory(buildRecentInterviewMemory(session, allQuestions, allAttempts))
                 .build();
@@ -188,62 +198,10 @@ public class AnswerSubmitService {
         return result;
     }
 
-    @SuppressWarnings("unchecked")
-    private EvaluationDecisionInput.InterviewGoalSummary buildInterviewGoalSummary(InterviewSession session) {
-        List<EvaluationDecisionInput.GoalDomainItem> domains = new ArrayList<>();
-        Map<String, String> statusByCode = extractDomainStatusMap(session.getStateLedgerJson());
-        Object raw = session.getSyllabusJson() != null ? session.getSyllabusJson().get("domains") : null;
-        if (raw instanceof List<?> domainList) {
-            for (Object domainObj : domainList) {
-                if (!(domainObj instanceof Map<?, ?> domain)) {
-                    continue;
-                }
-                String domainCode = asString(domain.get("domainCode"));
-                String internalStatus = statusByCode.getOrDefault(domainCode, "UNASKED");
-                String promptStatus = "COVERED".equalsIgnoreCase(internalStatus) ? "COVERED" : "UNASKED";
-                domains.add(EvaluationDecisionInput.GoalDomainItem.builder()
-                        .domainId(toLong(domain.get("domainId")))
-                        .domainCode(domainCode)
-                        .domainName(asString(domain.get("domainName")))
-                        .focusPoints(toStringList(domain.get("focusPoints")))
-                        .status(promptStatus)
-                        .build());
-            }
-        }
-        return EvaluationDecisionInput.InterviewGoalSummary.builder()
-                .domains(domains)
-                .build();
-    }
-
     private List<String> buildCoveredKnowledgeSummary(InterviewSession session) {
         return toStringList(session.getStateLedgerJson() != null
                 ? session.getStateLedgerJson().get("covered_points")
                 : null);
-    }
-
-    private EvaluationDecisionInput.QuotaSummary buildQuotaSummary(InterviewSession session,
-                                                                   List<InterviewQuestion> allQuestions) {
-        Map<String, Object> quotaState = QuotaStateSupport.ensureQuotaState(
-                session.getStateLedgerJson(),
-                allQuestions
-        );
-        return EvaluationDecisionInput.QuotaSummary.builder()
-                .samePointContinue(limitCounter(quotaState.get(QuotaStateSupport.SAME_POINT_CONTINUE)))
-                .sameDomainContinue(limitCounter(quotaState.get(QuotaStateSupport.SAME_DOMAIN_CONTINUE)))
-                .sameProjectPointContinue(limitCounter(quotaState.get(QuotaStateSupport.SAME_PROJECT_POINT_CONTINUE)))
-                .sameProjectContinue(limitCounter(quotaState.get(QuotaStateSupport.SAME_PROJECT_CONTINUE)))
-                .principleTotal(limitCounter(quotaState.get(QuotaStateSupport.PRINCIPLE_TOTAL)))
-                .projectTotal(limitCounter(quotaState.get(QuotaStateSupport.PROJECT_TOTAL)))
-                .scenarioTotal(limitCounter(quotaState.get(QuotaStateSupport.SCENARIO_TOTAL)))
-                .behavioralTotal(limitCounter(quotaState.get(QuotaStateSupport.BEHAVIORAL_TOTAL)))
-                .build();
-    }
-
-    private EvaluationDecisionInput.LimitCounter limitCounter(Object count) {
-        return EvaluationDecisionInput.LimitCounter.builder()
-                .count(QuotaStateSupport.toInt(count))
-                .maxCount(MAX_QUOTA_COUNT)
-                .build();
     }
 
     private EvaluationDecisionInput.CurrentQuestionContext buildCurrentQuestionContext(InterviewSession session,
@@ -255,24 +213,13 @@ public class AnswerSubmitService {
                 .stem(currentQuestion.getStem())
                 .questionType(currentQuestion.getQuestionType())
                 .domainId(currentQuestion.getDomainId())
+                .domainCode(resolveDomainCode(currentQuestion))
                 .domainName(resolveDomainName(currentQuestion, session))
                 .currentFocus(resolvePromptFocusPoint(currentQuestion))
                 .relatedItemKey(firstNonBlank(asString(ctx.get("activeItemKey")), asString(session.getStateLedgerJson() != null ? session.getStateLedgerJson().get("active_item_key") : null)))
                 .relatedItemType(firstNonBlank(asString(ctx.get("activeItemType")), asString(session.getStateLedgerJson() != null ? session.getStateLedgerJson().get("active_item_type") : null)))
                 .relatedItemName(firstNonBlank(asString(ctx.get("activeItemName")), asString(session.getStateLedgerJson() != null ? session.getStateLedgerJson().get("active_item_name") : null)))
                 .build();
-    }
-
-    private List<String> buildPossibleFutureDirections(InterviewSession session) {
-        List<String> directions = new ArrayList<>();
-        directions.add("PRINCIPLE: 平移到同知识域的另一个可判分知识点");
-        directions.add("PRINCIPLE: 切到尚未覆盖的知识域");
-        if (!buildProjectAndInternshipSummary(session).isEmpty()) {
-            directions.add("PROJECT_DEEP_DIVE: 回到真实项目中的一个具体实现细节");
-        }
-        directions.add("SCENARIO: 基于当前技术点给一个真实线上场景");
-        directions.add("BEHAVIORAL: 追问真实协作事件和复盘");
-        return directions;
     }
 
     private List<EvaluationDecisionInput.RecentInterviewMemoryItem> buildRecentInterviewMemory(
@@ -289,6 +236,13 @@ public class AnswerSubmitService {
                     InterviewAttempt attempt = latestFinalAttempts.get(question.getId());
                     Map<String, Object> evaluationJson = attempt.getEvaluationJson() != null ? attempt.getEvaluationJson() : Map.of();
                     Map<String, Object> ctx = question.getGenerationContextJson() != null ? question.getGenerationContextJson() : Map.of();
+                    String answerAssessment = "";
+                    if (!"SYSTEM_FALLBACK".equalsIgnoreCase(asString(evaluationJson.get("effectiveDecisionSource")))) {
+                        answerAssessment = firstNonBlank(
+                                asString(evaluationJson.get("decisionReason")),
+                                extractPlanDecisionReason(evaluationJson)
+                        );
+                    }
                     return EvaluationDecisionInput.RecentInterviewMemoryItem.builder()
                             .questionNo(question.getQuestionNo())
                             .questionType(question.getQuestionType())
@@ -300,7 +254,7 @@ public class AnswerSubmitService {
                             .relatedItemName(asString(ctx.get("activeItemName")))
                             .questionStem(question.getStem())
                             .answerSummary(summarizeAnswer(attempt.getAnswerText()))
-                            .answerAssessment(asString(evaluationJson.get("answerAssessment")))
+                            .answerAssessment(answerAssessment)
                             .build();
                 })
                 .toList();
@@ -323,82 +277,103 @@ public class AnswerSubmitService {
         return comparator.compare(left, right);
     }
 
-    private EvaluationDecisionOutput buildForcedEndDecision() {
-        return EvaluationDecisionOutput.builder()
+    private DecisionResolution buildForcedEndResolution() {
+        DecisionExecutionPlan plan = DecisionExecutionPlan.builder()
                 .interviewAction("WRAPUP")
-                .answerSummary("")
-                .answerAssessment("已达到最大题目数限制")
+                .strategyCode(StrategyCode.S_WRAPUP.code())
+                .targetQuestionType("")
+                .nextFocus("")
+                .targetDomainCode("")
+                .targetDomainName("")
+                .newCoveredDomains(List.of())
+                .newCoveredPoints(List.of())
+                .retrievalPlans(List.of())
                 .decisionReason("已达到当前会话允许的最大题量，结束本场面试。")
-                .candidateStrategies(List.of("结束面试"))
-                .finalDecision("结束面试")
-                .nextEntryAction("")
-                .nextQuestionType("")
-                .nextFocus("")
-                .expectedAnswerPoints(List.of())
-                .newCoveredDomains(List.of())
-                .newCoveredPoints(List.of())
-                .retrievalPlans(List.of())
+                .effectiveDecisionSource(DecisionExecutionPlan.EffectiveDecisionSource.RAW_AI)
+                .terminationSource(DecisionExecutionPlan.TerminationSource.MAX_QUESTIONS)
+                .terminationReason(DecisionExecutionPlan.TerminationReason.MAX_QUESTIONS)
+                .build();
+        return DecisionResolution.builder()
+                .repairAttempts(0)
+                .effectivePlan(plan)
+                .effectiveOutput(toEffectiveOutput(plan))
+                .validationAudit(Map.of("status", "forced_wrapup"))
                 .build();
     }
 
-    private EvaluationDecisionOutput buildContractFallbackDecision(String answerAssessment, String decisionReason) {
-        return EvaluationDecisionOutput.builder()
-                .interviewAction("WRAPUP")
-                .answerSummary("")
-                .answerAssessment(answerAssessment)
-                .decisionReason(decisionReason)
-                .candidateStrategies(List.of("结束面试"))
-                .finalDecision("结束面试")
-                .nextEntryAction("")
-                .nextQuestionType("")
-                .nextFocus("")
-                .expectedAnswerPoints(List.of())
-                .newCoveredDomains(List.of())
-                .newCoveredPoints(List.of())
-                .retrievalPlans(List.of())
-                .build();
-    }
+    private DecisionResolution resolveDecision(InterviewSession session,
+                                               InterviewQuestion currentQuestion,
+                                               EvaluationDecisionInput evalInput,
+                                               AiCallResult<EvaluationDecisionOutput> evalCallResult) {
+        EvaluationDecisionOutput rawOutput = extractRawOutput(evalCallResult);
+        DecisionValidationResult initialValidation = decisionExecutionPlanBuilder.build(
+                currentQuestion,
+                rawOutput,
+                evalInput.getRemainingTargetDomains(),
+                extractStrategyCodes(evalInput),
+                DecisionExecutionPlan.EffectiveDecisionSource.RAW_AI
+        );
+        if (initialValidation.isValid()) {
+            return DecisionResolution.builder()
+                    .evalInput(evalInput)
+                    .rawOutput(rawOutput)
+                    .rawResponse(evalCallResult != null ? evalCallResult.getRawResponse() : null)
+                    .validationErrors(List.of())
+                    .repairAttempts(0)
+                    .effectivePlan(initialValidation.getPlan())
+                    .effectiveOutput(toEffectiveOutput(initialValidation.getPlan()))
+                    .validationAudit(Map.of("status", "valid"))
+                    .build();
+        }
 
-    private EvaluationDecisionOutput normalizeEvaluationOutput(InterviewQuestion currentQuestion,
-                                                               EvaluationDecisionOutput output) {
-        if (output == null) {
-            return buildContractFallbackDecision("AI 评估决策解析失败，已降级为结束面试。", "");
+        DecisionRepairOrchestrator.RepairResult repairResult = decisionRepairOrchestrator.repair(
+                evalInput,
+                currentQuestion,
+                initialValidation.getErrorCodes(),
+                evalCallResult != null ? evalCallResult.getRawResponse() : null
+        );
+        if (repairResult.success()) {
+            return DecisionResolution.builder()
+                    .evalInput(evalInput)
+                    .rawOutput(rawOutput)
+                    .rawResponse(evalCallResult != null ? evalCallResult.getRawResponse() : null)
+                    .validationErrors(initialValidation.getErrorCodes())
+                    .repairInput(repairResult.repairInput())
+                    .repairedOutput(repairResult.repairedOutput())
+                    .repairAttempts(1)
+                    .effectivePlan(repairResult.plan())
+                    .effectiveOutput(toEffectiveOutput(repairResult.plan()))
+                    .validationAudit(Map.of(
+                            "status", "repaired",
+                            "errors", initialValidation.getErrorCodes()
+                    ))
+                    .build();
         }
-        if (output.getInterviewAction() == null || output.getInterviewAction().isBlank()) {
-            output.setInterviewAction("WRAPUP");
-        }
-        output.setInterviewAction(output.getInterviewAction().trim().toUpperCase(Locale.ROOT));
-        if (output.getCandidateStrategies() == null) {
-            output.setCandidateStrategies(List.of());
-        }
-        if (output.getNextEntryAction() == null) {
-            output.setNextEntryAction("");
-        } else {
-            output.setNextEntryAction(output.getNextEntryAction().trim());
-        }
-        if (output.getExpectedAnswerPoints() == null) {
-            output.setExpectedAnswerPoints(List.of());
-        }
-        if (output.getNewCoveredDomains() == null) {
-            output.setNewCoveredDomains(List.of());
-        }
-        if (output.getNewCoveredPoints() == null) {
-            output.setNewCoveredPoints(List.of());
-        }
-        if (output.getRetrievalPlans() == null) {
-            output.setRetrievalPlans(List.of());
-        }
-        if ("CONTINUE".equalsIgnoreCase(output.getInterviewAction())
-                && !EvaluationDecisionActionCatalog.isValidContinueDecision(
-                currentQuestion != null ? currentQuestion.getQuestionType() : "",
-                output.getFinalDecision(),
-                output.getNextQuestionType())) {
-            log.warn("评估决策动作与当前题型不匹配，但保留 CONTINUE 继续链路, questionType={}, finalDecision={}, nextQuestionType={}",
-                    currentQuestion != null ? currentQuestion.getQuestionType() : "",
-                    output.getFinalDecision(),
-                    output.getNextQuestionType());
-        }
-        return output;
+
+        Map<String, Object> fallbackState = DecisionFallbackStateSupport.ensureState(session.getStateLedgerJson());
+        int rotationIndex = DecisionFallbackStateSupport.toInt(fallbackState.get(DecisionFallbackStateSupport.ROTATION_INDEX));
+        Map<String, Object> previewState = DecisionFallbackStateSupport.previewAfterFallback(session.getStateLedgerJson());
+        DecisionExecutionPlan fallbackPlan = DecisionFallbackStateSupport.shouldTerminateAfterFallback(previewState)
+                ? systemFallbackPlanBuilder.buildSystemErrorPlan(session.getId(), currentQuestion, rotationIndex)
+                : systemFallbackPlanBuilder.buildContinuePlan(session.getId(), currentQuestion, rotationIndex);
+
+        return DecisionResolution.builder()
+                .evalInput(evalInput)
+                .rawOutput(rawOutput)
+                .rawResponse(evalCallResult != null ? evalCallResult.getRawResponse() : null)
+                .validationErrors(initialValidation.getErrorCodes())
+                .repairInput(repairResult.repairInput())
+                .repairedOutput(repairResult.repairedOutput())
+                .repairErrors(repairResult.errorCodes())
+                .repairAttempts(1)
+                .effectivePlan(fallbackPlan)
+                .effectiveOutput(toEffectiveOutput(fallbackPlan))
+                .validationAudit(Map.of(
+                        "status", "fallback_continue",
+                        "errors", initialValidation.getErrorCodes(),
+                        "repairErrors", repairResult.errorCodes()
+                ))
+                .build();
     }
 
     private SubmitAttemptResponse buildIdempotentResponse(InterviewAttempt existing) {
@@ -413,23 +388,18 @@ public class AnswerSubmitService {
                 .build();
     }
 
-    private Map<String, Object> buildEvaluationDebugPayload(AiCallResult<EvaluationDecisionOutput> result,
-                                                            EvaluationDecisionOutput parsedOutput) {
+    private Map<String, Object> buildEvaluationDebugPayload(DecisionResolution resolution) {
         Map<String, Object> payload = new LinkedHashMap<>();
-        if (result != null) {
-            payload.put("promptCode", result.getPromptCode());
-            payload.put("promptVersion", result.getPromptVersion());
-            payload.put("promptTokens", result.getPromptTokens());
-            payload.put("responseTokens", result.getResponseTokens());
-            payload.put("totalTokens", result.getPromptTokens() + result.getResponseTokens());
-            payload.put("latencyMs", result.getLatencyMs());
-            payload.put("systemPrompt", result.getSystemPrompt());
-            payload.put("userPrompt", result.getUserPrompt());
-            payload.put("rawResponse", result.getRawResponse());
-        } else {
-            payload.put("source", "forced");
+        if (resolution == null) {
+            return payload;
         }
-        payload.put("parsedOutput", parsedOutput);
+        payload.put("rawAiOutput", resolution.getRawOutput());
+        payload.put("rawResponse", resolution.getRawResponse());
+        payload.put("decisionValidation", resolution.getValidationAudit());
+        payload.put("repairAttempts", resolution.getRepairAttempts());
+        payload.put("repairInput", resolution.getRepairInput());
+        payload.put("repairOutput", resolution.getRepairedOutput());
+        payload.put("effectiveDecisionPlan", resolution.getEffectivePlan());
         return payload;
     }
 
@@ -465,25 +435,6 @@ public class AnswerSubmitService {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, String> extractDomainStatusMap(Map<String, Object> stateLedgerJson) {
-        Map<String, String> result = new LinkedHashMap<>();
-        if (stateLedgerJson == null) {
-            return result;
-        }
-        Object raw = stateLedgerJson.get("domain_states");
-        if (!(raw instanceof List<?> states)) {
-            return result;
-        }
-        for (Object stateObj : states) {
-            if (!(stateObj instanceof Map<?, ?> state)) {
-                continue;
-            }
-            result.put(asString(state.get("domainCode")), asString(state.get("status")));
-        }
-        return result;
-    }
-
     private String summarizeAnswer(String answerText) {
         if (answerText == null || answerText.isBlank() || "[skip]".equals(answerText)) {
             return "";
@@ -502,10 +453,10 @@ public class AnswerSubmitService {
 
     @SuppressWarnings("unchecked")
     private String resolveDomainName(InterviewQuestion question, InterviewSession session) {
-        if (question.getDomainId() == null) {
+        String domainCode = resolveDomainCode(question);
+        if (domainCode.isBlank() && question.getDomainId() == null) {
             return "";
         }
-        String domainCode = resolveDomainCode(question);
         if (session.getSyllabusJson() != null) {
             Object raw = session.getSyllabusJson().get("domains");
             if (raw instanceof List<?> domains) {
@@ -538,6 +489,56 @@ public class AnswerSubmitService {
 
     private List<String> safeStringList(List<String> values) {
         return values == null ? List.of() : values;
+    }
+
+    private List<String> extractStrategyCodes(EvaluationDecisionInput input) {
+        if (input == null || input.getAvailableStrategies() == null) {
+            return List.of();
+        }
+        return input.getAvailableStrategies().stream()
+                .map(EvaluationDecisionInput.AvailableStrategy::getStrategyCode)
+                .filter(code -> code != null && !code.isBlank())
+                .toList();
+    }
+
+    private EvaluationDecisionOutput extractRawOutput(AiCallResult<EvaluationDecisionOutput> callResult) {
+        if (callResult == null) {
+            return null;
+        }
+        String rawResponse = callResult.getRawResponse();
+        if (rawResponse != null && !rawResponse.isBlank()) {
+            try {
+                return new ObjectMapper().readValue(rawResponse, EvaluationDecisionOutput.class);
+            } catch (Exception ignored) {
+                // fall through to validated output
+            }
+        }
+        return callResult.getOutput();
+    }
+
+    private String extractPlanDecisionReason(Map<String, Object> evaluationJson) {
+        if (evaluationJson == null) {
+            return "";
+        }
+        Object rawPlan = evaluationJson.get("effectiveDecisionPlan");
+        if (!(rawPlan instanceof Map<?, ?> plan)) {
+            return "";
+        }
+        Object decisionReason = plan.get("decisionReason");
+        return decisionReason == null ? "" : String.valueOf(decisionReason);
+    }
+
+    private EvaluationDecisionOutput toEffectiveOutput(DecisionExecutionPlan plan) {
+        return EvaluationDecisionOutput.builder()
+                .interviewAction(plan.getInterviewAction())
+                .decisionReason(firstNonBlank(plan.getDecisionReason(), ""))
+                .finalDecision(firstNonBlank(plan.getStrategyCode(), ""))
+                .nextFocus(firstNonBlank(plan.getNextFocus(), ""))
+                .targetDomainCode(firstNonBlank(plan.getTargetDomainCode(), ""))
+                .newCoveredDomains(plan.getNewCoveredDomains() == null ? List.of() : plan.getNewCoveredDomains())
+                .newCoveredPoints(plan.getNewCoveredPoints() == null ? List.of() : plan.getNewCoveredPoints())
+                .retrievalPlans(plan.getRetrievalPlans() == null ? List.of() : plan.getRetrievalPlans())
+                .build();
     }
 
     private List<String> toStringList(Object value) {

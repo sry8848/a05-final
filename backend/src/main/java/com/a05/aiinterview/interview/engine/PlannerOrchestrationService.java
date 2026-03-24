@@ -141,6 +141,7 @@ public class PlannerOrchestrationService {
 
             // 7. 生成第一道题目
             InterviewQuestion firstQuestion = firstQuestionGenerationService.generateAndSave(session, plannerOutput);
+            ledger.put("asked_total", 1);
 
             Map<String, Object> firstQuestionSnapshot = buildFirstQuestionSnapshot(firstQuestion, domains);
 

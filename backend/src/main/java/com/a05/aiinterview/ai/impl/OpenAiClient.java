@@ -593,15 +593,18 @@ public class OpenAiClient implements AiClient {
         variables.put("experienceLevel", safeString(interview != null ? interview.getExperienceLevel() : null));
         variables.put("roundType", safeString(interview != null ? interview.getRoundType() : null));
         variables.put("projectAndInternshipSummary", stringifyAsJson(input.getProjectAndInternshipSummary()));
-        variables.put("interviewGoalSummary", stringifyAsJson(input.getInterviewGoalSummary()));
+        variables.put("remainingTargetDomains", formatRemainingTargetDomains(input.getRemainingTargetDomains()));
         variables.put("coveredKnowledgeSummary", stringifyAsJson(input.getCoveredKnowledgeSummary()));
-        variables.put("quotaSummary", stringifyAsJson(input.getQuotaSummary()));
+        variables.put("availableStrategies", formatAvailableStrategies(input.getAvailableStrategies()));
         variables.put("currentQuestion", stringifyAsJson(input.getCurrentQuestion()));
         variables.put("answerText", safeString(input.getAnswerText()));
         variables.put("expectedPoints", stringifyAsJson(input.getExpectedPoints()));
-        variables.put("possibleFutureDirections", stringifyAsJson(input.getPossibleFutureDirections()));
         variables.put("retrievedMaterials", stringifyAsJson(input.getRetrievedMaterials()));
         variables.put("recentInterviewMemory", stringifyAsJson(input.getRecentInterviewMemory()));
+        variables.put("repairMode", Boolean.TRUE.equals(input.getRepairMode()) ? "true" : "false");
+        variables.put("repairAttemptNo", input.getRepairAttemptNo() == null ? "" : String.valueOf(input.getRepairAttemptNo()));
+        variables.put("rawDecisionOutput", safeString(input.getRawDecisionOutput()));
+        variables.put("validationErrors", stringifyAsJson(input.getValidationErrors()));
         variables.put("outputSchema", safeString(outputSchema));
         return variables;
     }
@@ -848,6 +851,60 @@ public class OpenAiClient implements AiClient {
             sb.append("- ").append(line);
         }
         return sb.isEmpty() ? "- 无" : sb.toString();
+    }
+
+    private String formatAvailableStrategies(List<EvaluationDecisionInput.AvailableStrategy> strategies) {
+        if (strategies == null || strategies.isEmpty()) {
+            return "1. 结束面试（StrategyCode: S_WRAPUP）：\n- 意图：结束本场面试。\n- 适用条件：\n  当前已形成足够能力画像或已无继续追问价值。";
+        }
+        StringBuilder sb = new StringBuilder();
+        int index = 1;
+        for (EvaluationDecisionInput.AvailableStrategy strategy : strategies) {
+            if (strategy == null || strategy.getStrategyCode() == null || strategy.getStrategyCode().isBlank()) {
+                continue;
+            }
+            if (!sb.isEmpty()) {
+                sb.append("\n");
+            }
+            sb.append(index++).append(". ")
+                    .append(safeString(strategy.getLabel()))
+                    .append("（StrategyCode: ").append(safeString(strategy.getStrategyCode())).append("）：\n")
+                    .append("- 意图：").append(safeString(strategy.getDescription())).append("\n")
+                    .append("- 适用条件：\n  ").append(safeString(strategy.getApplicableWhen()));
+        }
+        return sb.isEmpty()
+                ? "1. 结束面试（StrategyCode: S_WRAPUP）：\n- 意图：结束本场面试。\n- 适用条件：\n  当前已形成足够能力画像或已无继续追问价值。"
+                : sb.toString();
+    }
+
+    private String formatRemainingTargetDomains(List<EvaluationDecisionInput.RemainingTargetDomain> domains) {
+        if (domains == null || domains.isEmpty()) {
+            return "- 无剩余待考察理论域";
+        }
+        StringBuilder sb = new StringBuilder();
+        int index = 1;
+        for (EvaluationDecisionInput.RemainingTargetDomain domain : domains) {
+            if (domain == null || domain.getDomainCode() == null || domain.getDomainCode().isBlank()) {
+                continue;
+            }
+            if (!sb.isEmpty()) {
+                sb.append("\n");
+            }
+            sb.append(index++).append(". ")
+                    .append(safeString(domain.getDomainName()))
+                    .append("（domainCode: ").append(safeString(domain.getDomainCode())).append("）\n")
+                    .append("- 关联知识点：");
+            List<String> focusPoints = domain.getFocusPoints();
+            if (focusPoints == null || focusPoints.isEmpty()) {
+                sb.append("无");
+            } else {
+                sb.append(String.join("、", focusPoints.stream()
+                        .filter(item -> item != null && !item.isBlank())
+                        .map(String::trim)
+                        .toList()));
+            }
+        }
+        return sb.isEmpty() ? "- 无剩余待考察理论域" : sb.toString();
     }
 
     private String buildCandidateContext(IntroRewriteInput input) {

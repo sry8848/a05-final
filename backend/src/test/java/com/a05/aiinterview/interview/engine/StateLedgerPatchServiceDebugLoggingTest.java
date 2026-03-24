@@ -1,6 +1,5 @@
 package com.a05.aiinterview.interview.engine;
 
-import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
@@ -84,9 +83,9 @@ class StateLedgerPatchServiceDebugLoggingTest {
                 mock(InterviewDebugTraceService.class)
         );
 
-        EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
+        DecisionExecutionPlan output = DecisionExecutionPlan.builder()
                 .interviewAction("WRAPUP")
-                .nextQuestionType("")
+                .targetQuestionType("")
                 .nextFocus("")
                 .build();
 
