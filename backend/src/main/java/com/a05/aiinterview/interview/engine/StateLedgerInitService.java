@@ -39,7 +39,7 @@ public class StateLedgerInitService {
      * @param allDomains    该岗位全部知识域实体（用于补全未在考纲中出现的域）
      * @return 初始化完成的状态账本 Map（待写入 state_ledger_json）
      */
-    public Map<String, Object> initLedger(Long sessionId, InterviewSyllabus syllabus,
+    public Map<String, Object> initLedger(Long sessionId, String experienceLevel, InterviewSyllabus syllabus,
                                           List<PositionSkillDomain> allDomains) {
         log.info("初始化状态账本, sessionId={}, 考纲知识域数={}", sessionId,
                 syllabus.getDomains() != null ? syllabus.getDomains().size() : 0);
@@ -71,14 +71,14 @@ public class StateLedgerInitService {
         log.info("session_skill_states 批量创建完成, sessionId={}, 共 {} 条", sessionId, states.size());
 
         // 构建状态账本 JSON
-        return buildLedger(sessionId, syllabus);
+        return buildLedger(sessionId, experienceLevel, syllabus);
     }
 
     /**
      * 构建初始状态账本 JSON。
      * 格式对齐 面试流程策略.md §4。
      */
-    private Map<String, Object> buildLedger(Long sessionId, InterviewSyllabus syllabus) {
+    private Map<String, Object> buildLedger(Long sessionId, String experienceLevel, InterviewSyllabus syllabus) {
         Map<String, Object> ledger = new LinkedHashMap<>();
         ledger.put("session_id", sessionId.toString());
         ledger.put("overall_status", DomainStatus.IN_PROGRESS.getValue());
@@ -90,6 +90,7 @@ public class StateLedgerInitService {
         ledger.put("covered_domains", new ArrayList<>());
         ledger.put("covered_points", new ArrayList<>());
         ledger.put("recent_question_families", new ArrayList<>());
+        ledger.put(InterviewPacingSupport.MAX_QUESTIONS_KEY, InterviewPacingSupport.maxQuestions(experienceLevel));
         ledger.put(QuotaStateSupport.LEDGER_KEY, QuotaStateSupport.initialQuotaState());
 
         List<Map<String, Object>> domainStates = new ArrayList<>();

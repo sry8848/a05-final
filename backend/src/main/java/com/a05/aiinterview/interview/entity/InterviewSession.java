@@ -2,6 +2,7 @@ package com.a05.aiinterview.interview.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
 import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
+import com.a05.aiinterview.common.enums.ExperienceLevel;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -95,4 +96,8 @@ public class InterviewSession {
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    public void setExperienceLevel(String experienceLevel) {
+        this.experienceLevel = ExperienceLevel.normalizeStoredValue(experienceLevel);
+    }
 }

@@ -137,7 +137,12 @@ public class PlannerOrchestrationService {
             interviewSessionMapper.updateById(syllabusUpdate);
 
             // 6. 初始化状态账本 session_skill_states
-            Map<String, Object> ledger = stateLedgerInitService.initLedger(sessionId, syllabus, domains);
+            Map<String, Object> ledger = stateLedgerInitService.initLedger(
+                    sessionId,
+                    session.getExperienceLevel(),
+                    syllabus,
+                    domains
+            );
 
             // 7. 生成第一道题目
             InterviewQuestion firstQuestion = firstQuestionGenerationService.generateAndSave(session, plannerOutput);

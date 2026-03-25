@@ -7,6 +7,7 @@ import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
 import com.a05.aiinterview.interview.dto.InterviewSyllabus;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
+import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.a05.aiinterview.position.entity.PositionSkillDomain;
 import com.a05.aiinterview.position.service.PositionService;
@@ -40,6 +41,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
         AiClient aiClient = mock(AiClient.class);
         StateLedgerInitService ledgerInitService = mock(StateLedgerInitService.class);
         FirstQuestionGenerationService firstQuestionGenerationService = mock(FirstQuestionGenerationService.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
 
         InterviewSession session = buildSession();
         PositionSkillDomain domain = buildDomain();
@@ -53,7 +55,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
         when(aiClient.callPlanner(any())).thenReturn(AiCallResult.<PlannerOutput>builder()
                 .output(plannerOutput)
                 .build());
-        when(ledgerInitService.initLedger(eq(8L), any(InterviewSyllabus.class), eq(List.of(domain)))).thenReturn(ledger);
+        when(ledgerInitService.initLedger(eq(8L), eq("FRESH_GRAD"), any(InterviewSyllabus.class), eq(List.of(domain)))).thenReturn(ledger);
         when(firstQuestionGenerationService.generateAndSave(any(InterviewSession.class), any())).thenReturn(firstQuestion);
         when(sessionMapper.updateById(any(InterviewSession.class))).thenReturn(1);
 
@@ -64,7 +66,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
                 aiClient,
                 ledgerInitService,
                 firstQuestionGenerationService,
-                new PlannerHistoryBuilderService(sessionMapper),
+                new PlannerHistoryBuilderService(sessionMapper, questionMapper),
                 new PlannerDomainNormalizationService(),
                 new PlannerHistoryDedupService(),
                 new InterviewSyllabusAssembler(),
@@ -103,6 +105,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
         AiClient aiClient = mock(AiClient.class);
         StateLedgerInitService ledgerInitService = mock(StateLedgerInitService.class);
         FirstQuestionGenerationService firstQuestionGenerationService = mock(FirstQuestionGenerationService.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
 
         InterviewSession session = buildSession();
         List<PositionSkillDomain> domains = List.of(
@@ -129,7 +132,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
         when(aiClient.callPlanner(any())).thenReturn(AiCallResult.<PlannerOutput>builder()
                 .output(plannerOutput)
                 .build());
-        when(ledgerInitService.initLedger(eq(8L), any(InterviewSyllabus.class), eq(domains))).thenReturn(ledger);
+        when(ledgerInitService.initLedger(eq(8L), eq("FRESH_GRAD"), any(InterviewSyllabus.class), eq(domains))).thenReturn(ledger);
         when(firstQuestionGenerationService.generateAndSave(any(InterviewSession.class), any())).thenReturn(firstQuestion);
         when(sessionMapper.updateById(any(InterviewSession.class))).thenReturn(1);
 
@@ -140,7 +143,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
                 aiClient,
                 ledgerInitService,
                 firstQuestionGenerationService,
-                new PlannerHistoryBuilderService(sessionMapper),
+                new PlannerHistoryBuilderService(sessionMapper, questionMapper),
                 new PlannerDomainNormalizationService(),
                 new PlannerHistoryDedupService(),
                 new InterviewSyllabusAssembler(),
@@ -150,7 +153,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
 
         service.runAsync(8L);
 
-        verify(ledgerInitService).initLedger(eq(8L), argThat(syllabus ->
+        verify(ledgerInitService).initLedger(eq(8L), eq("FRESH_GRAD"), argThat(syllabus ->
                 syllabus != null
                         && syllabus.getDomains() != null
                         && syllabus.getDomains().size() == 5
@@ -176,6 +179,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
         AiClient aiClient = mock(AiClient.class);
         StateLedgerInitService ledgerInitService = mock(StateLedgerInitService.class);
         FirstQuestionGenerationService firstQuestionGenerationService = mock(FirstQuestionGenerationService.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
 
         InterviewSession session = buildSession();
         PositionSkillDomain domain = buildDomain();
@@ -211,7 +215,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
         ))).thenReturn(AiCallResult.<PlannerOutput>builder()
                 .output(plannerOutput)
                 .build());
-        when(ledgerInitService.initLedger(eq(8L), any(InterviewSyllabus.class), eq(List.of(domain)))).thenReturn(ledger);
+        when(ledgerInitService.initLedger(eq(8L), eq("FRESH_GRAD"), any(InterviewSyllabus.class), eq(List.of(domain)))).thenReturn(ledger);
         when(firstQuestionGenerationService.generateAndSave(any(InterviewSession.class), any())).thenReturn(firstQuestion);
         when(sessionMapper.updateById(any(InterviewSession.class))).thenReturn(1);
 
@@ -222,7 +226,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
                 aiClient,
                 ledgerInitService,
                 firstQuestionGenerationService,
-                new PlannerHistoryBuilderService(sessionMapper),
+                new PlannerHistoryBuilderService(sessionMapper, questionMapper),
                 new PlannerDomainNormalizationService(),
                 new PlannerHistoryDedupService(),
                 new InterviewSyllabusAssembler(),

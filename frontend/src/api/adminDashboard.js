@@ -1,6 +1,5 @@
 import { ADMIN_TOKEN_KEY } from '../utils/authSession.js'
-
-const BASE = '/api/v1'
+import { buildApiUrl } from './base.js'
 
 function createRequestError(message, status) {
   const error = new Error(message || '请求失败')
@@ -18,7 +17,7 @@ async function request(path, options = {}) {
     throw createRequestError('管理员登录已失效', 401)
   }
 
-  const response = await fetch(`${BASE}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     method: 'GET',
     cache: options.cache,
     headers: {
@@ -44,7 +43,7 @@ async function request(path, options = {}) {
 }
 
 async function requestPublic(path, options = {}) {
-  const response = await fetch(`${BASE}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     method: 'GET',
     cache: options.cache
   })

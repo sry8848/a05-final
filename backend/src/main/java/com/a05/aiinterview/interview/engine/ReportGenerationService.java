@@ -12,6 +12,7 @@ import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.a05.aiinterview.interview.service.InterviewSessionStatusService;
+import com.a05.aiinterview.interview.service.support.InterviewOverallScoreSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -209,24 +210,13 @@ public class ReportGenerationService {
                     })
                     .collect(Collectors.toList());
         }
-        Map<String, Object> radarScoreMap = null;
-        if (output.getComprehensiveRadarScores() != null) {
-            List<Map<String, Object>> dimensions = output.getComprehensiveRadarScores().stream()
-                    .map(item -> {
-                        Map<String, Object> dimension = new LinkedHashMap<>();
-                        dimension.put("dimensionKey", item.getDimensionKey());
-                        dimension.put("dimensionName", item.getDimensionName());
-                        dimension.put("score", item.getScore());
-                        return dimension;
-                    })
-                    .collect(Collectors.toList());
-            radarScoreMap = new LinkedHashMap<>();
-            radarScoreMap.put("dimensions", dimensions);
-        }
+        Map<String, Object> radarScoreMap = InterviewOverallScoreSupport.toRadarScoreMap(
+                output.getComprehensiveRadarScores()
+        );
 
         InterviewReport report = new InterviewReport();
         report.setSessionId(sessionId);
-        report.setOverallScore(output.getOverallScore());
+        report.setOverallScore(InterviewOverallScoreSupport.resolveOverallScore(output));
         report.setSummary(output.getSummary());
         report.setStrengths(output.getStrengths());
         report.setWeaknesses(output.getWeaknesses());

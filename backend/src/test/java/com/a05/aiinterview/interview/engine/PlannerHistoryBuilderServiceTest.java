@@ -1,8 +1,11 @@
 package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.dto.PlannerInput;
+import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
+import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +26,8 @@ class PlannerHistoryBuilderServiceTest {
     @DisplayName("should query recent same-role sessions and map covered points into history items")
     void buildRecentHistory_shouldUseRecentSameRoleSessions() {
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
-        PlannerHistoryBuilderService service = new PlannerHistoryBuilderService(sessionMapper);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        PlannerHistoryBuilderService service = new PlannerHistoryBuilderService(sessionMapper, questionMapper);
 
         InterviewSession currentSession = new InterviewSession();
         currentSession.setId(70L);
@@ -50,6 +54,14 @@ class PlannerHistoryBuilderServiceTest {
                 70L,
                 3
         )).thenReturn(List.of(historySession));
+        when(sessionMapper.selectPlannerRecentSessions(
+                1L,
+                "JAVA_BACKEND",
+                List.of("completed", "report_generating"),
+                null,
+                70L,
+                2
+        )).thenReturn(List.of());
 
         List<PlannerInput.HistoryInterviewItem> result = service.buildRecentHistory(currentSession, now);
 
@@ -68,5 +80,76 @@ class PlannerHistoryBuilderServiceTest {
         assertThat(result.get(0).getDiscussedItems()).isEmpty();
         assertThat(result.get(0).getStrongPoints()).isEmpty();
         assertThat(result.get(0).getWeakPoints()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("should populate discussedItems from recent project questions in latest two same-role sessions")
+    void buildRecentHistory_shouldPopulateDiscussedItemsFromRecentProjectQuestions() {
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        PlannerHistoryBuilderService service = new PlannerHistoryBuilderService(sessionMapper, questionMapper);
+
+        InterviewSession currentSession = new InterviewSession();
+        currentSession.setId(80L);
+        currentSession.setUserId(2L);
+        currentSession.setTargetRole("JAVA_BACKEND");
+
+        InterviewSession knowledgeSession = new InterviewSession();
+        knowledgeSession.setId(79L);
+        knowledgeSession.setFinishedAt(LocalDateTime.of(2026, 3, 24, 10, 0));
+        knowledgeSession.setStateLedgerJson(new LinkedHashMap<>(Map.of(
+                "covered_points", List.of("Redis / 缓存击穿")
+        )));
+
+        InterviewSession projectSession = new InterviewSession();
+        projectSession.setId(78L);
+        projectSession.setFinishedAt(LocalDateTime.of(2026, 3, 23, 10, 0));
+        projectSession.setStateLedgerJson(new LinkedHashMap<>());
+
+        LocalDateTime now = LocalDateTime.of(2026, 3, 25, 10, 0);
+        when(sessionMapper.selectPlannerRecentSessions(
+                2L,
+                "JAVA_BACKEND",
+                List.of("completed", "report_generating"),
+                now.minusDays(30),
+                80L,
+                3
+        )).thenReturn(List.of(knowledgeSession));
+        when(sessionMapper.selectPlannerRecentSessions(
+                2L,
+                "JAVA_BACKEND",
+                List.of("completed", "report_generating"),
+                null,
+                80L,
+                2
+        )).thenReturn(List.of(projectSession));
+
+        InterviewQuestion projectQuestion = new InterviewQuestion();
+        projectQuestion.setId(9001L);
+        projectQuestion.setSessionId(78L);
+        projectQuestion.setQuestionNo(2);
+        projectQuestion.setQuestionType("PROJECT_DEEP_DIVE");
+        projectQuestion.setGenerationContextJson(new LinkedHashMap<>(Map.of(
+                "activeItemType", "PROJECT",
+                "activeItemName", "Chabst",
+                "projectPoint", "RabbitMQ 延迟消息处理超时订单"
+        )));
+        when(questionMapper.selectList(org.mockito.ArgumentMatchers.<LambdaQueryWrapper<InterviewQuestion>>any()))
+                .thenReturn(List.of(projectQuestion));
+
+        List<PlannerInput.HistoryInterviewItem> result = service.buildRecentHistory(currentSession, now);
+
+        assertThat(result).hasSize(2);
+        assertThat(result)
+                .anySatisfy(item -> assertThat(item.getCoveredKnowledgePoints())
+                        .containsExactly("Redis / 缓存击穿"));
+        assertThat(result)
+                .anySatisfy(item -> {
+                    assertThat(item.getDiscussedItems()).hasSize(1);
+                    assertThat(item.getDiscussedItems().getFirst().getItemType()).isEqualTo("PROJECT");
+                    assertThat(item.getDiscussedItems().getFirst().getItemName()).isEqualTo("Chabst");
+                    assertThat(item.getDiscussedItems().getFirst().getEntryPoints())
+                            .containsExactly("RabbitMQ 延迟消息处理超时订单");
+                });
     }
 }

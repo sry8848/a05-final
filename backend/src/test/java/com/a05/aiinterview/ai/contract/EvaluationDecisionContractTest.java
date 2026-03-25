@@ -57,6 +57,9 @@ class EvaluationDecisionContractTest {
         assertThat(output.getFinalDecision()).isEqualTo("S_ENTER_PROJECT");
         assertThat(output.getNextFocus()).isEqualTo("Seata AT 事务边界落地");
         assertThat(output.getTargetDomainCode()).isEmpty();
+        assertThat(output.getNextItemType()).isEmpty();
+        assertThat(output.getNextItemName()).isEmpty();
+        assertThat(output.getNextProjectPoint()).isEmpty();
         assertThat(output.getNewCoveredDomains()).hasSize(1);
         assertThat(output.getNewCoveredDomains().getFirst().getDomainCode()).isEqualTo("DOMAIN_SPRING");
         assertThat(output.getNewCoveredDomains().getFirst().getDomainName()).isEqualTo("Spring 框架");
@@ -96,6 +99,9 @@ class EvaluationDecisionContractTest {
         assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
         assertThat(output.getFinalDecision()).isEqualTo("S_WRAPUP");
         assertThat(output.getNextFocus()).isEmpty();
+        assertThat(output.getNextItemType()).isEmpty();
+        assertThat(output.getNextItemName()).isEmpty();
+        assertThat(output.getNextProjectPoint()).isEmpty();
         assertThat(output.getTargetDomainCode()).isEmpty();
         assertThat(output.getRetrievalPlans()).isEmpty();
     }
@@ -185,5 +191,30 @@ class EvaluationDecisionContractTest {
 
         assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
         assertThat(output.getFinalDecision()).isEqualTo("S_WRAPUP");
+    }
+
+    @Test
+    @DisplayName("project fields should survive legal continue output")
+    void projectFields_shouldSurviveLegalContinueOutput() {
+        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
+                {
+                  "decisionReason": "当前应继续进入项目主线核实真实工程深度。",
+                  "interviewAction": "CONTINUE",
+                  "finalDecision": "S_ENTER_PROJECT",
+                  "nextFocus": "延迟消息与并发控制",
+                  "nextItemType": "PROJECT",
+                  "nextItemName": "Chabst",
+                  "nextProjectPoint": "RabbitMQ 延迟消息处理超时订单",
+                  "targetDomainCode": "",
+                  "newCoveredDomains": [],
+                  "newCoveredPoints": [],
+                  "retrievalPlans": []
+                }
+                """);
+
+        assertThat(output.getInterviewAction()).isEqualTo("CONTINUE");
+        assertThat(output.getNextItemType()).isEqualTo("PROJECT");
+        assertThat(output.getNextItemName()).isEqualTo("Chabst");
+        assertThat(output.getNextProjectPoint()).isEqualTo("RabbitMQ 延迟消息处理超时订单");
     }
 }

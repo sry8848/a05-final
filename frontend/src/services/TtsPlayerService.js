@@ -1,3 +1,5 @@
+import { resolveBackendUrl } from '../api/base.js'
+
 /**
  * TtsPlayerService - 题目片段 TTS 队列播放服务
  *
@@ -225,7 +227,7 @@ export class TtsPlayerService {
   async _fetchAudioBlobUrl(audioUrl) {
     const token = localStorage.getItem('aiInterviewToken') || localStorage.getItem('token') || ''
     const headers = token ? { Authorization: `Bearer ${token}` } : {}
-    const resp = await fetch(audioUrl, { headers })
+    const resp = await fetch(resolveBackendUrl(audioUrl), { headers })
     if (!resp.ok) return null
     const blob = await resp.blob()
     if (!blob || blob.size <= 0) return null

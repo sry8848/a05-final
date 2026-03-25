@@ -6,13 +6,13 @@ import lombok.NoArgsConstructor;
 
 /**
  * 发送邮箱验证码接口的响应。
- * 开发环境（未配置 SEND_EMAIL）时返回 devCode，便于前端直接展示，无需查收邮件。
+ * 为兼容前端既有解析逻辑，保留 devCode 字段，但真实邮件发送模式下固定返回 null。
  */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class SendEmailCodeResponse {
 
-    /** 开发环境返回的验证码，生产环境为 null */
+    /** 兼容字段，真实邮件发送模式下固定为 null */
     private String devCode;
 }

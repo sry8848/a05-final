@@ -4,6 +4,7 @@ import com.a05.aiinterview.ai.AiClient;
 import com.a05.aiinterview.ai.dto.QuestionDetailEvaluationOutput;
 import com.a05.aiinterview.interview.entity.QuestionRedoAttempt;
 import com.a05.aiinterview.interview.mapper.QuestionRedoAttemptMapper;
+import com.a05.aiinterview.interview.service.support.QuestionDetailEvaluationScoreSupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -45,9 +46,10 @@ public class QuestionRedoEvaluationService {
         }
 
         try {
-            QuestionDetailEvaluationOutput output = aiClient
-                    .callQuestionDetailEvaluation(QuestionDetailEvaluationInputFactory.fromRedoAttempt(redoAttempt))
-                    .getOutput();
+            QuestionDetailEvaluationOutput output = QuestionDetailEvaluationScoreSupport.clampToPercentageRange(
+                    aiClient.callQuestionDetailEvaluation(QuestionDetailEvaluationInputFactory.fromRedoAttempt(redoAttempt))
+                            .getOutput()
+            );
             Map<String, Object> stableJson = objectMapper.convertValue(output, Map.class);
             patchStatus(redoAttemptId, QuestionDetailEvaluationService.STATUS_READY, stableJson);
             log.info("单题重答评估完成, redoAttemptId={}, sourceSessionId={}, sourceQuestionId={}",

@@ -84,4 +84,37 @@ class DecisionExecutionPlanBuilderTest {
         assertThat(result.getErrorCodes()).contains("TARGET_DOMAIN_REQUIRED");
         assertThat(result.getPlan()).isNull();
     }
+
+    @Test
+    @DisplayName("project fields should be preserved on valid CONTINUE output")
+    void projectFields_shouldBePreservedOnValidContinueOutput() {
+        InterviewQuestion currentQuestion = new InterviewQuestion();
+        currentQuestion.setQuestionType("INTRO");
+
+        EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
+                .interviewAction("CONTINUE")
+                .finalDecision(StrategyCode.S_ENTER_PROJECT.code())
+                .nextFocus("延迟消息与并发控制")
+                .nextItemType("PROJECT")
+                .nextItemName("Chabst")
+                .nextProjectPoint("RabbitMQ 延迟消息处理超时订单")
+                .targetDomainCode("")
+                .newCoveredDomains(List.of())
+                .newCoveredPoints(List.of())
+                .retrievalPlans(List.of())
+                .build();
+
+        DecisionValidationResult result = builder.build(
+                currentQuestion,
+                output,
+                List.of(),
+                List.of(StrategyCode.S_ENTER_PROJECT.code()),
+                DecisionExecutionPlan.EffectiveDecisionSource.RAW_AI
+        );
+
+        assertThat(result.isValid()).isTrue();
+        assertThat(result.getPlan().getNextItemType()).isEqualTo("PROJECT");
+        assertThat(result.getPlan().getNextItemName()).isEqualTo("Chabst");
+        assertThat(result.getPlan().getNextProjectPoint()).isEqualTo("RabbitMQ 延迟消息处理超时订单");
+    }
 }

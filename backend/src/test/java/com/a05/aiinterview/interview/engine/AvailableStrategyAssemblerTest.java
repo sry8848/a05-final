@@ -22,7 +22,8 @@ class AvailableStrategyAssemblerTest {
                 "PRINCIPLE",
                 true,
                 remainingDomains("DOMAIN_REDIS"),
-                quotaState()
+                quotaState(),
+                "FRESH_GRAD"
         );
 
         assertThat(strategies)
@@ -50,7 +51,8 @@ class AvailableStrategyAssemblerTest {
                 "SCENARIO",
                 true,
                 remainingDomains("DOMAIN_MYSQL"),
-                quotaState()
+                quotaState(),
+                "JUNIOR"
         );
 
         assertThat(strategies)
@@ -81,7 +83,8 @@ class AvailableStrategyAssemblerTest {
                 "BEHAVIORAL",
                 true,
                 remainingDomains("DOMAIN_JVM"),
-                quotaState()
+                quotaState(),
+                "SENIOR"
         );
 
         assertThat(strategies)
@@ -106,18 +109,19 @@ class AvailableStrategyAssemblerTest {
     }
 
     @Test
-    @DisplayName("should delete blocked strategies when limits are full")
-    void shouldDeleteBlockedStrategiesWhenLimitsAreFull() {
+    @DisplayName("fresh grad profile should block strategies when configured limits are full")
+    void freshGradProfileShouldBlockStrategiesWhenConfiguredLimitsAreFull() {
         List<EvaluationDecisionInput.AvailableStrategy> strategies = assembler.assemble(
                 "PRINCIPLE",
                 true,
                 remainingDomains("DOMAIN_REDIS"),
                 quotaState(
-                        QuotaStateSupport.SAME_POINT_CONTINUE, 20,
-                        QuotaStateSupport.SAME_DOMAIN_CONTINUE, 20,
-                        QuotaStateSupport.PRINCIPLE_TOTAL, 20,
-                        QuotaStateSupport.PROJECT_TOTAL, 20
-                )
+                        QuotaStateSupport.SAME_POINT_CONTINUE, 1,
+                        QuotaStateSupport.SAME_DOMAIN_CONTINUE, 2,
+                        QuotaStateSupport.PRINCIPLE_TOTAL, 3,
+                        QuotaStateSupport.PROJECT_TOTAL, 2
+                ),
+                "FRESH_GRAD"
         );
 
         assertThat(strategies)
@@ -145,7 +149,8 @@ class AvailableStrategyAssemblerTest {
                 "PRINCIPLE",
                 false,
                 remainingDomains("DOMAIN_REDIS"),
-                quotaState()
+                quotaState(),
+                "MIDDLE"
         );
 
         assertThat(strategies)
@@ -160,7 +165,8 @@ class AvailableStrategyAssemblerTest {
                 "PRINCIPLE",
                 true,
                 List.of(),
-                quotaState()
+                quotaState(),
+                "SENIOR"
         );
 
         assertThat(strategies)
@@ -169,6 +175,34 @@ class AvailableStrategyAssemblerTest {
                         StrategyCode.S_SWITCH_DOMAIN.code(),
                         StrategyCode.S_ENTER_PRINCIPLE.code()
                 );
+    }
+
+    @Test
+    @DisplayName("senior profile should keep enter-project available when junior quota is already exhausted")
+    void seniorProfileShouldKeepEnterProjectAvailableWhenJuniorQuotaIsAlreadyExhausted() {
+        Map<String, Object> quotaState = quotaState(QuotaStateSupport.PROJECT_TOTAL, 3);
+
+        List<EvaluationDecisionInput.AvailableStrategy> juniorStrategies = assembler.assemble(
+                "PRINCIPLE",
+                true,
+                remainingDomains("DOMAIN_REDIS"),
+                quotaState,
+                "JUNIOR"
+        );
+        List<EvaluationDecisionInput.AvailableStrategy> seniorStrategies = assembler.assemble(
+                "PRINCIPLE",
+                true,
+                remainingDomains("DOMAIN_REDIS"),
+                quotaState,
+                "SENIOR"
+        );
+
+        assertThat(juniorStrategies)
+                .extracting(EvaluationDecisionInput.AvailableStrategy::getStrategyCode)
+                .doesNotContain(StrategyCode.S_ENTER_PROJECT.code());
+        assertThat(seniorStrategies)
+                .extracting(EvaluationDecisionInput.AvailableStrategy::getStrategyCode)
+                .contains(StrategyCode.S_ENTER_PROJECT.code());
     }
 
     private static List<EvaluationDecisionInput.RemainingTargetDomain> remainingDomains(String domainCode) {

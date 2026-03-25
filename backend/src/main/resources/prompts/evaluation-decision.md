@@ -56,6 +56,7 @@ promptVersion: v2
 - Step 2：意图推演。基于 Step 1 评估，确定我们下一题最需要候选人补充的核心信息。
 - Step 3：策略匹配。去当前注入的【当前可用策略池】中寻找最匹配的唯一 `StrategyCode`。
 - Step 4：焦点生成。基于选定策略生成 `nextFocus`，必须是 4-20 字的单一焦点短语，绝不能写成完整问句。
+- Step 4.1：若下一题继续走项目主线，必须同时输出 `nextItemType`、`nextItemName`、`nextProjectPoint`。其中 `nextProjectPoint` 必须是 4-20 字的项目切口短语，不能直接复制整句题干。
 - Step 5：RAG 需求研判。若 `nextFocus` 需要事实补充，输出 `retrievalPlans`；否则输出空数组。
 
 [思维链（decisionReason）输出规则]
@@ -88,6 +89,10 @@ promptVersion: v2
 - 若为 `WRAPUP`，则 `finalDecision` 必须是结束面试的策略编码，且 `nextFocus`、`targetDomainCode`、`retrievalPlans` 必须为空。
 - 若为 `CONTINUE`，则 `finalDecision` 绝不允许是结束面试的策略编码。
 3. 焦点规范：`nextFocus` 必须是 4-20 个字的单一核心短语，绝不能写成完整问句，也不能大而化之。
+3.1 项目结构化字段：
+- 当你选择的 `finalDecision` 对应动作是【进入项目题】或【继续项目主线】时，必须同时输出 `nextItemType`、`nextItemName`、`nextProjectPoint`
+- `nextProjectPoint` 必须是结构化项目切口短语，不能写成整句问题
+- 当动作不是项目题时，`nextItemType`、`nextItemName`、`nextProjectPoint` 必须输出 `""`
 4. 当你选择的 `finalDecision` 对应动作是【切换知识域】或【进入理论题】时，`targetDomainCode` 必须从【主考纲剩余待考察域（菜单）】中选择一个合法的 `domainCode`。否则此字段输出 `""`，务必不要在对应动作不是【切换知识域】或【进入理论题】时为`targetDomainCode`赋值
 5. 沉淀隔离：`newCoveredDomains` 和 `newCoveredPoints` 只能记录上一题已经形成事实判断的知识，绝不允许把下一题准备问的知识点提前预支写进去。
    **[知识沉淀与提纯规则（极其重要）]**
@@ -106,6 +111,9 @@ promptVersion: v2
   "interviewAction": "CONTINUE | WRAPUP",
   "finalDecision": "S_J_PRESSURE",
   "nextFocus": "主从延迟导致双删失败的兜底防御",
+  "nextItemType": "",
+  "nextItemName": "",
+  "nextProjectPoint": "",
   "targetDomainCode": "DOMAIN_REDIS",
   "newCoveredDomains": [
     {
@@ -150,6 +158,13 @@ promptVersion: v2
 - 对于有工作经验的候选人，可以更注重架构、权衡、边界和系统治理。
 - 对于实习或应届生，理论知识、项目真实性、基础实现能力更重要。
 
+【面试进度】
+- 当前题号：{{questionIndex}}
+- 最大题量：{{maxQuestions}}
+
+【当前限额使用情况】
+{{quotaSnapshot}}
+
 【当前可用策略池】
 {{availableStrategies}}
 
@@ -167,6 +182,18 @@ promptVersion: v2
 
 【项目与实习信息】
 {{projectAndInternshipSummary}}
+
+说明：
+- 其中 `blockedEntryPoints` 表示该项目在同岗位最近两场面试里已经使用过的跨场禁选切口
+- 这些切口仅用于跨场去重参考；你可以继续选择同一个项目，但应优先更换到未被禁选的新切口
+
+【近期跨场禁选知识点】
+{{crossSessionBlockedKnowledgePoints}}
+
+说明：
+- 这里只表示同岗位近期已经形成判断的知识点
+- 仅作跨场去重参考，不是程序硬限制
+- 如果当前语境必须回到某个知识点，你仍可选择，但默认应优先避开这些重复点
 
 【主考纲剩余待考察域（菜单）】
 {{remainingTargetDomains}}

@@ -41,7 +41,8 @@ class AnswerSubmitServiceIdempotentTest {
                 new AvailableStrategyAssembler(),
                 planBuilder,
                 new DecisionRepairOrchestrator(aiClient, planBuilder),
-                new SystemFallbackPlanBuilder()
+                new SystemFallbackPlanBuilder(),
+                new PlannerHistoryBuilderService(sessionMapper, questionMapper)
         );
 
         InterviewAttempt existing = new InterviewAttempt();

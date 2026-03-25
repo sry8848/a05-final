@@ -181,7 +181,8 @@ class ProfileServiceTest {
                 .filter(item -> "java_core".equals(item.getDomainCode()))
                 .findFirst()
                 .orElseThrow();
-        assertEquals(BigDecimal.valueOf(72.0), javaCore.getScore());
+        assertEquals(BigDecimal.valueOf(76.8), javaCore.getScore());
+        assertEquals(BigDecimal.valueOf(76.8), javaCore.getAverageScore());
         assertEquals(BigDecimal.valueOf(22.0), javaCore.getScoreDelta());
         assertEquals(4, javaCore.getAppearanceCount());
         assertEquals(4, javaCore.getRecentScores().size());
@@ -190,7 +191,8 @@ class ProfileServiceTest {
                 .filter(item -> "debugging".equals(item.getDomainCode()))
                 .findFirst()
                 .orElseThrow();
-        assertEquals(BigDecimal.valueOf(43.0), debugging.getScore());
+        assertEquals(BigDecimal.valueOf(40.5), debugging.getScore());
+        assertEquals(BigDecimal.valueOf(40.5), debugging.getAverageScore());
         assertEquals(BigDecimal.valueOf(-7.0), debugging.getScoreDelta());
         assertTrue(debugging.isRankingEligible());
         assertEquals(List.of("缺少验证与回归意识", "缺少分层定位思路", "问题定位缺验证闭环"), debugging.getWeaknessPoints());
@@ -204,7 +206,7 @@ class ProfileServiceTest {
         assertTrue(!cache.isRankingEligible());
 
         assertEquals(2, dto.getTopStrengths().size());
-        assertEquals("project_delivery", dto.getTopStrengths().get(0).getDomainCode());
+        assertEquals("java_core", dto.getTopStrengths().get(0).getDomainCode());
         assertEquals(1, dto.getTopWeaknesses().size());
         assertEquals("debugging", dto.getTopWeaknesses().get(0).getDomainCode());
         assertEquals(4, dto.getTopWeaknesses().get(0).getRecentScores().size());
@@ -309,6 +311,127 @@ class ProfileServiceTest {
         assertEquals(1, dto.getTotalSessions());
         assertEquals(30, dto.getTotalMinutes());
         assertEquals(1, dto.getScoreTrend().size());
+    }
+
+    @Test
+    void getStatistics_shouldPreferEffectiveOverallScoreFromRadarWhenAvailable() {
+        UserMapper userMapper = mock(UserMapper.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
+        PositionService positionService = mock(PositionService.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
+        ProfileAvatarStorageConfig storageConfig = new ProfileAvatarStorageConfig();
+        ProfileService service = new ProfileService(
+                userMapper, sessionMapper, reportMapper, positionService, storageConfig, statusService
+        );
+
+        List<InterviewSession> sessions = List.of(
+                buildSession(1L, "JAVA_BACKEND", "professional", LocalDateTime.of(2026, 3, 1, 9, 0), 30),
+                buildSession(2L, "JAVA_BACKEND", "practice", LocalDateTime.of(2026, 3, 2, 9, 0), 45)
+        );
+        when(sessionMapper.selectList(any())).thenReturn(sessions);
+
+        InterviewReport r1 = new InterviewReport();
+        r1.setSessionId(1L);
+        r1.setOverallScore(BigDecimal.valueOf(10));
+        r1.setComprehensiveRadarScores(Map.of("dimensions", List.of(
+                Map.of("dimensionKey", "fundamentals", "dimensionName", "基础原理掌握", "score", 80),
+                Map.of("dimensionKey", "engineering_practice", "dimensionName", "工程实践与项目落地", "score", 70),
+                Map.of("dimensionKey", "scenario_tradeoff", "dimensionName", "场景分析与方案取舍", "score", 60),
+                Map.of("dimensionKey", "debugging", "dimensionName", "问题定位与排查思路", "score", 90),
+                Map.of("dimensionKey", "communication", "dimensionName", "沟通表达与结构化呈现", "score", 100)
+        )));
+
+        InterviewReport r2 = new InterviewReport();
+        r2.setSessionId(2L);
+        r2.setOverallScore(BigDecimal.valueOf(88));
+        r2.setComprehensiveRadarScores(null);
+        when(reportMapper.selectList(any())).thenReturn(List.of(r1, r2));
+
+        ProfileStatisticsDto dto = service.getStatistics(9L, "JAVA_BACKEND");
+
+        assertEquals(BigDecimal.valueOf(83.5), dto.getAverageScore());
+        assertEquals(BigDecimal.valueOf(79.0), dto.getScoreTrend().get(0).getScore());
+        assertEquals(BigDecimal.valueOf(88), dto.getScoreTrend().get(1).getScore());
+    }
+
+    @Test
+    void getSkillOverview_shouldUseAverageReportScoreAsRankScore() {
+        UserMapper userMapper = mock(UserMapper.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
+        PositionService positionService = mock(PositionService.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
+        ProfileAvatarStorageConfig storageConfig = new ProfileAvatarStorageConfig();
+        ProfileService service = new ProfileService(
+                userMapper, sessionMapper, reportMapper, positionService, storageConfig, statusService
+        );
+
+        List<InterviewSession> sessions = List.of(
+                buildSession(1L, "JAVA_BACKEND", "professional", LocalDateTime.of(2026, 3, 1, 10, 0), 30),
+                buildSession(2L, "JAVA_BACKEND", "practice", LocalDateTime.of(2026, 3, 2, 10, 0), 30),
+                buildSession(3L, "JAVA_BACKEND", "professional", LocalDateTime.of(2026, 3, 3, 10, 0), 30),
+                buildSession(4L, "JAVA_BACKEND", "professional", LocalDateTime.of(2026, 3, 4, 10, 0), 30)
+        );
+        when(sessionMapper.selectList(any())).thenReturn(sessions);
+        when(positionService.listSkillDomainEntities("JAVA_BACKEND")).thenReturn(List.of(
+                buildDomainEntity("java_core", "Java 核心基础"),
+                buildDomainEntity("project_delivery", "项目落地"),
+                buildDomainEntity("debugging", "问题排查")
+        ));
+
+        InterviewReport s1 = new InterviewReport();
+        s1.setSessionId(1L);
+        s1.setSkillDomainScores(List.of(
+                Map.of("domainCode", "java_core", "domainName", "Java 核心基础", "score", 60, "commentary", "集合与并发基础还需补强"),
+                Map.of("domainCode", "project_delivery", "domainName", "项目落地", "score", 55, "commentary", "项目职责描述较真实"),
+                Map.of("domainCode", "debugging", "domainName", "问题排查", "score", 42, "commentary", "排查步骤偏跳跃")
+        ));
+
+        InterviewReport s2 = new InterviewReport();
+        s2.setSessionId(2L);
+        s2.setSkillDomainScores(List.of(
+                Map.of("domainCode", "java_core", "domainName", "Java 核心基础", "score", 75, "commentary", "原理掌握有提升"),
+                Map.of("domainCode", "project_delivery", "domainName", "项目落地", "score", 65, "commentary", "项目落地说明仍可更细"),
+                Map.of("domainCode", "debugging", "domainName", "问题排查", "score", 45, "commentary", "问题定位仍缺验证闭环")
+        ));
+
+        InterviewReport s3 = new InterviewReport();
+        s3.setSessionId(3L);
+        s3.setSkillDomainScores(List.of(
+                Map.of("domainCode", "java_core", "domainName", "Java 核心基础", "score", 90, "commentary", "关键机制回答准确"),
+                Map.of("domainCode", "project_delivery", "domainName", "项目落地", "score", 80, "commentary", "项目链路表达完整"),
+                Map.of("domainCode", "debugging", "domainName", "问题排查", "score", 40, "commentary", "仍缺少分层定位思路")
+        ));
+
+        InterviewReport s4 = new InterviewReport();
+        s4.setSessionId(4L);
+        s4.setSkillDomainScores(List.of(
+                Map.of("domainCode", "java_core", "domainName", "Java 核心基础", "score", 82, "commentary", "回答更稳定"),
+                Map.of("domainCode", "project_delivery", "domainName", "项目落地", "score", 85, "commentary", "方案说明扎实"),
+                Map.of("domainCode", "debugging", "domainName", "问题排查", "score", 35, "commentary", "缺少验证与回归意识")
+        ));
+        when(reportMapper.selectList(any())).thenReturn(List.of(s1, s2, s3, s4));
+
+        SkillOverviewDto dto = service.getSkillOverview(9L, "JAVA_BACKEND");
+
+        var javaCore = dto.getDomains().stream()
+                .filter(item -> "java_core".equals(item.getDomainCode()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(BigDecimal.valueOf(76.8), javaCore.getScore());
+        assertEquals(BigDecimal.valueOf(76.8), javaCore.getAverageScore());
+        assertEquals(BigDecimal.valueOf(22.0), javaCore.getScoreDelta());
+
+        var debugging = dto.getDomains().stream()
+                .filter(item -> "debugging".equals(item.getDomainCode()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(BigDecimal.valueOf(40.5), debugging.getScore());
+        assertEquals(BigDecimal.valueOf(-7.0), debugging.getScoreDelta());
+
+        assertEquals("java_core", dto.getTopStrengths().get(0).getDomainCode());
+        assertEquals("debugging", dto.getTopWeaknesses().get(0).getDomainCode());
     }
 
     private InterviewSession buildSession(

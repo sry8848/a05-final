@@ -3,10 +3,10 @@
  * code=0 成功，非 0 报 Error(message)。
  */
 
-const BASE = '/api/v1'
+import { buildApiUrl } from './base.js'
 
 async function request(path, options = {}) {
-  const url = BASE + path
+  const url = buildApiUrl(path)
   const headers = {
     'Content-Type': 'application/json',
     Authorization: getAuthHeader(),
@@ -25,7 +25,7 @@ async function request(path, options = {}) {
 
 /** 上传文件：不设置 Content-Type，由浏览器设置 multipart/form-data */
 async function uploadRequest(path, formData) {
-  const url = BASE + path
+  const url = buildApiUrl(path)
   const res = await fetch(url, {
     method: 'POST',
     headers: { Authorization: getAuthHeader() },
@@ -275,7 +275,7 @@ export function deleteQuestionBankItem(itemId) {
  * @returns {Promise<{ok: boolean, status: number}>}
  */
 export async function getSystemPing(signal) {
-  const res = await fetch(BASE + '/system/ping', {
+  const res = await fetch(buildApiUrl('/system/ping'), {
     method: 'GET',
     headers: {
       Authorization: getAuthHeader()
@@ -306,7 +306,8 @@ function isAbortLikeError(err) {
 
 /** Stream interview question via fetch-based SSE */
 export async function streamInterviewQuestion(sessionId, attemptId, handlers = {}, signal, options = {}) {
-  const url = BASE + '/interviews/' + sessionId + '/questions/stream?attemptId=' + encodeURIComponent(attemptId)
+  const url = buildApiUrl('/interviews/' + sessionId + '/questions/stream')
+    + '?attemptId=' + encodeURIComponent(attemptId)
   const headers = {
     Accept: 'text/event-stream',
     Authorization: getAuthHeader()

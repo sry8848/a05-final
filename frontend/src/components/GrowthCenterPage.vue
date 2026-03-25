@@ -129,15 +129,6 @@
               />
             </g>
           </svg>
-          <div class="trend-x-labels" style="--axis-side-padding: 20px;">
-            <span
-              v-for="(lb, i) in trendAxisLabels"
-              :key="'xl-' + i"
-              :title="lb ? trendFullXLabels[i] : ''"
-            >
-              {{ lb }}
-            </span>
-          </div>
         </div>
       </div>
     </div>
@@ -268,15 +259,6 @@
               />
             </g>
           </svg>
-          <div class="trend-x-labels" style="--axis-side-padding: 26px;">
-            <span
-              v-for="(lb, i) in domainTrendAxisLabels"
-              :key="'dx-' + i"
-              :title="lb ? domainTrendFullXLabels[i] : ''"
-            >
-              {{ lb }}
-            </span>
-          </div>
         </div>
 
         <div v-else class="domain-trend-empty">
@@ -293,8 +275,8 @@ import { getProfile, getProfileSkillOverview, getProfileStatistics } from '../ap
 import CustomSelect from './CustomSelect.vue'
 import { getGrowthRequestPositionCodes } from '../utils/growthHistoryState'
 import {
-  buildSparseDateAxisLabels,
-  formatTrendTooltipDate
+  formatTrendTooltipDate,
+  takeRecentTrendPoints
 } from '../utils/growthTrendAxis'
 
 const RADAR_DIMENSIONS = [
@@ -365,13 +347,10 @@ export default {
     const trendDimensionOptions = [
       { value: 'all', label: '综合评分' }
     ]
-    const trendSeries = computed(() => trendPoints.value.map((item) => Number(item.score || 0)))
-    const trendFullXLabels = computed(() =>
-      trendPoints.value.map((item) => formatTrendTooltipDate(item?.date))
+    const visibleTrendPoints = computed(() =>
+      takeRecentTrendPoints(trendPoints.value, 8)
     )
-    const trendAxisLabels = computed(() =>
-      buildSparseDateAxisLabels(trendPoints.value.map((item) => item?.date), 5)
-    )
+    const trendSeries = computed(() => visibleTrendPoints.value.map((item) => Number(item.score || 0)))
 
     const trendChartPoints = computed(() => {
       const data = trendSeries.value
@@ -484,12 +463,8 @@ export default {
       rankedDomainOptions.value.find((item) => item.code === selectedRankTrendDomain.value) || rankedDomainOptions.value[0] || null
     )
 
-    const domainTrendSeries = computed(() => selectedRankTrendItem.value?.recentScores || [])
-    const domainTrendFullXLabels = computed(() =>
-      domainTrendSeries.value.map((item) => formatTrendTooltipDate(item?.date))
-    )
-    const domainTrendAxisLabels = computed(() =>
-      buildSparseDateAxisLabels(domainTrendSeries.value.map((item) => item?.date), 6)
+    const domainTrendSeries = computed(() =>
+      takeRecentTrendPoints(selectedRankTrendItem.value?.recentScores || [], 8)
     )
 
     function buildTrendPointTooltip(item) {
@@ -500,7 +475,7 @@ export default {
     }
 
     const trendPointTooltips = computed(() =>
-      trendPoints.value.map((item) => buildTrendPointTooltip(item))
+      visibleTrendPoints.value.map((item) => buildTrendPointTooltip(item))
     )
     const domainTrendPointTooltips = computed(() =>
       domainTrendSeries.value.map((item) => buildTrendPointTooltip(item))
@@ -612,8 +587,6 @@ export default {
       trendChartPoints,
       trendLinePath,
       trendAreaPath,
-      trendAxisLabels,
-      trendFullXLabels,
       trendPointTooltips,
       selectedPosition,
       positionOptions,
@@ -626,8 +599,6 @@ export default {
       domainTrendChartPoints,
       domainTrendLinePath,
       domainTrendAreaPath,
-      domainTrendAxisLabels,
-      domainTrendFullXLabels,
       domainTrendPointTooltips,
       formatDelta,
       goToInterview
@@ -785,20 +756,6 @@ export default {
 
 .trend-point-group {
   cursor: default;
-}
-
-.trend-x-labels {
-  display: flex;
-  padding: 8px var(--axis-side-padding, 0) 0;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.trend-x-labels span {
-  flex: 1;
-  min-width: 0;
-  text-align: center;
-  white-space: nowrap;
 }
 
 .section-header-row {

@@ -3,6 +3,19 @@ export const ADMIN_TOKEN_KEY = 'aiInterviewAdminToken'
 export const LEGACY_USER_TOKEN_KEY = 'token'
 export const SETTINGS_KEY = 'aiInterviewSettings'
 
+function mergeStoredUser(settings, { nickname, email }) {
+  const currentUser = settings.user && typeof settings.user === 'object'
+    ? { ...settings.user }
+    : {}
+  if (nickname) {
+    currentUser.name = nickname
+  }
+  if (email != null) {
+    currentUser.email = email
+  }
+  return Object.keys(currentUser).length ? currentUser : settings.user
+}
+
 function readSettings(storage) {
   try {
     return JSON.parse(storage.getItem(SETTINGS_KEY) || '{}')
@@ -17,14 +30,14 @@ function writeSettings(storage, updater) {
   return next
 }
 
-export function persistUserSession(storage, { token, nickname }) {
+export function persistUserSession(storage, { token, nickname, email }) {
   storage.setItem(USER_TOKEN_KEY, token)
   storage.setItem(LEGACY_USER_TOKEN_KEY, token)
   storage.removeItem(ADMIN_TOKEN_KEY)
   writeSettings(storage, (settings) => ({
     ...settings,
     isLoggedIn: true,
-    user: nickname ? { name: nickname } : settings.user
+    user: mergeStoredUser(settings, { nickname, email })
   }))
 }
 
@@ -73,15 +86,21 @@ export async function restoreAuthSession({ storage, getCurrentAdmin, getCurrentU
   if (userToken) {
     try {
       const user = await getCurrentUser(userToken)
+      const userEmail = user.email || ''
       persistUserSession(storage, {
         token: userToken,
-        nickname: user.nickname || user.name
+        nickname: user.nickname || user.name,
+        email: userEmail
       })
-      return {
+      const result = {
         isLoggedIn: true,
         isAdmin: false,
         userName: user.nickname || user.name || '面试者'
       }
+      if (userEmail) {
+        result.userEmail = userEmail
+      }
+      return result
     } catch {
       storage.removeItem(USER_TOKEN_KEY)
     }

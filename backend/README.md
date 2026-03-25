@@ -1,83 +1,132 @@
-# AI 模拟面试系统 - 后端
+# Backend
 
-Spring Boot 3 + MyBatis-Plus + MySQL + Redis + RabbitMQ。
+Spring Boot 后端服务，统一暴露在 `/api/v1`。
+
+完整联调顺序优先看根目录 [README.md](/D:/a05-cursor/README.md)。本文只说明后端自身结构、配置和启动要点。
 
 ## 模块结构
 
-```
+```text
 src/main/java/com/a05/aiinterview/
-  common/      # 统一响应、异常处理、工具
-  auth/        # 注册、验证码、登录、鉴权
-  system/      # Ping、环境检测
-  resume/      # 简历上传、解析、编辑
-  position/    # 岗位与知识域树
-  interview/   # 会话、题目、提交并继续
-  report/      # 报告、单题详情、AI 追问
-  questionbank/# 成长问答库
-  profile/     # 个人资料、成长统计
-  ai/          # Prompt、模型适配、RAG、AI 调用日志
-  admin/       # 后台管理扩展
+├── admin/       # 管理端鉴权与仪表盘
+├── ai/          # Prompt、模型适配、契约校验、调用日志
+├── auth/        # 注册、登录、验证码、JWT
+├── common/      # 统一响应、异常、追踪
+├── interview/   # 面试会话、SSE 出题、报告、重答
+├── position/    # 岗位与知识域
+├── profile/     # 用户资料与成长数据
+├── questionbank/# 成长问答库
+├── rag/         # Qdrant 检索与知识入库
+├── resume/      # 简历上传、解析、编辑
+├── speech/      # ASR 票据、TTS 播报、代理桥接
+└── system/      # Ping 等系统接口
 ```
 
-## 运行前准备
+## 配置文件
+
+- `src/main/resources/application.yml`
+  公共基础配置，包含数据库、Redis、RabbitMQ、JWT、AI、RAG、语音默认项
+- `src/main/resources/application-local.yml`
+  本地真实联调配置，使用百炼兼容 OpenAI 接口，适合 `mvn spring-boot:run -Dspring-boot.run.profiles=local`
+- `src/main/resources/application-dev.yml`
+  开发便捷配置，保留数据库与管理员默认项
+- `src/test/resources/application-test.yml`
+  自动化测试专用，禁用 RAG / 语音并开启 mock AI
+
+## 启动前提
 
 - JDK 21
-- **MySQL 8**：先创建库并执行建表脚本，否则会报 `Unknown database 'aiinterview'`：
-  ```bash
-  # 1）创建数据库
-  mysql -u root -p < src/main/resources/db/01-create-database.sql
-  # 2）进入库并执行鉴权表结构（可选：按需执行各 schema-*.sql）
-  mysql -u root -p aiinterview < src/main/resources/db/schema-auth.sql
-  ```
-  或手动在 MySQL 中执行：
-  ```sql
-  CREATE DATABASE IF NOT EXISTS aiinterview DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_unicode_ci;
-  USE aiinterview;
-  -- 然后执行 schema-auth.sql 中的建表语句
-  ```
-- Redis（可选：不启用则使用内存验证码存储）
+- MySQL 8
+- Redis
 - RabbitMQ
+- 可选：Qdrant
+- 可选：阿里云百炼 API Key
 
-## 运行
+数据库脚本位置：
+
+- [backend/src/main/resources/db](/D:/a05-cursor/backend/src/main/resources/db)
+
+推荐初始化顺序见：
+
+- [backend/src/main/resources/db/README.md](/D:/a05-cursor/backend/src/main/resources/db/README.md)
+
+## 本地启动
 
 ```bash
-# 开发环境（使用 application-dev.yml）
-mvn spring-boot:run -Dspring-boot.run.profiles=dev
+cd backend
+mvn spring-boot:run "-Dspring-boot.run.profiles=local"
+```
 
-# 或先打包
+打包运行：
+
+```bash
 mvn package
-java -jar target/aiinterview-backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev
+java -jar target/aiinterview-backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 ```
 
-## 接口前缀
+## 关键环境变量
 
-- context-path: `/api/v1`
-- 示例：`GET http://localhost:8080/api/v1/system/ping`
+常用变量包括：
 
-## 配置
+- `AI_BAILIAN_API_KEY`
+- `RAG_ENABLED`
+- `QDRANT_HOST`
+- `QDRANT_PORT`
+- `QDRANT_COLLECTION`
+- `ASR_ENABLED`
+- `ASR_API_KEY`
+- `TTS_ENABLED`
+- `TTS_API_KEY`
 
-- `application.yml`：通用配置
-- `application-dev.yml`：开发环境（本地 MySQL/Redis/RabbitMQ）
-- 数据库密码等可通过环境变量 `DB_PASSWORD`、`REDIS_PASSWORD` 覆盖
+这些变量可以从根目录 `.env` 导入到当前终端，或者直接写到 IDEA 的运行配置里。
 
-## 常见启动问题
+## 数据与资源目录
 
-### 1. `Unknown database 'ai_interview'`（或 `aiinterview`）
+- `src/main/resources/db/`
+  初始化与增量 SQL
+- `src/main/resources/prompts/`
+  当前 Prompt 模板：`planner`、`evaluation-decision`、`question-generation-stream`、`question-detail-evaluation`、`report-generation`、`intro-rewrite`
+- `src/main/resources/mapper/`
+  MyBatis XML
 
-**原因**：MySQL 中尚未创建应用使用的库名。  
-**处理**：在 MySQL 中执行建库（库名需与 `application.yml` 里 `spring.datasource.url` 中的库名一致，例如 `ai_interview` 或 `aiinterview`）：
+## 当前接口前缀
 
-```sql
-CREATE DATABASE IF NOT EXISTS ai_interview DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_unicode_ci;
--- 然后执行 schema-auth.sql 等建表脚本
+所有 HTTP 接口统一以：
+
+```text
+/api/v1
 ```
 
-### 2. `required a bean of type 'VerificationCodeStore' that could not be found`
+例如：
 
-**原因**：验证码存储有两种实现（Redis / 内存），原先依赖 `@ConditionalOnBean(StringRedisTemplate)` 与 `@ConditionalOnMissingBean(VerificationCodeStore)`。在部分环境下（如 Redis 未启动、Bean 创建顺序等），两个条件都未满足，导致没有任何 `VerificationCodeStore` 实现被注册，`AuthService` 注入失败。
+```text
+GET http://localhost:8080/api/v1/system/ping
+```
 
-**处理**：已通过 `auth.config.VerificationCodeStoreConfig` 显式提供唯一 Bean：有 Redis 时用 Redis 实现，否则用内存实现。无需再改配置；若仍报错，请确认未排除 `com.a05.aiinterview.auth.config` 包扫描。
+## 常见问题
 
-### 3. MyBatis 实体或 Mapper 找不到
+### `Unknown database 'ai_interview'`
 
-**原因**：`application.yml` 中 `mybatis-plus.type-aliases-package` 或日志中的包名必须与 Java 包一致（`com.a05.aiinterview`），不能写成 `com.a05.ai_interview`，否则实体别名与日志包路径会失效。
+通常是数据库还没初始化，先执行根 README 里的 `db-init`。
+
+### `VerificationCodeStore` Bean 找不到
+
+当前仓库已经通过 `VerificationCodeStoreConfig` 显式处理 Redis / 内存两套实现；如果还报错，优先检查：
+
+- `auth.config` 包是否被正确扫描
+- Redis 配置是否被手动排除
+
+### Qdrant 相关 Bean 启动报错
+
+先确认：
+
+- `rag.enabled=true` 时 Qdrant 真的可连
+- `QDRANT_PORT` 使用的是 gRPC 端口 `6334`
+
+### 语音能力无法启用
+
+先确认：
+
+- `speech.asr.enabled` / `speech.tts.enabled`
+- `AI_BAILIAN_API_KEY` 已导入当前终端
+- 浏览器端不是直接访问云端地址，而是先通过后端拿票据

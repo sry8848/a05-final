@@ -8,6 +8,7 @@ import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.a05.aiinterview.interview.service.InterviewSessionStatusService;
+import com.a05.aiinterview.interview.service.support.InterviewOverallScoreSupport;
 import com.a05.aiinterview.position.entity.PositionSkillDomain;
 import com.a05.aiinterview.position.service.PositionService;
 import com.a05.aiinterview.profile.config.ProfileAvatarStorageConfig;
@@ -243,7 +244,7 @@ public class ProfileService {
 
     private BigDecimal avgScore(List<InterviewReport> reports) {
         List<BigDecimal> values = reports.stream()
-                .map(InterviewReport::getOverallScore)
+                .map(InterviewOverallScoreSupport::resolveOverallScore)
                 .filter(v -> v != null)
                 .toList();
         if (values.isEmpty()) {
@@ -266,11 +267,12 @@ public class ProfileService {
         List<ScoreTrendPointDto> trend = new ArrayList<>();
         for (InterviewSession session : sessions) {
             InterviewReport report = reportMap.get(session.getId());
-            if (report == null || report.getOverallScore() == null || session.getCreatedAt() == null) {
+            BigDecimal effectiveScore = InterviewOverallScoreSupport.resolveOverallScore(report);
+            if (report == null || effectiveScore == null || session.getCreatedAt() == null) {
                 continue;
             }
             LocalDate day = session.getCreatedAt().toLocalDate();
-            trend.add(new ScoreTrendPointDto(day.format(DATE_FMT), report.getOverallScore()));
+            trend.add(new ScoreTrendPointDto(day.format(DATE_FMT), effectiveScore));
         }
         return trend;
     }
@@ -445,9 +447,12 @@ public class ProfileService {
             item.setLastTestedAt(aggregate.lastTestedAt != null ? aggregate.lastTestedAt.toString() : null);
             item.setRankingEligible(aggregate.appearanceCount >= 3 && allowedDomains.containsKey(entry.getKey()));
             if (aggregate.appearanceCount > 0) {
-                item.setAverageScore(aggregate.sum.divide(BigDecimal.valueOf(aggregate.appearanceCount), 1, RoundingMode.HALF_UP));
+                BigDecimal averageScore = aggregate.sum.divide(
+                        BigDecimal.valueOf(aggregate.appearanceCount), 1, RoundingMode.HALF_UP
+                );
+                item.setAverageScore(averageScore);
                 item.setScoreDelta(aggregate.deltaSum.setScale(1, RoundingMode.HALF_UP));
-                item.setScore(clampToScoreRange(BASELINE_SCORE.add(aggregate.deltaSum)));
+                item.setScore(averageScore);
                 List<String> weaknessPoints = buildWeaknessPoints(aggregate.commentaries);
                 item.setWeaknessPoints(weaknessPoints);
                 item.setWeaknessSummary(weaknessPoints.isEmpty() ? null : String.join(" · ", weaknessPoints));
@@ -462,8 +467,8 @@ public class ProfileService {
         }
 
         items.sort(Comparator
-                .comparing((SkillDomainItemDto item) -> distanceFromBaseline(item.getScore()), Comparator.reverseOrder())
-                .thenComparing(SkillDomainItemDto::getScore, Comparator.nullsLast(Comparator.reverseOrder()))
+                .comparing(SkillDomainItemDto::getScore, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(SkillDomainItemDto::getScoreDelta, Comparator.nullsLast(Comparator.reverseOrder()))
                 .thenComparing(SkillDomainItemDto::getDomainCode));
         return items;
     }
@@ -473,8 +478,9 @@ public class ProfileService {
                 .filter(SkillDomainItemDto::isRankingEligible)
                 .filter(item -> item.getScore() != null && item.getScore().compareTo(BASELINE_SCORE) > 0)
                 .sorted(Comparator
-                        .comparing((SkillDomainItemDto item) -> distanceFromBaseline(item.getScore()), Comparator.reverseOrder())
-                        .thenComparing(SkillDomainItemDto::getScore, Comparator.reverseOrder()))
+                        .comparing(SkillDomainItemDto::getScore, Comparator.reverseOrder())
+                        .thenComparing(SkillDomainItemDto::getScoreDelta, Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(SkillDomainItemDto::getDomainCode))
                 .limit(3)
                 .toList();
     }
@@ -484,8 +490,9 @@ public class ProfileService {
                 .filter(SkillDomainItemDto::isRankingEligible)
                 .filter(item -> item.getScore() != null && item.getScore().compareTo(BASELINE_SCORE) < 0)
                 .sorted(Comparator
-                        .comparing((SkillDomainItemDto item) -> distanceFromBaseline(item.getScore()), Comparator.reverseOrder())
-                        .thenComparing(SkillDomainItemDto::getScore))
+                        .comparing(SkillDomainItemDto::getScore)
+                        .thenComparing(SkillDomainItemDto::getScoreDelta, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(SkillDomainItemDto::getDomainCode))
                 .limit(3)
                 .toList();
     }
@@ -611,20 +618,6 @@ public class ProfileService {
             }
         }
         return false;
-    }
-
-    private BigDecimal clampToScoreRange(BigDecimal score) {
-        if (score == null) {
-            return null;
-        }
-        return score.max(BigDecimal.ZERO).min(BigDecimal.valueOf(100)).setScale(1, RoundingMode.HALF_UP);
-    }
-
-    private BigDecimal distanceFromBaseline(BigDecimal score) {
-        if (score == null) {
-            return BigDecimal.ZERO;
-        }
-        return score.subtract(BASELINE_SCORE).abs();
     }
 
     private User requireUser(Long userId) {

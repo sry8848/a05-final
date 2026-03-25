@@ -43,7 +43,7 @@ class StateLedgerInitServiceTest {
         syllabus.setDomains(List.of(plan));
 
         AtomicReference<Map<String, Object>> ledgerRef = new AtomicReference<>();
-        assertThatCode(() -> ledgerRef.set(service.initLedger(6L, syllabus, List.of(domain))))
+        assertThatCode(() -> ledgerRef.set(service.initLedger(6L, "MIDDLE", syllabus, List.of(domain))))
                 .doesNotThrowAnyException();
 
         Map<String, Object> ledger = ledgerRef.get();
@@ -55,6 +55,7 @@ class StateLedgerInitServiceTest {
         assertThat(ledger.get("covered_domains")).isEqualTo(List.of());
         assertThat(ledger.get("covered_points")).isEqualTo(List.of());
         assertThat(ledger.get("recent_question_families")).isEqualTo(List.of());
+        assertThat(ledger.get("max_questions")).isEqualTo(16);
         assertThat(ledger.get("quota_state")).isEqualTo(Map.of(
                 "samePointContinue", 0,
                 "sameDomainContinue", 0,

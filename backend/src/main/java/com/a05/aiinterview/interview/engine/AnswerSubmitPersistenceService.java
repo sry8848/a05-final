@@ -92,6 +92,9 @@ public class AnswerSubmitPersistenceService {
         evaluationJson.put("decisionReason", evalOutput.getDecisionReason());
         evaluationJson.put("finalDecision", evalOutput.getFinalDecision());
         evaluationJson.put("nextFocus", evalOutput.getNextFocus());
+        evaluationJson.put("nextItemType", evalOutput.getNextItemType());
+        evaluationJson.put("nextItemName", evalOutput.getNextItemName());
+        evaluationJson.put("nextProjectPoint", evalOutput.getNextProjectPoint());
         evaluationJson.put("newCoveredDomains", evalOutput.getNewCoveredDomains());
         evaluationJson.put("newCoveredPoints", evalOutput.getNewCoveredPoints());
         evaluationJson.put("retrievalPlans", evalOutput.getRetrievalPlans());

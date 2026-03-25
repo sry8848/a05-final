@@ -107,6 +107,7 @@
 
 <script>
 import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { resolveBackendUrl } from '../api/base.js'
 import { getProfile, updateProfile, uploadProfileAvatar } from '../api/resume'
 
 export default {
@@ -169,7 +170,7 @@ export default {
       if (auth) {
         headers.Authorization = auth
       }
-      const response = await fetch(avatarUrl, { headers })
+      const response = await fetch(resolveBackendUrl(avatarUrl), { headers })
       if (!response.ok) {
         throw new Error('加载头像失败')
       }

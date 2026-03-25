@@ -5,6 +5,7 @@ import com.a05.aiinterview.ai.contract.StrategyCode;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionInput;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
+import com.a05.aiinterview.interview.entity.InterviewAttempt;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
@@ -19,7 +20,11 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @DisplayName("AnswerSubmitService evaluation input tests")
 class AnswerSubmitServiceEvaluationInputTest {
@@ -105,8 +110,10 @@ class AnswerSubmitServiceEvaluationInputTest {
         InterviewSession session = new InterviewSession();
         session.setId(77L);
         session.setTargetRole("JAVA_BACKEND");
+        session.setExperienceLevel("FRESH_GRAD");
         session.setStateLedgerJson(Map.of(
                 "quota_state", QuotaStateSupport.initialQuotaState(),
+                "max_questions", 14,
                 "domain_states", List.of(
                         Map.of("domainCode", "DOMAIN_SPRING", "status", "COVERED"),
                         Map.of("domainCode", "DOMAIN_REDIS", "status", "UNASKED")
@@ -166,6 +173,101 @@ class AnswerSubmitServiceEvaluationInputTest {
                         StrategyCode.S_ENTER_SCENARIO.code(),
                         StrategyCode.S_WRAPUP.code()
                 );
+    }
+
+    @Test
+    @DisplayName("buildEvaluationInput should expose progress fields and backfill max questions from experience profile")
+    void buildEvaluationInput_shouldExposeProgressFieldsAndBackfillMaxQuestionsFromExperienceProfile() {
+        AiClient aiClient = mock(AiClient.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        AnswerSubmitService service = new AnswerSubmitService(
+                aiClient,
+                sessionMapper,
+                questionMapper,
+                mock(InterviewAttemptMapper.class),
+                mock(AnswerSubmitPersistenceService.class),
+                mock(ReportGenerationService.class),
+                new InterviewDebugTraceService(new ObjectMapper()),
+                new RemainingDomainMenuBuilder(),
+                new AvailableStrategyAssembler(),
+                new DecisionExecutionPlanBuilder(),
+                new DecisionRepairOrchestrator(aiClient, new DecisionExecutionPlanBuilder()),
+                new SystemFallbackPlanBuilder(),
+                new PlannerHistoryBuilderService(sessionMapper, questionMapper)
+        );
+
+        InterviewSession session = new InterviewSession();
+        session.setId(88L);
+        session.setTargetRole("JAVA_BACKEND");
+        session.setExperienceLevel("JUNIOR");
+        session.setCurrentQuestionNo(4);
+        session.setStateLedgerJson(new java.util.LinkedHashMap<>(Map.of(
+                "quota_state", new java.util.LinkedHashMap<>(Map.of(
+                        QuotaStateSupport.SAME_POINT_CONTINUE, 1,
+                        QuotaStateSupport.PROJECT_TOTAL, 2
+                )),
+                "domain_states", List.of(
+                        Map.of("domainCode", "DOMAIN_REDIS", "status", "UNASKED")
+                )
+        )));
+        session.setSyllabusJson(Map.of(
+                "domains", List.of(
+                        Map.of(
+                                "domainCode", "DOMAIN_REDIS",
+                                "domainName", "Redis 缓存",
+                                "focusPoints", List.of("缓存一致性")
+                        )
+                ),
+                "experienceItems", List.of(
+                        Map.of(
+                                "itemType", "PROJECT",
+                                "itemName", "Chabst",
+                                "resumeDescription", "项目描述",
+                                "techHooks", List.of("Redis")
+                        )
+                )
+        ));
+
+        InterviewQuestion currentQuestion = new InterviewQuestion();
+        currentQuestion.setId(901L);
+        currentQuestion.setQuestionNo(6);
+        currentQuestion.setQuestionType("PRINCIPLE");
+        currentQuestion.setStem("请解释缓存击穿。");
+        currentQuestion.setExpectedPoints(List.of("定义"));
+        currentQuestion.setGenerationContextJson(Map.of(
+                "domainCode", "DOMAIN_REDIS",
+                "focusPoint", "缓存击穿"
+        ));
+
+        EvaluationDecisionInput input = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildEvaluationInput",
+                session,
+                currentQuestion,
+                List.of(currentQuestion),
+                List.of(),
+                "回答"
+        );
+
+        assertThat(input.getQuestionIndex()).isEqualTo(6);
+        assertThat(input.getMaxQuestions()).isEqualTo(15);
+        assertThat(input.getQuotaSnapshot()).containsKeys(
+                QuotaStateSupport.SAME_POINT_CONTINUE,
+                QuotaStateSupport.PROJECT_TOTAL
+        );
+        assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.SAME_POINT_CONTINUE).getUsed()).isEqualTo(1);
+        assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.SAME_POINT_CONTINUE).getMax()).isEqualTo(1);
+        assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.PROJECT_TOTAL).getUsed()).isEqualTo(2);
+        assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.PROJECT_TOTAL).getMax()).isEqualTo(3);
+        assertThat(session.getStateLedgerJson()).containsEntry("max_questions", 15);
+
+        verify(sessionMapper).updateById(argThat(updated ->
+                updated != null
+                        && updated.getId().equals(88L)
+                        && updated.getStateLedgerJson() != null
+                        && Integer.valueOf(15).equals(updated.getStateLedgerJson().get("max_questions"))
+        ));
     }
 
     @Test
@@ -242,12 +344,18 @@ class AnswerSubmitServiceEvaluationInputTest {
         assertThat(memory.getFirst().getAnswerAssessment()).isEmpty();
     }
 
-    private AnswerSubmitService buildService() {
+    @Test
+    @DisplayName("buildEvaluationInput should include cross-session blocked knowledge points and project entry points")
+    void buildEvaluationInput_shouldIncludeCrossSessionBlockedData() {
         AiClient aiClient = mock(AiClient.class);
-        return new AnswerSubmitService(
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        PlannerHistoryBuilderService plannerHistoryBuilderService =
+                new PlannerHistoryBuilderService(sessionMapper, questionMapper);
+        AnswerSubmitService service = new AnswerSubmitService(
                 aiClient,
-                mock(InterviewSessionMapper.class),
-                mock(InterviewQuestionMapper.class),
+                sessionMapper,
+                questionMapper,
                 mock(InterviewAttemptMapper.class),
                 mock(AnswerSubmitPersistenceService.class),
                 mock(ReportGenerationService.class),
@@ -256,7 +364,124 @@ class AnswerSubmitServiceEvaluationInputTest {
                 new AvailableStrategyAssembler(),
                 new DecisionExecutionPlanBuilder(),
                 new DecisionRepairOrchestrator(aiClient, new DecisionExecutionPlanBuilder()),
-                new SystemFallbackPlanBuilder()
+                new SystemFallbackPlanBuilder(),
+                plannerHistoryBuilderService
+        );
+
+        InterviewSession session = new InterviewSession();
+        session.setId(120L);
+        session.setUserId(1L);
+        session.setTargetRole("JAVA_BACKEND");
+        session.setExperienceLevel("FRESH_GRAD");
+        session.setStateLedgerJson(Map.of(
+                "quota_state", QuotaStateSupport.initialQuotaState(),
+                "max_questions", 14,
+                "domain_states", List.of(Map.of("domainCode", "DOMAIN_SPRING", "status", "UNASKED"))
+        ));
+        session.setSyllabusJson(Map.of(
+                "domains", List.of(
+                        Map.of(
+                                "domainCode", "DOMAIN_SPRING",
+                                "domainName", "Spring 框架",
+                                "focusPoints", List.of("事务传播")
+                        )
+                ),
+                "experienceItems", List.of(
+                        Map.of(
+                                "itemType", "PROJECT",
+                                "itemName", "Chabst",
+                                "resumeDescription", "项目描述",
+                                "techHooks", List.of("RabbitMQ 延迟消息处理超时订单", "Redisson 秒杀锁")
+                        )
+                )
+        ));
+
+        InterviewSession knowledgeHistory = new InterviewSession();
+        knowledgeHistory.setId(119L);
+        knowledgeHistory.setFinishedAt(java.time.LocalDateTime.of(2026, 3, 24, 10, 0));
+        knowledgeHistory.setStateLedgerJson(Map.of(
+                "covered_points", List.of("Redis / 缓存击穿", "MySQL / 索引优化")
+        ));
+
+        InterviewSession projectHistory = new InterviewSession();
+        projectHistory.setId(118L);
+        projectHistory.setFinishedAt(java.time.LocalDateTime.of(2026, 3, 23, 10, 0));
+        projectHistory.setStateLedgerJson(Map.of());
+
+        InterviewQuestion projectQuestion = new InterviewQuestion();
+        projectQuestion.setId(7001L);
+        projectQuestion.setSessionId(118L);
+        projectQuestion.setQuestionNo(2);
+        projectQuestion.setQuestionType("PROJECT_DEEP_DIVE");
+        projectQuestion.setGenerationContextJson(Map.of(
+                "activeItemType", "PROJECT",
+                "activeItemName", "Chabst",
+                "projectPoint", "RabbitMQ 延迟消息处理超时订单"
+        ));
+
+        when(sessionMapper.selectPlannerRecentSessions(
+                org.mockito.ArgumentMatchers.eq(1L),
+                org.mockito.ArgumentMatchers.eq("JAVA_BACKEND"),
+                org.mockito.ArgumentMatchers.eq(List.of("completed", "report_generating")),
+                any(),
+                org.mockito.ArgumentMatchers.eq(120L),
+                org.mockito.ArgumentMatchers.eq(3)
+        )).thenReturn(List.of(knowledgeHistory));
+        when(sessionMapper.selectPlannerRecentSessions(
+                1L,
+                "JAVA_BACKEND",
+                List.of("completed", "report_generating"),
+                null,
+                120L,
+                2
+        )).thenReturn(List.of(projectHistory));
+        when(questionMapper.selectList(any())).thenReturn(List.of(projectQuestion));
+
+        InterviewQuestion currentQuestion = new InterviewQuestion();
+        currentQuestion.setQuestionType("PRINCIPLE");
+        currentQuestion.setId(901L);
+        currentQuestion.setStem("请解释缓存击穿。");
+        currentQuestion.setExpectedPoints(List.of("定义"));
+        currentQuestion.setGenerationContextJson(Map.of(
+                "domainCode", "DOMAIN_SPRING",
+                "focusPoint", "缓存击穿"
+        ));
+
+        EvaluationDecisionInput input = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildEvaluationInput",
+                session,
+                currentQuestion,
+                List.of(currentQuestion),
+                List.<InterviewAttempt>of(),
+                "回答"
+        );
+
+        assertThat(input.getCrossSessionBlockedKnowledgePoints())
+                .containsExactly("Redis / 缓存击穿", "MySQL / 索引优化");
+        assertThat(input.getProjectAndInternshipSummary()).hasSize(1);
+        assertThat(input.getProjectAndInternshipSummary().getFirst().getBlockedEntryPoints())
+                .containsExactly("RabbitMQ 延迟消息处理超时订单");
+    }
+
+    private AnswerSubmitService buildService() {
+        AiClient aiClient = mock(AiClient.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        return new AnswerSubmitService(
+                aiClient,
+                sessionMapper,
+                questionMapper,
+                mock(InterviewAttemptMapper.class),
+                mock(AnswerSubmitPersistenceService.class),
+                mock(ReportGenerationService.class),
+                new InterviewDebugTraceService(new ObjectMapper()),
+                new RemainingDomainMenuBuilder(),
+                new AvailableStrategyAssembler(),
+                new DecisionExecutionPlanBuilder(),
+                new DecisionRepairOrchestrator(aiClient, new DecisionExecutionPlanBuilder()),
+                new SystemFallbackPlanBuilder(),
+                new PlannerHistoryBuilderService(sessionMapper, questionMapper)
         );
     }
 }

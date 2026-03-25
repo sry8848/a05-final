@@ -18,6 +18,9 @@ public class DecisionExecutionPlan {
     private String strategyCode;
     private String targetQuestionType;
     private String nextFocus;
+    private String nextItemType;
+    private String nextItemName;
+    private String nextProjectPoint;
     private String targetDomainCode;
     private String targetDomainName;
     private List<EvaluationDecisionOutput.CoveredDomain> newCoveredDomains;

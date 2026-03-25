@@ -83,11 +83,20 @@ public class MockAiClient implements AiClient {
         long startMs = System.currentTimeMillis();
         String nextFocus = input.getCurrentQuestion() != null ? input.getCurrentQuestion().getCurrentFocus() : "当前主题";
         String strategyCode = StrategyCode.S_ENTER_PROJECT.code();
+        EvaluationDecisionInput.ProjectAndInternshipItem firstProject = input.getProjectAndInternshipSummary() == null
+                || input.getProjectAndInternshipSummary().isEmpty()
+                ? null
+                : input.getProjectAndInternshipSummary().getFirst();
         EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
                 .decisionReason("当前继续提问仍有信息增益，因此进入项目主线继续建立真实工程画像。")
                 .interviewAction("CONTINUE")
                 .finalDecision(strategyCode)
                 .nextFocus(nextFocus)
+                .nextItemType(firstProject != null ? firstProject.getItemType() : "")
+                .nextItemName(firstProject != null ? firstProject.getItemName() : "")
+                .nextProjectPoint(firstProject != null && firstProject.getTechHooks() != null && !firstProject.getTechHooks().isEmpty()
+                        ? firstProject.getTechHooks().getFirst()
+                        : "")
                 .targetDomainCode("")
                 .newCoveredDomains(List.of())
                 .newCoveredPoints(List.of())
@@ -100,13 +109,14 @@ public class MockAiClient implements AiClient {
     public AiCallResult<ReportGenerationOutput> callReportGeneration(ReportGenerationInput input) {
         long startMs = System.currentTimeMillis();
         List<ReportGenerationOutput.SkillDomainScore> domainScores = buildMockDomainScores(input);
+        List<ReportGenerationOutput.ComprehensiveRadarScore> radarScores = buildMockRadarScores();
         ReportGenerationOutput output = ReportGenerationOutput.builder()
                 .overallScore(BigDecimal.valueOf(75.0))
                 .summary("候选人整体表现稳定，基础知识和工程表达具备一定水准。")
                 .strengths(List.of("表达清晰", "基础知识较完整", "有一定工程经验"))
                 .weaknesses(List.of("复杂场景下的取舍不够深入", "部分回答仍偏概念化"))
                 .improvementSuggestions(List.of("补齐高并发和分布式场景经验", "加强问题排查与方案权衡训练"))
-                .comprehensiveRadarScores(null)
+                .comprehensiveRadarScores(radarScores)
                 .skillDomainScores(domainScores)
                 .build();
         return mockResult(output, startMs, "report_generation");
@@ -152,6 +162,36 @@ public class MockAiClient implements AiClient {
                         .build())
                 .forEach(scores::add);
         return scores;
+    }
+
+    private List<ReportGenerationOutput.ComprehensiveRadarScore> buildMockRadarScores() {
+        return List.of(
+                ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                        .dimensionKey("fundamentals")
+                        .dimensionName("基础原理掌握")
+                        .score(BigDecimal.valueOf(78.0))
+                        .build(),
+                ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                        .dimensionKey("engineering_practice")
+                        .dimensionName("工程实践与项目落地")
+                        .score(BigDecimal.valueOf(74.0))
+                        .build(),
+                ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                        .dimensionKey("scenario_tradeoff")
+                        .dimensionName("场景分析与方案取舍")
+                        .score(BigDecimal.valueOf(72.0))
+                        .build(),
+                ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                        .dimensionKey("debugging")
+                        .dimensionName("问题定位与排查思路")
+                        .score(BigDecimal.valueOf(70.0))
+                        .build(),
+                ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                        .dimensionKey("communication")
+                        .dimensionName("沟通表达与结构化呈现")
+                        .score(BigDecimal.valueOf(76.0))
+                        .build()
+        );
     }
 
     private <T> AiCallResult<T> mockResult(T output, long startMs, String promptCode) {

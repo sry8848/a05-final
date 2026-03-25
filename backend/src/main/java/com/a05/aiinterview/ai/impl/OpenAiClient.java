@@ -592,9 +592,13 @@ public class OpenAiClient implements AiClient {
         variables.put("positionCode", safeString(interview != null ? interview.getPositionCode() : null));
         variables.put("experienceLevel", safeString(interview != null ? interview.getExperienceLevel() : null));
         variables.put("roundType", safeString(interview != null ? interview.getRoundType() : null));
+        variables.put("questionIndex", input.getQuestionIndex() == null ? "" : String.valueOf(input.getQuestionIndex()));
+        variables.put("maxQuestions", input.getMaxQuestions() == null ? "" : String.valueOf(input.getMaxQuestions()));
+        variables.put("quotaSnapshot", stringifyAsJson(input.getQuotaSnapshot()));
         variables.put("projectAndInternshipSummary", stringifyAsJson(input.getProjectAndInternshipSummary()));
         variables.put("remainingTargetDomains", formatRemainingTargetDomains(input.getRemainingTargetDomains()));
         variables.put("coveredKnowledgeSummary", stringifyAsJson(input.getCoveredKnowledgeSummary()));
+        variables.put("crossSessionBlockedKnowledgePoints", stringifyAsJson(input.getCrossSessionBlockedKnowledgePoints()));
         variables.put("availableStrategies", formatAvailableStrategies(input.getAvailableStrategies()));
         variables.put("currentQuestion", stringifyAsJson(input.getCurrentQuestion()));
         variables.put("answerText", safeString(input.getAnswerText()));

@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 评估决策 AI 调用入参。
@@ -24,9 +25,13 @@ public class EvaluationDecisionInput {
     private Long currentQuestionId;
 
     private InterviewMeta interview;
+    private Integer questionIndex;
+    private Integer maxQuestions;
+    private Map<String, QuotaSnapshotItem> quotaSnapshot;
     private List<ProjectAndInternshipItem> projectAndInternshipSummary;
     private List<RemainingTargetDomain> remainingTargetDomains;
     private List<String> coveredKnowledgeSummary;
+    private List<String> crossSessionBlockedKnowledgePoints;
     private List<AvailableStrategy> availableStrategies;
     private CurrentQuestionContext currentQuestion;
     private String answerText;
@@ -52,11 +57,21 @@ public class EvaluationDecisionInput {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    public static class QuotaSnapshotItem {
+        private Integer used;
+        private Integer max;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class ProjectAndInternshipItem {
         private String itemType;
         private String itemName;
         private String resumeDescription;
         private List<String> techHooks;
+        private List<String> blockedEntryPoints;
     }
 
     @Data

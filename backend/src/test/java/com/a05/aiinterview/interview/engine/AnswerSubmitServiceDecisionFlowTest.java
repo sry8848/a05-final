@@ -162,7 +162,8 @@ class AnswerSubmitServiceDecisionFlowTest {
                 new AvailableStrategyAssembler(),
                 planBuilder,
                 new DecisionRepairOrchestrator(aiClient, planBuilder),
-                new SystemFallbackPlanBuilder()
+                new SystemFallbackPlanBuilder(),
+                new PlannerHistoryBuilderService(sessionMapper, questionMapper)
         );
         return new Fixture(service, aiClient, sessionMapper, persistenceService, reportService, session);
     }

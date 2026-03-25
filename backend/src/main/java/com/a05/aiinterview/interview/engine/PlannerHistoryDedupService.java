@@ -21,24 +21,20 @@ public class PlannerHistoryDedupService {
                                      List<PlannerInput.HistoryInterviewItem> historyInterviews) {
         PlannerOutput safeOutput = output != null ? output : PlannerOutput.builder().build();
         List<PlannerOutput.DomainPlan> safeDomains = safeOutput.getDomains() != null ? safeOutput.getDomains() : List.of();
-        if (safeDomains.isEmpty()) {
-            return safeOutput;
-        }
-
         Set<String> denySet = buildDenySet(historyInterviews);
-        if (denySet.isEmpty()) {
-            return safeOutput;
-        }
-
         Map<String, PositionSkillDomain> allowedByCode = buildAllowedByCode(allowedDomains);
-        List<PlannerOutput.DomainPlan> dedupedDomains = safeDomains.stream()
+        List<PlannerOutput.DomainPlan> dedupedDomains = denySet.isEmpty()
+                ? safeDomains
+                : safeDomains.stream()
                 .map(domain -> deduplicateDomain(domain, allowedByCode.get(domain.getDomainCode()), denySet))
                 .toList();
+        List<PlannerOutput.ExperienceItem> dedupedExperienceItems =
+                deduplicateExperienceItems(safeOutput.getExperienceItems(), historyInterviews);
 
         return PlannerOutput.builder()
                 .planningReasoning(safeOutput.getPlanningReasoning())
                 .domains(dedupedDomains)
-                .experienceItems(safeOutput.getExperienceItems() != null ? safeOutput.getExperienceItems() : List.of())
+                .experienceItems(dedupedExperienceItems)
                 .build();
     }
 
@@ -76,6 +72,58 @@ public class PlannerHistoryDedupService {
                 .build();
     }
 
+    private List<PlannerOutput.ExperienceItem> deduplicateExperienceItems(
+            List<PlannerOutput.ExperienceItem> experienceItems,
+            List<PlannerInput.HistoryInterviewItem> historyInterviews) {
+        List<PlannerOutput.ExperienceItem> safeItems = experienceItems != null ? experienceItems : List.of();
+        if (safeItems.isEmpty()) {
+            return safeItems;
+        }
+        Map<PlannerHistoryBuilderService.ProjectIdentity, Set<String>> blockedEntryPoints =
+                buildBlockedEntryPoints(historyInterviews);
+        if (blockedEntryPoints.isEmpty()) {
+            return safeItems;
+        }
+        return safeItems.stream()
+                .map(item -> deduplicateExperienceItem(item, blockedEntryPoints))
+                .toList();
+    }
+
+    private PlannerOutput.ExperienceItem deduplicateExperienceItem(
+            PlannerOutput.ExperienceItem item,
+            Map<PlannerHistoryBuilderService.ProjectIdentity, Set<String>> blockedEntryPoints) {
+        if (item == null) {
+            return null;
+        }
+        List<String> originalTechHooks = PlannerFocusPointSupport.sanitizeFocusPoints(item.getTechHooks());
+        if (originalTechHooks.isEmpty()) {
+            return item;
+        }
+        Set<String> blocked = blockedEntryPoints.get(new PlannerHistoryBuilderService.ProjectIdentity(
+                item.getItemType(),
+                item.getItemName()
+        ));
+        if (blocked == null || blocked.isEmpty()) {
+            return copyExperienceItem(item, originalTechHooks);
+        }
+        List<String> filteredTechHooks = originalTechHooks.stream()
+                .filter(techHook -> !blocked.contains(PlannerFocusPointSupport.normalizeForHistoryMatch(techHook)))
+                .toList();
+        if (!filteredTechHooks.isEmpty()) {
+            return copyExperienceItem(item, filteredTechHooks);
+        }
+        return copyExperienceItem(item, List.of(originalTechHooks.get(0)));
+    }
+
+    private PlannerOutput.ExperienceItem copyExperienceItem(PlannerOutput.ExperienceItem item, List<String> techHooks) {
+        return PlannerOutput.ExperienceItem.builder()
+                .itemType(item.getItemType())
+                .itemName(item.getItemName())
+                .resumeDescription(item.getResumeDescription())
+                .techHooks(techHooks)
+                .build();
+    }
+
     private Set<String> buildDenySet(List<PlannerInput.HistoryInterviewItem> historyInterviews) {
         if (historyInterviews == null || historyInterviews.isEmpty()) {
             return Set.of();
@@ -107,5 +155,38 @@ public class PlannerHistoryDedupService {
             allowedByCode.put(allowedDomain.getDomainCode(), allowedDomain);
         }
         return allowedByCode;
+    }
+
+    private Map<PlannerHistoryBuilderService.ProjectIdentity, Set<String>> buildBlockedEntryPoints(
+            List<PlannerInput.HistoryInterviewItem> historyInterviews) {
+        if (historyInterviews == null || historyInterviews.isEmpty()) {
+            return Map.of();
+        }
+        LinkedHashMap<PlannerHistoryBuilderService.ProjectIdentity, Set<String>> blocked = new LinkedHashMap<>();
+        for (PlannerInput.HistoryInterviewItem historyInterview : historyInterviews) {
+            if (historyInterview == null || historyInterview.getDiscussedItems() == null) {
+                continue;
+            }
+            for (PlannerInput.HistoryExperienceItem discussedItem : historyInterview.getDiscussedItems()) {
+                if (discussedItem == null) {
+                    continue;
+                }
+                PlannerHistoryBuilderService.ProjectIdentity identity = new PlannerHistoryBuilderService.ProjectIdentity(
+                        discussedItem.getItemType(),
+                        discussedItem.getItemName()
+                );
+                if (identity.itemType().isBlank() || identity.itemName().isBlank()) {
+                    continue;
+                }
+                Set<String> entryPoints = blocked.computeIfAbsent(identity, ignored -> new LinkedHashSet<>());
+                for (String entryPoint : discussedItem.getEntryPoints()) {
+                    String normalized = PlannerFocusPointSupport.normalizeForHistoryMatch(entryPoint);
+                    if (normalized != null) {
+                        entryPoints.add(normalized);
+                    }
+                }
+            }
+        }
+        return blocked;
     }
 }

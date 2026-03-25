@@ -75,7 +75,7 @@ class ReportGenerationServiceTest {
         when(attemptMapper.selectList(any())).thenReturn(List.of(attempt));
 
         ReportGenerationOutput output = ReportGenerationOutput.builder()
-                .overallScore(BigDecimal.valueOf(88))
+                .overallScore(BigDecimal.valueOf(11))
                 .summary("总结")
                 .strengths(List.of("优势"))
                 .weaknesses(List.of("短板"))
@@ -94,6 +94,27 @@ class ReportGenerationServiceTest {
                                 .dimensionName("基础原理掌握")
                                 .score(BigDecimal.valueOf(90))
                                 .build()
+                        ,
+                        ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                                .dimensionKey("engineering_practice")
+                                .dimensionName("工程实践与项目落地")
+                                .score(BigDecimal.valueOf(80))
+                                .build(),
+                        ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                                .dimensionKey("scenario_tradeoff")
+                                .dimensionName("场景分析与方案取舍")
+                                .score(BigDecimal.valueOf(70))
+                                .build(),
+                        ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                                .dimensionKey("debugging")
+                                .dimensionName("问题定位与排查思路")
+                                .score(BigDecimal.valueOf(60))
+                                .build(),
+                        ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                                .dimensionKey("communication")
+                                .dimensionName("沟通表达与结构化呈现")
+                                .score(BigDecimal.valueOf(50))
+                                .build()
                 ))
                 .build();
         when(aiClient.callReportGeneration(any())).thenReturn(
@@ -109,15 +130,16 @@ class ReportGenerationServiceTest {
         ArgumentCaptor<InterviewReport> reportCaptor = ArgumentCaptor.forClass(InterviewReport.class);
         verify(reportMapper).insert(reportCaptor.capture());
         InterviewReport persisted = reportCaptor.getValue();
+        assertEquals(BigDecimal.valueOf(72.0), persisted.getOverallScore());
         assertNotNull(persisted.getComprehensiveRadarScores());
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> dimensions = (List<Map<String, Object>>) persisted.getComprehensiveRadarScores().get("dimensions");
-        assertEquals(1, dimensions.size());
+        assertEquals(5, dimensions.size());
         assertEquals("fundamentals", dimensions.get(0).get("dimensionKey"));
     }
 
     @Test
-    void generateAsync_shouldKeepPracticeRadarScoresNull() {
+    void generateAsync_shouldPersistPracticeRadarForInternalOverallScoreCalculation() {
         AiClient aiClient = mock(AiClient.class);
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
@@ -140,13 +162,24 @@ class ReportGenerationServiceTest {
         when(attemptMapper.selectList(any())).thenReturn(List.of());
 
         ReportGenerationOutput output = ReportGenerationOutput.builder()
-                .overallScore(BigDecimal.valueOf(70))
+                .overallScore(BigDecimal.valueOf(20))
                 .summary("总结")
                 .strengths(List.of())
                 .weaknesses(List.of())
                 .improvementSuggestions(List.of())
                 .skillDomainScores(List.of())
-                .comprehensiveRadarScores(null)
+                .comprehensiveRadarScores(List.of(
+                        ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                                .dimensionKey("fundamentals").dimensionName("基础原理掌握").score(BigDecimal.valueOf(80)).build(),
+                        ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                                .dimensionKey("engineering_practice").dimensionName("工程实践与项目落地").score(BigDecimal.valueOf(70)).build(),
+                        ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                                .dimensionKey("scenario_tradeoff").dimensionName("场景分析与方案取舍").score(BigDecimal.valueOf(60)).build(),
+                        ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                                .dimensionKey("debugging").dimensionName("问题定位与排查思路").score(BigDecimal.valueOf(90)).build(),
+                        ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                                .dimensionKey("communication").dimensionName("沟通表达与结构化呈现").score(BigDecimal.valueOf(100)).build()
+                ))
                 .build();
         when(aiClient.callReportGeneration(any())).thenReturn(
                 AiCallResult.<ReportGenerationOutput>builder().output(output).build()
@@ -156,7 +189,8 @@ class ReportGenerationServiceTest {
 
         ArgumentCaptor<InterviewReport> reportCaptor = ArgumentCaptor.forClass(InterviewReport.class);
         verify(reportMapper).insert(reportCaptor.capture());
-        assertNull(reportCaptor.getValue().getComprehensiveRadarScores());
+        assertNotNull(reportCaptor.getValue().getComprehensiveRadarScores());
+        assertEquals(BigDecimal.valueOf(79.0), reportCaptor.getValue().getOverallScore());
     }
 
     @Test

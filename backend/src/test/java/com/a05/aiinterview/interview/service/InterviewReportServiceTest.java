@@ -225,6 +225,51 @@ class InterviewReportServiceTest {
         assertEquals("failed", dto.getReportStatus());
     }
 
+    @Test
+    void getReport_shouldHidePracticeRadarButExposeRecalculatedOverallScore() {
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        ReportGenerationService generationService = mock(ReportGenerationService.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
+        InterviewReportService service = new InterviewReportService(
+                sessionMapper, reportMapper, questionMapper, attemptMapper, generationService, statusService
+        );
+
+        Long sessionId = 9001L;
+        Long userId = 9002L;
+        InterviewSession session = new InterviewSession();
+        session.setId(sessionId);
+        session.setUserId(userId);
+        session.setStatus("completed");
+        session.setMode("practice");
+        session.setTargetRole("JAVA_BACKEND");
+        when(sessionMapper.selectById(sessionId)).thenReturn(session);
+        when(statusService.resolveAndSync(session)).thenReturn("completed");
+
+        InterviewReport report = new InterviewReport();
+        report.setId(18L);
+        report.setSessionId(sessionId);
+        report.setOverallScore(BigDecimal.valueOf(12));
+        report.setComprehensiveRadarScores(Map.of(
+                "dimensions", List.of(
+                        Map.of("dimensionKey", "fundamentals", "dimensionName", "基础原理掌握", "score", 80),
+                        Map.of("dimensionKey", "engineering_practice", "dimensionName", "工程实践与项目落地", "score", 70),
+                        Map.of("dimensionKey", "scenario_tradeoff", "dimensionName", "场景分析与方案取舍", "score", 60),
+                        Map.of("dimensionKey", "debugging", "dimensionName", "问题定位与排查思路", "score", 90),
+                        Map.of("dimensionKey", "communication", "dimensionName", "沟通表达与结构化呈现", "score", 100)
+                )
+        ));
+        when(reportMapper.selectBySessionId(sessionId)).thenReturn(report);
+        when(questionMapper.selectList(any())).thenReturn(List.of());
+
+        InterviewReportDto dto = service.getReport(sessionId, userId);
+
+        assertEquals(BigDecimal.valueOf(79.0), dto.getOverallScore());
+        assertNull(dto.getComprehensiveRadarScores());
+    }
+
     private InterviewQuestion buildQuestion(Long id, Long sessionId, int no, String stem) {
         InterviewQuestion q = new InterviewQuestion();
         q.setId(id);

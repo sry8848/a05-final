@@ -130,13 +130,13 @@
             </div>
           </div>
 
-          <div v-if="evaluationStatus === 'ready'" class="domain-score-list">
-            <div v-for="item in detail.evaluatedDomains" :key="item.domainName" class="domain-score-item">
+          <div v-if="evaluationStatus === 'ready' && detailDomainFeedback.length" class="domain-score-list">
+            <p class="domain-feedback-title">知识域点评</p>
+            <div v-for="item in detailDomainFeedback" :key="`${item.domainCode}-${item.domainName}`" class="domain-score-item">
               <div class="domain-score-header">
                 <span>{{ item.domainName }}</span>
-                <strong>{{ hasDomainScore(item) ? `${Number(item.score)} 分` : '待评估' }}</strong>
               </div>
-              <p>{{ item.commentary || item.note }}</p>
+              <p>{{ item.commentary || '暂无点评' }}</p>
             </div>
           </div>
 
@@ -250,11 +250,11 @@
                   </div>
                 </div>
 
-                <div v-if="redoLatest.evaluatedDomains.length" class="domain-score-list">
-                  <div v-for="item in redoLatest.evaluatedDomains" :key="`${item.domainCode}-${item.domainName}`" class="domain-score-item">
+                <div v-if="redoDomainFeedback.length" class="domain-score-list">
+                  <p class="domain-feedback-title">知识域点评</p>
+                  <div v-for="item in redoDomainFeedback" :key="`${item.domainCode}-${item.domainName}`" class="domain-score-item">
                     <div class="domain-score-header">
                       <span>{{ item.domainName || item.domainCode }}</span>
-                      <strong>{{ hasDomainScore(item) ? `${Number(item.score)} 分` : '待评估' }}</strong>
                     </div>
                     <p>{{ item.commentary || '暂无点评' }}</p>
                   </div>
@@ -425,6 +425,7 @@ import {
   shouldPollQuestionRedoAttempt,
   withQuestionRedoState
 } from '../utils/questionRedoState'
+import { buildEvaluatedDomainFeedback } from '../utils/questionDomainFeedback'
 
 const CONSULT_STORAGE_KEY = 'questionConsultHistory'
 const REDO_POLL_INTERVAL_MS = 2000
@@ -490,6 +491,7 @@ export default {
       const commentary = String(props.detail?.commentary || '').trim()
       return commentary || '评语待生成'
     })
+    const detailDomainFeedback = computed(() => buildEvaluatedDomainFeedback(props.detail?.evaluatedDomains))
 
     const summaryScoreText = computed(() => {
       if (evaluationStatus.value !== 'ready' || !hasNumericScore.value) return '--'
@@ -508,6 +510,7 @@ export default {
       if (score >= 60) return 'medium'
       return 'low'
     })
+    const redoDomainFeedback = computed(() => buildEvaluatedDomainFeedback(redoLatest.value?.evaluatedDomains))
 
     const latestRedoAtText = computed(() => {
       const raw = redoLatest.value?.createdAt
@@ -516,11 +519,6 @@ export default {
       if (Number.isNaN(date.getTime())) return String(raw)
       return date.toLocaleString('zh-CN', { hour12: false })
     })
-
-    const hasDomainScore = (item) => {
-      if (!item || item.score == null) return false
-      return Number.isFinite(Number(item.score))
-    }
 
     const renderSegments = computed(() => {
       if (!props.detail?.highlightedSegments || !props.detail.highlightedSegments.length) return []
@@ -777,11 +775,12 @@ export default {
       hasNumericScore,
       scoreClass,
       displayCommentary,
+      detailDomainFeedback,
       summaryScoreText,
       redoHasNumericScore,
       redoScoreClass,
+      redoDomainFeedback,
       latestRedoAtText,
-      hasDomainScore,
       renderSegments,
       annotationNotes,
       quickQuestions,
@@ -1248,6 +1247,13 @@ export default {
   flex-direction: column;
   gap: 12px;
   margin-bottom: 18px;
+}
+
+.domain-feedback-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
 .domain-score-item {

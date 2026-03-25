@@ -23,6 +23,9 @@ public class EvaluationDecisionOutput {
     /** StrategyCode */
     private String finalDecision;
     private String nextFocus;
+    private String nextItemType;
+    private String nextItemName;
+    private String nextProjectPoint;
     private String targetDomainCode;
     private List<CoveredDomain> newCoveredDomains;
     private List<String> newCoveredPoints;

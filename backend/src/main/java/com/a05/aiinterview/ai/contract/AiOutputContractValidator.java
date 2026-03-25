@@ -85,6 +85,9 @@ public class AiOutputContractValidator {
         output.setDecisionReason(defaultString(output.getDecisionReason(), ""));
         output.setFinalDecision(defaultString(output.getFinalDecision(), ""));
         output.setNextFocus(defaultString(output.getNextFocus(), ""));
+        output.setNextItemType(defaultString(output.getNextItemType(), ""));
+        output.setNextItemName(defaultString(output.getNextItemName(), ""));
+        output.setNextProjectPoint(defaultString(output.getNextProjectPoint(), ""));
         output.setTargetDomainCode(defaultString(output.getTargetDomainCode(), ""));
         List<EvaluationDecisionOutput.CoveredDomain> rawCoveredDomains = output.getNewCoveredDomains();
         output.setNewCoveredDomains(sanitizeCoveredDomains(rawCoveredDomains));
@@ -106,6 +109,9 @@ public class AiOutputContractValidator {
         if ("WRAPUP".equals(output.getInterviewAction())) {
             output.setFinalDecision(StrategyCode.S_WRAPUP.code());
             output.setNextFocus("");
+            output.setNextItemType("");
+            output.setNextItemName("");
+            output.setNextProjectPoint("");
             output.setTargetDomainCode("");
             output.setRetrievalPlans(new ArrayList<>());
             return output;
@@ -203,6 +209,9 @@ public class AiOutputContractValidator {
                 .decisionReason("")
                 .finalDecision(StrategyCode.S_WRAPUP.code())
                 .nextFocus("")
+                .nextItemType("")
+                .nextItemName("")
+                .nextProjectPoint("")
                 .targetDomainCode("")
                 .newCoveredDomains(new ArrayList<>())
                 .newCoveredPoints(new ArrayList<>())

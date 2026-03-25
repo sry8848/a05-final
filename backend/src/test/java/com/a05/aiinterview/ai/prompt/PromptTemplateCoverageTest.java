@@ -89,8 +89,12 @@ class PromptTemplateCoverageTest {
                 Map.entry("currentQuestion", "{\"stem\":\"你刚才提到 Seata AT 模式，那具体讲讲全局事务和本地事务的边界。\",\"questionType\":\"PRINCIPLE\",\"domainCode\":\"DOMAIN_SPRING\",\"domainName\":\"Spring 框架\",\"currentFocus\":\"Seata AT事务边界\",\"relatedItemKey\":\"\",\"relatedItemType\":\"\",\"relatedItemName\":\"\"}"),
                 Map.entry("answerText", "回答内容"),
                 Map.entry("expectedPoints", "- 参数含义\n- 调优思路"),
-                Map.entry("projectAndInternshipSummary", "[{\"itemType\":\"PROJECT\",\"itemName\":\"订单系统\",\"resumeDescription\":\"负责订单链路\",\"techHooks\":[\"线程池调优\"]}]"),
+                Map.entry("projectAndInternshipSummary", "[{\"itemType\":\"PROJECT\",\"itemName\":\"订单系统\",\"resumeDescription\":\"负责订单链路\",\"techHooks\":[\"线程池调优\"],\"blockedEntryPoints\":[\"Redis 缓存一致性\"]}]"),
                 Map.entry("coveredKnowledgeSummary", "[\"Java / 锁升级\"]"),
+                Map.entry("crossSessionBlockedKnowledgePoints", "[\"Redis / 缓存击穿\"]"),
+                Map.entry("questionIndex", 4),
+                Map.entry("maxQuestions", 16),
+                Map.entry("quotaSnapshot", "{\"samePointContinue\":{\"used\":1,\"max\":1},\"projectTotal\":{\"used\":2,\"max\":3}}"),
                 Map.entry("retrievedMaterials", "[]"),
                 Map.entry("recentInterviewMemory", "[]"),
                 Map.entry("repairMode", "false"),
@@ -106,6 +110,12 @@ class PromptTemplateCoverageTest {
                 .contains("DOMAIN_REDIS")
                 .contains("S_J_PRESSURE")
                 .contains("S_ENTER_PROJECT")
+                .contains("当前题号")
+                .contains("4")
+                .contains("16")
+                .contains("samePointContinue")
+                .contains("近期跨场禁选知识点")
+                .contains("blockedEntryPoints")
                 .contains("历史问题、回答概要、回答评价")
                 .doesNotContain("知识域及知识点状态")
                 .doesNotContain("\"possibleNextMoves\"")
@@ -120,6 +130,9 @@ class PromptTemplateCoverageTest {
                 .contains("StrategyCode")
                 .contains("只能从当前注入的策略池中选择一个 `finalDecision`")
                 .contains("nextFocus")
+                .contains("nextProjectPoint")
+                .contains("nextItemType")
+                .contains("nextItemName")
                 .contains("`targetDomainCode` 必须从【主考纲剩余待考察域（菜单）】中选择一个合法的 `domainCode`")
                 .contains("绝不能写成完整问句")
                 .contains("绝不允许把下一题准备问的知识点提前预支写进去")

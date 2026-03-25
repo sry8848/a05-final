@@ -3,6 +3,7 @@ package com.a05.aiinterview.interview.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.a05.aiinterview.common.enums.ExperienceLevel;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -40,4 +41,8 @@ public class InterviewPreference {
     private Integer answerTimeLimitSeconds;
 
     private LocalDateTime updatedAt;
+
+    public void setExperienceLevel(String experienceLevel) {
+        this.experienceLevel = ExperienceLevel.normalizeStoredValue(experienceLevel);
+    }
 }

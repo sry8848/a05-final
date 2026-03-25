@@ -657,23 +657,49 @@ export default {
     }
 
     const handleLoginSuccess = (userData) => {
-      const nextViewState = resolveUserLoginViewState()
-      if (userData?.token) {
-        persistUserSession(localStorage, userData)
+      const nextViewState = resolveUserLoginViewState({
+        isLoggedIn: isLoggedIn.value,
+        isAdmin: isAdmin.value,
+        showAdminLogin: showAdminLogin.value,
+        showRegister: showRegister.value
+      })
+      if (!userData?.token) {
+        showNotification('登录返回缺少令牌，请重试', 'error')
+        return
       }
-      if (userData && userData.nickname) {
-        user.name = userData.nickname
-      }
-      isLoggedIn.value = nextViewState.isLoggedIn
-      isAdmin.value = nextViewState.isAdmin
-      showAdminLogin.value = nextViewState.showAdminLogin
-      showRegister.value = nextViewState.showRegister
-      showNotification('登录成功，欢迎回来！', 'success')
+      persistUserSession(localStorage, userData)
+      getCurrentUser(userData.token)
+        .then((currentUser) => {
+          persistUserSession(localStorage, {
+            token: userData.token,
+            nickname: currentUser?.nickname || userData.nickname || '',
+            email: currentUser?.email || ''
+          })
+          user.name = currentUser?.nickname || userData.nickname || user.name
+          user.email = currentUser?.email || ''
+          isLoggedIn.value = nextViewState.isLoggedIn
+          isAdmin.value = nextViewState.isAdmin
+          showAdminLogin.value = nextViewState.showAdminLogin
+          showRegister.value = nextViewState.showRegister
+          showNotification('登录成功，欢迎回来！', 'success')
+        })
+        .catch((error) => {
+          clearPersistedAuthSession(localStorage)
+          user.name = '面试者'
+          user.email = ''
+          showNotification(error?.message || '获取当前用户信息失败，请重试', 'error')
+        })
     }
 
     const handleRegisterSuccess = (userData) => {
-      const nextViewState = resolveLogoutViewState()
+      const nextViewState = resolveLogoutViewState({
+        isLoggedIn: isLoggedIn.value,
+        isAdmin: isAdmin.value,
+        showAdminLogin: showAdminLogin.value,
+        currentPage: currentPage.value
+      })
       user.name = userData.username
+      user.email = userData.email || ''
       isLoggedIn.value = nextViewState.isLoggedIn
       isAdmin.value = nextViewState.isAdmin
       showAdminLogin.value = nextViewState.showAdminLogin
@@ -683,7 +709,12 @@ export default {
     }
 
     const handleLogout = async () => {
-      const nextViewState = resolveLogoutViewState()
+      const nextViewState = resolveLogoutViewState({
+        isLoggedIn: isLoggedIn.value,
+        isAdmin: isAdmin.value,
+        showAdminLogin: showAdminLogin.value,
+        currentPage: currentPage.value
+      })
       const adminToken = localStorage.getItem(ADMIN_TOKEN_KEY)
       const userToken = localStorage.getItem(USER_TOKEN_KEY)
       try {
@@ -701,6 +732,8 @@ export default {
       showAdminLogin.value = nextViewState.showAdminLogin
       showRegister.value = false
       currentPage.value = nextViewState.currentPage
+      user.name = '面试者'
+      user.email = ''
       isInterviewRunning.value = false
       showReportGeneratingPage.value = false
       pendingGeneratingResult.value = null
@@ -1224,11 +1257,14 @@ export default {
         if (restored.userName) {
           user.name = restored.userName
         }
+        user.email = restored.userEmail || ''
       } catch (error) {
         console.warn('[App] auth session restore failed', error)
         clearPersistedAuthSession(localStorage)
         isLoggedIn.value = false
         isAdmin.value = false
+        user.name = '面试者'
+        user.email = ''
       }
     }
 

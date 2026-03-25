@@ -581,12 +581,15 @@ public class QuestionStreamService {
 
         return NextQuestionPlan.builder()
                 .interviewAction("CONTINUE")
-                .effectiveDecisionSource(toStr(effectivePlan.get("effectiveDecisionSource")))
-                .finalDecision(toStr(effectivePlan.get("strategyCode")))
-                .targetQuestionType(toStr(effectivePlan.get("targetQuestionType")))
-                .nextFocus(toStr(effectivePlan.get("nextFocus")))
-                .targetDomainCode(toStr(effectivePlan.get("targetDomainCode")))
-                .targetDomainName(toStr(effectivePlan.get("targetDomainName")))
+                .effectiveDecisionSource(firstNonBlank(toStr(effectivePlan.get("effectiveDecisionSource")), ""))
+                .finalDecision(firstNonBlank(toStr(effectivePlan.get("strategyCode")), ""))
+                .targetQuestionType(firstNonBlank(toStr(effectivePlan.get("targetQuestionType")), ""))
+                .nextFocus(firstNonBlank(toStr(effectivePlan.get("nextFocus")), ""))
+                .nextItemType(firstNonBlank(toStr(effectivePlan.get("nextItemType")), ""))
+                .nextItemName(firstNonBlank(toStr(effectivePlan.get("nextItemName")), ""))
+                .nextProjectPoint(firstNonBlank(toStr(effectivePlan.get("nextProjectPoint")), ""))
+                .targetDomainCode(firstNonBlank(toStr(effectivePlan.get("targetDomainCode")), ""))
+                .targetDomainName(firstNonBlank(toStr(effectivePlan.get("targetDomainName")), ""))
                 .decisionReason("SYSTEM_FALLBACK".equalsIgnoreCase(toStr(effectivePlan.get("effectiveDecisionSource")))
                         ? ""
                         : toStr(effectivePlan.get("decisionReason")))
@@ -617,7 +620,8 @@ public class QuestionStreamService {
                 buildAskedQuestionsForPrompt(historyQuestions, ASKED_QUESTIONS_MAX_CHARS);
 
         ResolvedDomain resolvedDomain = resolveRelatedDomain(session, plan);
-        ResolvedItem resolvedItem = resolveActiveItem(session);
+        ResolvedItem resolvedItem = resolveActiveItem(session, plan);
+        String questionGoalFocus = resolveQuestionGoalFocus(plan);
 
         QuestionGenerationInput.RetrievalContext retrievalContext = QuestionGenerationInput.RetrievalContext.builder()
                 .summary(RAG_CONTEXT_FALLBACK)
@@ -640,7 +644,7 @@ public class QuestionStreamService {
                         .activeItemKey(resolvedItem.itemKey)
                         .itemType(resolvedItem.itemType)
                         .itemName(resolvedItem.itemName)
-                        .currentFocus(firstNonBlank(extractLedgerString(session, "current_focus"), plan.getNextFocus()))
+                        .currentFocus(firstNonBlank(extractLedgerString(session, "current_focus"), plan.getNextProjectPoint(), plan.getNextFocus()))
                         .build())
                 .recentContext(QuestionGenerationInput.RecentContext.builder()
                         .lastQuestion(historyQuestions.isEmpty() ? "" : historyQuestions.getLast().getStem())
@@ -650,7 +654,7 @@ public class QuestionStreamService {
                         .build())
                 .nextQuestionGoal(QuestionGenerationInput.NextQuestionGoal.builder()
                         .questionType(firstNonBlank(plan.getTargetQuestionType(), "PRINCIPLE"))
-                        .nextFocus(plan.getNextFocus())
+                        .nextFocus(questionGoalFocus)
                         .goalSummary(buildGoalSummary(plan))
                         .relatedDomainId(resolvedDomain.domainId)
                         .relatedDomainCode(resolvedDomain.domainCode)
@@ -692,7 +696,7 @@ public class QuestionStreamService {
                 .max(Integer::compareTo)
                 .orElse(0) + 1;
         ResolvedDomain resolvedDomain = resolveRelatedDomain(session, plan);
-        ResolvedItem resolvedItem = resolveActiveItem(session);
+        ResolvedItem resolvedItem = resolveActiveItem(session, plan);
         String questionType = firstNonBlank(plan.getTargetQuestionType(), "PRINCIPLE");
         resolvedDomain = ensureQuestionDomain(session, currentQuestion, questionType, resolvedDomain);
 
@@ -702,7 +706,7 @@ public class QuestionStreamService {
         question.setQuestionType(questionType);
         question.setDomainId(resolvedDomain.domainId);
         question.setStem(stem);
-        question.setTargetSkill(firstNonBlank(plan.getNextFocus(), resolvedDomain.domainName));
+        question.setTargetSkill(firstNonBlank(plan.getNextProjectPoint(), plan.getNextFocus(), resolvedDomain.domainName));
         question.setExpectedPoints(List.of());
         question.setStatus("asked");
 
@@ -711,6 +715,7 @@ public class QuestionStreamService {
         ctx.put("domainName", resolvedDomain.domainName);
         ctx.put("questionType", questionType);
         ctx.put("focusPoint", plan.getNextFocus());
+        ctx.put("projectPoint", firstNonBlank(plan.getNextProjectPoint(), ""));
         ctx.put("targetSkill", question.getTargetSkill());
         ctx.put("expectedPoints", question.getExpectedPoints());
         ctx.put("activeItemKey", resolvedItem.itemKey);
@@ -1142,7 +1147,7 @@ public class QuestionStreamService {
     }
 
     private String buildGoalSummary(NextQuestionPlan plan) {
-        String focus = firstNonBlank(plan.getNextFocus(), "当前主题");
+        String focus = firstNonBlank(resolveQuestionGoalFocus(plan), "当前主题");
         return "围绕「" + focus + "」继续形成判断。";
     }
 
@@ -1271,15 +1276,64 @@ public class QuestionStreamService {
         return new ResolvedDomain(null, "", "");
     }
 
-    private ResolvedItem resolveActiveItem(InterviewSession session) {
+    private ResolvedItem resolveActiveItem(InterviewSession session, NextQuestionPlan plan) {
+        String planItemType = plan == null ? "" : firstNonBlank(plan.getNextItemType(), "");
+        String planItemName = plan == null ? "" : firstNonBlank(plan.getNextItemName(), "");
+        if (!planItemType.isBlank() && !planItemName.isBlank()) {
+            ResolvedItem fromSyllabus = resolveActiveItemFromSyllabus(session, planItemType, planItemName);
+            if (fromSyllabus != null) {
+                return fromSyllabus;
+            }
+            return new ResolvedItem("", planItemType, planItemName);
+        }
         return new ResolvedItem(
                 extractLedgerString(session, "active_item_key"),
                 extractLedgerString(session, "active_item_type"),
                 extractLedgerString(session, "active_item_name"));
     }
 
+    @SuppressWarnings("unchecked")
+    private ResolvedItem resolveActiveItemFromSyllabus(InterviewSession session, String itemType, String itemName) {
+        if (session == null || session.getSyllabusJson() == null) {
+            return null;
+        }
+        Object rawItems = session.getSyllabusJson().get("experienceItems");
+        if (!(rawItems instanceof List<?> items)) {
+            return null;
+        }
+        for (Object itemObj : items) {
+            if (!(itemObj instanceof Map<?, ?> item)) {
+                continue;
+            }
+            if (normalize(itemType).equals(normalize(toStr(item.get("itemType"))))
+                    && firstNonBlank(itemName, "").equals(firstNonBlank(toStr(item.get("itemName")), ""))) {
+                return new ResolvedItem(
+                        firstNonBlank(toStr(item.get("itemKey")), ""),
+                        firstNonBlank(toStr(item.get("itemType")), itemType),
+                        firstNonBlank(toStr(item.get("itemName")), itemName)
+                );
+            }
+        }
+        return null;
+    }
+
+    private String resolveQuestionGoalFocus(NextQuestionPlan plan) {
+        if (plan == null) {
+            return "";
+        }
+        if ("PROJECT_DEEP_DIVE".equalsIgnoreCase(firstNonBlank(plan.getTargetQuestionType(), ""))
+                && !firstNonBlank(plan.getNextProjectPoint(), "").isBlank()) {
+            return plan.getNextProjectPoint();
+        }
+        return firstNonBlank(plan.getNextFocus(), "");
+    }
+
     private String buildQuestionFamilyId(String questionType, String focusPoint) {
         return firstNonBlank(questionType, "UNKNOWN") + "." + firstNonBlank(focusPoint, "focus");
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
     }
 
     @lombok.Data
@@ -1292,6 +1346,9 @@ public class QuestionStreamService {
         private String finalDecision;
         private String targetQuestionType;
         private String nextFocus;
+        private String nextItemType;
+        private String nextItemName;
+        private String nextProjectPoint;
         private String targetDomainCode;
         private String targetDomainName;
         private String decisionReason;

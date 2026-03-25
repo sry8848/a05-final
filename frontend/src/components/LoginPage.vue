@@ -209,15 +209,12 @@ export default {
       }
       sendingCode.value = true
       try {
-        const data = await sendEmailCode(codeForm.email, 'login')
+        await sendEmailCode(codeForm.email, 'login')
         countdown.value = 60
         const timer = setInterval(() => {
           countdown.value--
           if (countdown.value <= 0) clearInterval(timer)
         }, 1000)
-        if (data && data.devCode) {
-          alert('开发环境验证码：' + data.devCode)
-        }
       } catch (e) {
         alert(e.message || '发送验证码失败')
       } finally {

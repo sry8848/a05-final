@@ -22,7 +22,8 @@ public class AvailableStrategyAssembler {
     public List<EvaluationDecisionInput.AvailableStrategy> assemble(String currentQuestionType,
                                                                     boolean hasProjectContext,
                                                                     List<EvaluationDecisionInput.RemainingTargetDomain> remainingTargetDomains,
-                                                                    Map<String, Object> quotaState) {
+                                                                    Map<String, Object> quotaState,
+                                                                    String experienceLevel) {
         String normalizedType = StrategyCatalog.normalizeQuestionType(currentQuestionType);
         Map<String, Object> normalizedQuotaState = quotaState == null
                 ? QuotaStateSupport.initialQuotaState()
@@ -37,7 +38,13 @@ public class AvailableStrategyAssembler {
         pool.add(StrategyCatalog.wrapup());
 
         return pool.stream()
-                .filter(definition -> isAvailable(definition, hasProjectContext, remainingDomainCodes, normalizedQuotaState))
+                .filter(definition -> isAvailable(
+                        definition,
+                        hasProjectContext,
+                        remainingDomainCodes,
+                        normalizedQuotaState,
+                        experienceLevel
+                ))
                 .map(this::toInput)
                 .toList();
     }
@@ -56,7 +63,8 @@ public class AvailableStrategyAssembler {
     private boolean isAvailable(StrategyDefinition definition,
                                 boolean hasProjectContext,
                                 Set<String> remainingDomainCodes,
-                                Map<String, Object> quotaState) {
+                                Map<String, Object> quotaState,
+                                String experienceLevel) {
         if (definition.wrapup()) {
             return true;
         }
@@ -67,7 +75,8 @@ public class AvailableStrategyAssembler {
             return false;
         }
         for (StrategyLimit limit : definition.blockingLimits()) {
-            if (QuotaStateSupport.toInt(quotaState.get(limit.ledgerKey())) >= limit.maxCount()) {
+            if (QuotaStateSupport.toInt(quotaState.get(limit.ledgerKey()))
+                    >= InterviewPacingSupport.maxFor(experienceLevel, limit)) {
                 return false;
             }
         }

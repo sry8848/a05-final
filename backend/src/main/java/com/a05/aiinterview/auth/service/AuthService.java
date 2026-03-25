@@ -21,11 +21,14 @@ public class AuthService {
 
     private static final int CODE_LENGTH = 6;
     private static final int CODE_EXPIRE_SECONDS = 300;
+    private static final int SEND_COOLDOWN_SECONDS = 60;
 
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final VerificationCodeStore verificationCodeStore;
+    private final AuthEmailSender authEmailSender;
+    private final VerificationSendThrottleStore verificationSendThrottleStore;
 
     @Transactional(rollbackFor = Exception.class)
     public void register(RegisterRequest req) {
@@ -52,7 +55,7 @@ public class AuthService {
         user.setEmail(email);
         user.setNickname(req.getNickname().trim());
         user.setPasswordHash(passwordEncoder.encode(req.getPassword()));
-        user.setEmailVerified(false);
+        user.setEmailVerified(true);
         user.setPhoneVerified(false);
         user.setStatus("active");
         user.setCreatedAt(LocalDateTime.now());
@@ -93,14 +96,19 @@ public class AuthService {
             }
         }
 
-        String code = generateNumericCode(CODE_LENGTH);
-        verificationCodeStore.save(scene, email, code, CODE_EXPIRE_SECONDS);
-        // 开发环境：不发真实邮件，将验证码放入响应供前端展示；生产配置 SEND_EMAIL 后不发 devCode
-        if (System.getenv("SEND_EMAIL") == null) {
-            log.info("[DEV] 邮箱验证码 email={}, code={} ({}分钟内有效)", email, code, CODE_EXPIRE_SECONDS / 60);
-            return new SendEmailCodeResponse(code);
+        if (!verificationSendThrottleStore.tryAcquire(scene, email, SEND_COOLDOWN_SECONDS)) {
+            throw new IllegalArgumentException("请求过于频繁，请 60 秒后再试");
         }
-        return new SendEmailCodeResponse(null);
+
+        String code = generateNumericCode(CODE_LENGTH);
+        try {
+            authEmailSender.sendEmailCode(scene, email, code, CODE_EXPIRE_SECONDS);
+            verificationCodeStore.save(scene, email, code, CODE_EXPIRE_SECONDS);
+            return new SendEmailCodeResponse(null);
+        } catch (RuntimeException e) {
+            verificationSendThrottleStore.release(scene, email);
+            throw e;
+        }
     }
 
     public LoginData loginByEmailCode(LoginEmailCodeRequest req) {
@@ -116,6 +124,7 @@ public class AuthService {
         if (!"active".equals(user.getStatus())) {
             throw new IllegalArgumentException("账户状态异常");
         }
+        markEmailVerifiedIfNeeded(user);
         return buildLoginData(user);
     }
 
@@ -144,6 +153,18 @@ public class AuthService {
     private LoginData buildLoginData(User user) {
         String token = jwtUtil.generateToken(user.getId(), user.getEmail());
         return new LoginData(token, String.valueOf(user.getId()), user.getNickname());
+    }
+
+    private void markEmailVerifiedIfNeeded(User user) {
+        if (user == null || Boolean.TRUE.equals(user.getEmailVerified())) {
+            return;
+        }
+        User update = new User();
+        update.setId(user.getId());
+        update.setEmailVerified(true);
+        update.setUpdatedAt(LocalDateTime.now());
+        userMapper.updateById(update);
+        user.setEmailVerified(true);
     }
 
     private static String generateNumericCode(int len) {

@@ -90,4 +90,61 @@ class QuestionRedoEvaluationServiceTest {
         assertEquals("ready", updateCaptor.getAllValues().get(1).getEvaluationStatus());
         assertEquals(BigDecimal.valueOf(91), updateCaptor.getAllValues().get(1).getEvaluationJson().get("score"));
     }
+
+    @Test
+    void evaluateByRedoAttemptId_shouldClampScoresToPercentageRange() {
+        AiClient aiClient = mock(AiClient.class);
+        QuestionRedoAttemptMapper redoMapper = mock(QuestionRedoAttemptMapper.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        QuestionRedoEvaluationService service = new QuestionRedoEvaluationService(
+                aiClient,
+                redoMapper,
+                objectMapper
+        );
+
+        QuestionRedoAttempt attempt = new QuestionRedoAttempt();
+        attempt.setId(3001L);
+        attempt.setUserId(9L);
+        attempt.setSourceSessionId(11L);
+        attempt.setSourceQuestionId(22L);
+        attempt.setAnswerText("重答内容");
+        attempt.setEvaluationStatus("pending");
+        attempt.setSourceSnapshotJson(Map.of(
+                "questionStem", "请解释浏览器渲染流水线。",
+                "questionType", "PRINCIPLE",
+                "domainName", "浏览器原理",
+                "positionCode", "FRONTEND",
+                "experienceLevel", "JUNIOR",
+                "mode", "practice",
+                "expectedPoints", List.of("Parse", "Layout", "Paint")
+        ));
+        when(redoMapper.selectById(3001L)).thenReturn(attempt);
+        when(redoMapper.updateById(any())).thenReturn(1);
+
+        QuestionDetailEvaluationOutput output = QuestionDetailEvaluationOutput.builder()
+                .score(new BigDecimal("-8"))
+                .evaluatedDomains(List.of(
+                        QuestionDetailEvaluationOutput.EvaluatedDomain.builder()
+                                .domainCode("browser")
+                                .domainName("浏览器原理")
+                                .score(new BigDecimal("108.2"))
+                                .commentary("超范围")
+                                .build()
+                ))
+                .build();
+        when(aiClient.callQuestionDetailEvaluation(any())).thenReturn(
+                AiCallResult.<QuestionDetailEvaluationOutput>builder().output(output).build()
+        );
+
+        service.evaluateByRedoAttemptId(3001L);
+
+        ArgumentCaptor<QuestionRedoAttempt> updateCaptor = ArgumentCaptor.forClass(QuestionRedoAttempt.class);
+        verify(redoMapper, times(2)).updateById(updateCaptor.capture());
+        QuestionDetailEvaluationOutput saved = objectMapper.convertValue(
+                updateCaptor.getAllValues().get(1).getEvaluationJson(),
+                QuestionDetailEvaluationOutput.class
+        );
+        assertEquals(new BigDecimal("0"), saved.getScore());
+        assertEquals(new BigDecimal("100"), saved.getEvaluatedDomains().get(0).getScore());
+    }
 }

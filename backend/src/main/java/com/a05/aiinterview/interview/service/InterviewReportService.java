@@ -11,6 +11,7 @@ import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.a05.aiinterview.interview.service.support.AttemptEvaluationReader;
+import com.a05.aiinterview.interview.service.support.InterviewOverallScoreSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
@@ -113,8 +114,12 @@ public class InterviewReportService {
 
         log.info("报告已就绪, sessionId={}, overallScore={}", sessionId, report.getOverallScore());
         InterviewReportDto dto = InterviewReportDto.fromEntity(report);
+        dto.setOverallScore(InterviewOverallScoreSupport.resolveOverallScore(report));
         dto.setMode(session.getMode());
         dto.setTargetRole(session.getTargetRole());
+        if (!"professional".equalsIgnoreCase(session.getMode())) {
+            dto.setComprehensiveRadarScores(null);
+        }
         dto.setQuestions(buildQuestionSummaries(sessionId));
         return dto;
     }

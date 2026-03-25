@@ -79,6 +79,9 @@ class QuestionStreamServiceBuildInputTest {
         assertThat(plan.getInterviewAction()).isEqualTo("CONTINUE");
         assertThat(plan.getTargetQuestionType()).isEqualTo("PROJECT_DEEP_DIVE");
         assertThat(plan.getNextFocus()).contains("订单超时关闭");
+        assertThat(plan.getNextItemType()).isEmpty();
+        assertThat(plan.getNextItemName()).isEmpty();
+        assertThat(plan.getNextProjectPoint()).isEmpty();
         assertThat(plan.getRetrievalPlans()).hasSize(1);
         assertThat(plan.getDecisionReason()).contains("项目主线");
     }
@@ -526,6 +529,108 @@ class QuestionStreamServiceBuildInputTest {
                 throw new RuntimeException(ex.getTargetException());
             }
         });
+    }
+
+    @Test
+    void saveQuestion_shouldPersistProjectPointAndResolvedProjectIdentity() throws Exception {
+        AiClient aiClient = mock(AiClient.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        RagRetrievalService ragService = mock(RagRetrievalService.class);
+        TtsService ttsService = mock(TtsService.class);
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+
+        InterviewQuestion currentQuestion = new InterviewQuestion();
+        currentQuestion.setId(920L);
+        currentQuestion.setSessionId(520L);
+        currentQuestion.setQuestionNo(1);
+        currentQuestion.setQuestionType("INTRO");
+
+        when(questionMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(currentQuestion));
+        when(questionMapper.selectById(920L)).thenReturn(currentQuestion);
+        doAnswer(invocation -> {
+            InterviewQuestion inserted = invocation.getArgument(0, InterviewQuestion.class);
+            inserted.setId(921L);
+            return 1;
+        }).when(questionMapper).insert(org.mockito.ArgumentMatchers.any(InterviewQuestion.class));
+
+        QuestionStreamService service = new QuestionStreamService(
+                aiClient,
+                sessionMapper,
+                questionMapper,
+                attemptMapper,
+                ragService,
+                ttsService,
+                redisTemplate,
+                new InterviewDebugTraceService(new ObjectMapper()),
+                new ObjectMapper()
+        );
+
+        InterviewSession session = new InterviewSession();
+        session.setId(520L);
+        session.setCurrentQuestionNo(1);
+        session.setSyllabusJson(Map.of(
+                "domains", List.of(),
+                "experienceItems", List.of(
+                        Map.of(
+                                "itemKey", "project_chabst",
+                                "itemType", "PROJECT",
+                                "itemName", "Chabst",
+                                "resumeDescription", "项目描述",
+                                "techHooks", List.of("RabbitMQ 延迟消息处理超时订单")
+                        )
+                )
+        ));
+        session.setStateLedgerJson(new LinkedHashMap<>(Map.of(
+                "asked_total", 1,
+                "quota_state", new LinkedHashMap<>(Map.of(
+                        "samePointContinue", 0,
+                        "sameDomainContinue", 0,
+                        "sameProjectPointContinue", 0,
+                        "sameProjectContinue", 0,
+                        "principleTotal", 0,
+                        "projectTotal", 0,
+                        "scenarioTotal", 0,
+                        "behavioralTotal", 0
+                ))
+        )));
+
+        QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
+                .interviewAction("CONTINUE")
+                .finalDecision("S_ENTER_PROJECT")
+                .targetQuestionType("PROJECT_DEEP_DIVE")
+                .nextFocus("延迟消息与并发控制")
+                .nextItemType("PROJECT")
+                .nextItemName("Chabst")
+                .nextProjectPoint("RabbitMQ 延迟消息处理超时订单")
+                .build();
+
+        Method method = QuestionStreamService.class.getDeclaredMethod(
+                "saveQuestion",
+                InterviewSession.class,
+                Long.class,
+                String.class,
+                QuestionStreamService.NextQuestionPlan.class,
+                String.class
+        );
+        method.setAccessible(true);
+
+        InterviewQuestion saved = (InterviewQuestion) method.invoke(
+                service,
+                session,
+                920L,
+                "attempt-920",
+                plan,
+                "结合 Chabst 讲讲你们用 RabbitMQ 延迟消息处理超时订单时，怎么保证并发和幂等。"
+        );
+
+        assertThat(saved.getId()).isEqualTo(921L);
+        assertThat(saved.getGenerationContextJson())
+                .containsEntry("activeItemKey", "project_chabst")
+                .containsEntry("activeItemType", "PROJECT")
+                .containsEntry("activeItemName", "Chabst")
+                .containsEntry("projectPoint", "RabbitMQ 延迟消息处理超时订单");
     }
 
     private QuestionStreamService newService() {

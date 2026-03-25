@@ -2,20 +2,30 @@ package com.a05.aiinterview.interview.service;
 
 import com.a05.aiinterview.interview.dto.InterviewHistoryItemDto;
 import com.a05.aiinterview.interview.dto.InterviewHistoryPageDto;
+import com.a05.aiinterview.interview.entity.InterviewReport;
+import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.interview.service.support.InterviewOverallScoreSupport;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
 public class InterviewHistoryService {
 
     private final InterviewSessionMapper interviewSessionMapper;
+    private final InterviewReportMapper interviewReportMapper;
     private final InterviewSessionStatusService interviewSessionStatusService;
 
     public InterviewHistoryPageDto list(Long userId,
@@ -31,14 +41,27 @@ public class InterviewHistoryService {
         int safePageSize = Math.min(Math.max(pageSize, 1), 100);
         int offset = (safePage - 1) * safePageSize;
 
+        String normalizedStatus = normalize(status);
+        String normalizedTargetRole = normalize(targetRole);
         String safeSortBy = normalizeSortBy(sortBy);
         String safeSortOrder = normalizeSortOrder(sortOrder);
 
-        long total = interviewSessionMapper.countHistory(userId, normalize(status), normalize(targetRole), dateFrom, dateTo);
-        List<InterviewHistoryItemDto> items = interviewSessionMapper.selectHistoryPage(
+        long total = interviewSessionMapper.countHistory(userId, normalizedStatus, normalizedTargetRole, dateFrom, dateTo);
+        List<InterviewHistoryItemDto> items = "overallScore".equals(safeSortBy)
+                ? selectAndSortByEffectiveOverallScore(
                 userId,
-                normalize(status),
-                normalize(targetRole),
+                normalizedStatus,
+                normalizedTargetRole,
+                dateFrom,
+                dateTo,
+                safeSortOrder,
+                safePageSize,
+                offset,
+                total)
+                : interviewSessionMapper.selectHistoryPage(
+                userId,
+                normalizedStatus,
+                normalizedTargetRole,
                 dateFrom,
                 dateTo,
                 safeSortBy,
@@ -46,6 +69,7 @@ public class InterviewHistoryService {
                 offset,
                 safePageSize
         );
+        hydrateEffectiveOverallScores(items);
 
         InterviewHistoryPageDto dto = new InterviewHistoryPageDto();
         dto.setTotal(total);
@@ -57,6 +81,98 @@ public class InterviewHistoryService {
                 )));
         dto.setItems(items);
         return dto;
+    }
+
+    private List<InterviewHistoryItemDto> selectAndSortByEffectiveOverallScore(Long userId,
+                                                                               String status,
+                                                                               String targetRole,
+                                                                               LocalDateTime dateFrom,
+                                                                               LocalDateTime dateTo,
+                                                                               String sortOrder,
+                                                                               int pageSize,
+                                                                               int offset,
+                                                                               long total) {
+        if (total <= 0) {
+            return List.of();
+        }
+        int fetchLimit = (int) Math.min(total, Integer.MAX_VALUE);
+        List<InterviewHistoryItemDto> candidates = new ArrayList<>(interviewSessionMapper.selectHistoryPage(
+                userId,
+                status,
+                targetRole,
+                dateFrom,
+                dateTo,
+                "createdAt",
+                "desc",
+                0,
+                fetchLimit
+        ));
+        hydrateEffectiveOverallScores(candidates);
+        candidates.sort(buildOverallScoreComparator(sortOrder));
+
+        int fromIndex = Math.min(offset, candidates.size());
+        int toIndex = Math.min(fromIndex + pageSize, candidates.size());
+        return candidates.subList(fromIndex, toIndex);
+    }
+
+    private void hydrateEffectiveOverallScores(List<InterviewHistoryItemDto> items) {
+        if (items == null || items.isEmpty()) {
+            return;
+        }
+        List<Long> sessionIds = items.stream()
+                .map(InterviewHistoryItemDto::getSessionId)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        if (sessionIds.isEmpty()) {
+            return;
+        }
+
+        Map<Long, InterviewReport> reportMap = new HashMap<>();
+        interviewReportMapper.selectList(new LambdaQueryWrapper<InterviewReport>()
+                        .in(InterviewReport::getSessionId, sessionIds))
+                .forEach(report -> reportMap.put(report.getSessionId(), report));
+
+        items.forEach(item -> {
+            InterviewReport report = reportMap.get(item.getSessionId());
+            BigDecimal effectiveScore = InterviewOverallScoreSupport.resolveOverallScore(report);
+            if (effectiveScore != null) {
+                item.setOverallScore(effectiveScore);
+            }
+        });
+    }
+
+    private Comparator<InterviewHistoryItemDto> buildOverallScoreComparator(String sortOrder) {
+        return (left, right) -> {
+            int scoreCompare = compareNullableScores(left.getOverallScore(), right.getOverallScore());
+            if ("desc".equalsIgnoreCase(sortOrder)) {
+                scoreCompare = -scoreCompare;
+            }
+            if (scoreCompare != 0) {
+                return scoreCompare;
+            }
+            LocalDateTime leftCreatedAt = left.getCreatedAt();
+            LocalDateTime rightCreatedAt = right.getCreatedAt();
+            int createdAtCompare = Comparator.nullsLast(LocalDateTime::compareTo).reversed()
+                    .compare(leftCreatedAt, rightCreatedAt);
+            if (createdAtCompare != 0) {
+                return createdAtCompare;
+            }
+            return Comparator.nullsLast(Long::compareTo).reversed()
+                    .compare(left.getSessionId(), right.getSessionId());
+        };
+    }
+
+    private int compareNullableScores(BigDecimal left, BigDecimal right) {
+        if (left == null && right == null) {
+            return 0;
+        }
+        if (left == null) {
+            return 1;
+        }
+        if (right == null) {
+            return -1;
+        }
+        return left.compareTo(right);
     }
 
     private String normalize(String value) {

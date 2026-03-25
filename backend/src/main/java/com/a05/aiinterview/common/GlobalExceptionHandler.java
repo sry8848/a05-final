@@ -1,5 +1,6 @@
 package com.a05.aiinterview.common;
 
+import com.a05.aiinterview.auth.service.AuthMailDeliveryException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -50,6 +51,13 @@ public class GlobalExceptionHandler {
                 .orElse("参数校验失败");
         log.warn("参数校验失败: {}", msg);
         return ApiResponse.fail(400, msg);
+    }
+
+    @ExceptionHandler(AuthMailDeliveryException.class)
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<Void> handleAuthMailDelivery(AuthMailDeliveryException e) {
+        log.warn("邮件发送失败: {}", e.getMessage());
+        return ApiResponse.fail(503, e.getMessage());
     }
 
     @ExceptionHandler(BindException.class)

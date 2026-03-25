@@ -74,6 +74,86 @@ class PlannerHistoryDedupServiceTest {
         assertThat(deduped.getDomains().get(0).getFocusPoints()).containsExactly("Transaction Isolation");
     }
 
+    @Test
+    @DisplayName("should remove recently discussed entry points from the same project without deleting the project")
+    void dedup_shouldRemoveRecentlyDiscussedEntryPointsButKeepProject() {
+        PlannerOutput output = PlannerOutput.builder()
+                .planningReasoning("test")
+                .domains(List.of())
+                .experienceItems(List.of(
+                        PlannerOutput.ExperienceItem.builder()
+                                .itemType("PROJECT")
+                                .itemName("Chabst")
+                                .resumeDescription("desc")
+                                .techHooks(List.of("RabbitMQ 延迟消息处理超时订单", "Redisson 秒杀锁", "Seata AT 分布式事务"))
+                                .build()
+                ))
+                .build();
+
+        List<PlannerInput.HistoryInterviewItem> history = List.of(
+                PlannerInput.HistoryInterviewItem.builder()
+                        .roundType("")
+                        .interviewAt("2026-03-20T10:00:00")
+                        .coveredKnowledgePoints(List.of())
+                        .discussedItems(List.of(
+                                PlannerInput.HistoryExperienceItem.builder()
+                                        .itemType("PROJECT")
+                                        .itemName("Chabst")
+                                        .entryPoints(List.of("RabbitMQ 延迟消息处理超时订单", "Seata AT 分布式事务"))
+                                        .build()
+                        ))
+                        .strongPoints(List.of())
+                        .weakPoints(List.of())
+                        .build()
+        );
+
+        PlannerOutput deduped = service.deduplicate(output, allowedDomains(), history);
+
+        assertThat(deduped.getExperienceItems()).hasSize(1);
+        assertThat(deduped.getExperienceItems().getFirst().getItemName()).isEqualTo("Chabst");
+        assertThat(deduped.getExperienceItems().getFirst().getTechHooks()).containsExactly("Redisson 秒杀锁");
+    }
+
+    @Test
+    @DisplayName("should keep project and fallback to first original techHook when all entry points are blocked")
+    void dedup_shouldKeepProjectWhenAllEntryPointsBlocked() {
+        PlannerOutput output = PlannerOutput.builder()
+                .planningReasoning("test")
+                .domains(List.of())
+                .experienceItems(List.of(
+                        PlannerOutput.ExperienceItem.builder()
+                                .itemType("PROJECT")
+                                .itemName("Chabst")
+                                .resumeDescription("desc")
+                                .techHooks(List.of("RabbitMQ 延迟消息处理超时订单", "Redisson 秒杀锁"))
+                                .build()
+                ))
+                .build();
+
+        List<PlannerInput.HistoryInterviewItem> history = List.of(
+                PlannerInput.HistoryInterviewItem.builder()
+                        .roundType("")
+                        .interviewAt("2026-03-20T10:00:00")
+                        .coveredKnowledgePoints(List.of())
+                        .discussedItems(List.of(
+                                PlannerInput.HistoryExperienceItem.builder()
+                                        .itemType("PROJECT")
+                                        .itemName("Chabst")
+                                        .entryPoints(List.of("RabbitMQ 延迟消息处理超时订单", "Redisson 秒杀锁"))
+                                        .build()
+                        ))
+                        .strongPoints(List.of())
+                        .weakPoints(List.of())
+                        .build()
+        );
+
+        PlannerOutput deduped = service.deduplicate(output, allowedDomains(), history);
+
+        assertThat(deduped.getExperienceItems()).hasSize(1);
+        assertThat(deduped.getExperienceItems().getFirst().getTechHooks())
+                .containsExactly("RabbitMQ 延迟消息处理超时订单");
+    }
+
     private List<PositionSkillDomain> allowedDomains() {
         return List.of(
                 allowed(26L, "redis", "Redis 缓存", "持久化、缓存雪崩、主从复制", 1),

@@ -184,8 +184,8 @@ class ReportGenerationContractTest {
     }
 
     @Test
-    @DisplayName("practice 模式允许 comprehensiveRadarScores 为 null")
-    void missingComprehensiveRadarScores_shouldRemainNull() {
+    @DisplayName("缺少 comprehensiveRadarScores 时保持 null，供上层走回退逻辑")
+    void missingComprehensiveRadarScores_shouldRemainNullForFallback() {
         String json = """
                 {
                   "overallScore": 75.0,

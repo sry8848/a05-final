@@ -20,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -53,6 +54,7 @@ public class AnswerSubmitService {
     private final DecisionExecutionPlanBuilder decisionExecutionPlanBuilder;
     private final DecisionRepairOrchestrator decisionRepairOrchestrator;
     private final SystemFallbackPlanBuilder systemFallbackPlanBuilder;
+    private final PlannerHistoryBuilderService plannerHistoryBuilderService;
 
     public SubmitAttemptResponse submitAnswer(Long sessionId, Long userId, SubmitAttemptRequest request) {
         log.info("提交回答主链路开始, sessionId={}, questionId={}, attemptId={}",
@@ -142,21 +144,30 @@ public class AnswerSubmitService {
                                                          List<InterviewQuestion> allQuestions,
                                                          List<InterviewAttempt> allAttempts,
                                                          String answerText) {
-        List<EvaluationDecisionInput.ProjectAndInternshipItem> projectSummary = buildProjectAndInternshipSummary(session);
+        int maxQuestions = ensureMaxQuestions(session);
+        Map<PlannerHistoryBuilderService.ProjectIdentity, List<String>> blockedProjectEntryPoints =
+                plannerHistoryBuilderService.buildBlockedProjectEntryPoints(session);
+        List<EvaluationDecisionInput.ProjectAndInternshipItem> projectSummary =
+                buildProjectAndInternshipSummary(session, blockedProjectEntryPoints);
         List<EvaluationDecisionInput.RemainingTargetDomain> remainingTargetDomains = remainingDomainMenuBuilder.build(session);
         Map<String, Object> quotaState = QuotaStateSupport.ensureQuotaState(session.getStateLedgerJson(), allQuestions);
         return EvaluationDecisionInput.builder()
                 .interviewId(session.getId())
                 .currentQuestionId(currentQuestion.getId())
                 .interview(buildInterviewMeta(session))
+                .questionIndex(resolveQuestionIndex(session, currentQuestion))
+                .maxQuestions(maxQuestions)
+                .quotaSnapshot(InterviewPacingSupport.buildQuotaSnapshot(session.getExperienceLevel(), quotaState))
                 .projectAndInternshipSummary(projectSummary)
                 .remainingTargetDomains(remainingTargetDomains)
                 .coveredKnowledgeSummary(buildCoveredKnowledgeSummary(session))
+                .crossSessionBlockedKnowledgePoints(plannerHistoryBuilderService.buildCrossSessionBlockedKnowledgePoints(session))
                 .availableStrategies(availableStrategyAssembler.assemble(
                         currentQuestion != null ? currentQuestion.getQuestionType() : "",
                         !projectSummary.isEmpty(),
                         remainingTargetDomains,
-                        quotaState
+                        quotaState,
+                        session.getExperienceLevel()
                 ))
                 .currentQuestion(buildCurrentQuestionContext(session, currentQuestion))
                 .answerText(answerText)
@@ -175,7 +186,9 @@ public class AnswerSubmitService {
     }
 
     @SuppressWarnings("unchecked")
-    private List<EvaluationDecisionInput.ProjectAndInternshipItem> buildProjectAndInternshipSummary(InterviewSession session) {
+    private List<EvaluationDecisionInput.ProjectAndInternshipItem> buildProjectAndInternshipSummary(
+            InterviewSession session,
+            Map<PlannerHistoryBuilderService.ProjectIdentity, List<String>> blockedProjectEntryPoints) {
         if (session.getSyllabusJson() == null) {
             return List.of();
         }
@@ -188,14 +201,29 @@ public class AnswerSubmitService {
             if (!(itemObj instanceof Map<?, ?> item)) {
                 continue;
             }
+            String itemType = asString(item.get("itemType"));
+            String itemName = asString(item.get("itemName"));
             result.add(EvaluationDecisionInput.ProjectAndInternshipItem.builder()
-                    .itemType(asString(item.get("itemType")))
-                    .itemName(asString(item.get("itemName")))
+                    .itemType(itemType)
+                    .itemName(itemName)
                     .resumeDescription(asString(item.get("resumeDescription")))
                     .techHooks(toStringList(item.get("techHooks")))
+                    .blockedEntryPoints(resolveBlockedEntryPoints(blockedProjectEntryPoints, itemType, itemName))
                     .build());
         }
         return result;
+    }
+
+    private List<String> resolveBlockedEntryPoints(
+            Map<PlannerHistoryBuilderService.ProjectIdentity, List<String>> blockedProjectEntryPoints,
+            String itemType,
+            String itemName) {
+        if (blockedProjectEntryPoints == null || blockedProjectEntryPoints.isEmpty()) {
+            return List.of();
+        }
+        List<String> blocked = blockedProjectEntryPoints.get(
+                new PlannerHistoryBuilderService.ProjectIdentity(itemType, itemName));
+        return blocked == null ? List.of() : blocked;
     }
 
     private List<String> buildCoveredKnowledgeSummary(InterviewSession session) {
@@ -404,9 +432,7 @@ public class AnswerSubmitService {
     }
 
     private boolean shouldForceEndByMaxQuestions(InterviewSession session) {
-        int maxQuestions = toInt(session.getStateLedgerJson() != null
-                ? session.getStateLedgerJson().get("max_questions")
-                : null);
+        int maxQuestions = ensureMaxQuestions(session);
         if (maxQuestions <= 0) {
             return false;
         }
@@ -491,6 +517,38 @@ public class AnswerSubmitService {
         return values == null ? List.of() : values;
     }
 
+    private int resolveQuestionIndex(InterviewSession session, InterviewQuestion currentQuestion) {
+        if (currentQuestion != null && currentQuestion.getQuestionNo() != null && currentQuestion.getQuestionNo() > 0) {
+            return currentQuestion.getQuestionNo();
+        }
+        return session != null && session.getCurrentQuestionNo() != null ? session.getCurrentQuestionNo() : 0;
+    }
+
+    private int ensureMaxQuestions(InterviewSession session) {
+        Map<String, Object> ledger = session != null ? session.getStateLedgerJson() : null;
+        int existing = toInt(ledger != null ? ledger.get(InterviewPacingSupport.MAX_QUESTIONS_KEY) : null);
+        if (existing > 0) {
+            return existing;
+        }
+        int computed = InterviewPacingSupport.maxQuestions(session != null ? session.getExperienceLevel() : null);
+        Map<String, Object> updatedLedger = new LinkedHashMap<>();
+        if (ledger != null) {
+            updatedLedger.putAll(ledger);
+        }
+        updatedLedger.put(InterviewPacingSupport.MAX_QUESTIONS_KEY, computed);
+        if (session != null) {
+            session.setStateLedgerJson(updatedLedger);
+            if (session.getId() != null) {
+                InterviewSession update = new InterviewSession();
+                update.setId(session.getId());
+                update.setStateLedgerJson(updatedLedger);
+                update.setUpdatedAt(LocalDateTime.now());
+                interviewSessionMapper.updateById(update);
+            }
+        }
+        return computed;
+    }
+
     private List<String> extractStrategyCodes(EvaluationDecisionInput input) {
         if (input == null || input.getAvailableStrategies() == null) {
             return List.of();
@@ -534,6 +592,9 @@ public class AnswerSubmitService {
                 .decisionReason(firstNonBlank(plan.getDecisionReason(), ""))
                 .finalDecision(firstNonBlank(plan.getStrategyCode(), ""))
                 .nextFocus(firstNonBlank(plan.getNextFocus(), ""))
+                .nextItemType(firstNonBlank(plan.getNextItemType(), ""))
+                .nextItemName(firstNonBlank(plan.getNextItemName(), ""))
+                .nextProjectPoint(firstNonBlank(plan.getNextProjectPoint(), ""))
                 .targetDomainCode(firstNonBlank(plan.getTargetDomainCode(), ""))
                 .newCoveredDomains(plan.getNewCoveredDomains() == null ? List.of() : plan.getNewCoveredDomains())
                 .newCoveredPoints(plan.getNewCoveredPoints() == null ? List.of() : plan.getNewCoveredPoints())

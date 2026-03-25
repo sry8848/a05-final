@@ -6,28 +6,22 @@ import com.a05.aiinterview.interview.engine.QuotaStateSupport;
  * 策略限额键。
  */
 public enum StrategyLimit {
-    SAME_POINT_CONTINUE(QuotaStateSupport.SAME_POINT_CONTINUE, 20),
-    SAME_DOMAIN_CONTINUE(QuotaStateSupport.SAME_DOMAIN_CONTINUE, 20),
-    SAME_PROJECT_POINT_CONTINUE(QuotaStateSupport.SAME_PROJECT_POINT_CONTINUE, 20),
-    SAME_PROJECT_CONTINUE(QuotaStateSupport.SAME_PROJECT_CONTINUE, 20),
-    PRINCIPLE_TOTAL(QuotaStateSupport.PRINCIPLE_TOTAL, 20),
-    PROJECT_TOTAL(QuotaStateSupport.PROJECT_TOTAL, 20),
-    SCENARIO_TOTAL(QuotaStateSupport.SCENARIO_TOTAL, 20),
-    BEHAVIORAL_TOTAL(QuotaStateSupport.BEHAVIORAL_TOTAL, 20);
+    SAME_POINT_CONTINUE(QuotaStateSupport.SAME_POINT_CONTINUE),
+    SAME_DOMAIN_CONTINUE(QuotaStateSupport.SAME_DOMAIN_CONTINUE),
+    SAME_PROJECT_POINT_CONTINUE(QuotaStateSupport.SAME_PROJECT_POINT_CONTINUE),
+    SAME_PROJECT_CONTINUE(QuotaStateSupport.SAME_PROJECT_CONTINUE),
+    PRINCIPLE_TOTAL(QuotaStateSupport.PRINCIPLE_TOTAL),
+    PROJECT_TOTAL(QuotaStateSupport.PROJECT_TOTAL),
+    SCENARIO_TOTAL(QuotaStateSupport.SCENARIO_TOTAL),
+    BEHAVIORAL_TOTAL(QuotaStateSupport.BEHAVIORAL_TOTAL);
 
     private final String ledgerKey;
-    private final int maxCount;
 
-    StrategyLimit(String ledgerKey, int maxCount) {
+    StrategyLimit(String ledgerKey) {
         this.ledgerKey = ledgerKey;
-        this.maxCount = maxCount;
     }
 
     public String ledgerKey() {
         return ledgerKey;
-    }
-
-    public int maxCount() {
-        return maxCount;
     }
 }

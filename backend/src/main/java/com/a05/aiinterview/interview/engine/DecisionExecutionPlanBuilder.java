@@ -36,6 +36,9 @@ public class DecisionExecutionPlanBuilder {
         String interviewAction = normalize(output.getInterviewAction());
         String strategyCode = normalize(output.getFinalDecision());
         String nextFocus = trim(output.getNextFocus());
+        String nextItemType = trim(output.getNextItemType());
+        String nextItemName = trim(output.getNextItemName());
+        String nextProjectPoint = trim(output.getNextProjectPoint());
         String targetDomainCode = trim(output.getTargetDomainCode());
 
         if (!"CONTINUE".equals(interviewAction) && !"WRAPUP".equals(interviewAction)) {
@@ -55,6 +58,9 @@ public class DecisionExecutionPlanBuilder {
                     .strategyCode(StrategyCode.S_WRAPUP.code())
                     .targetQuestionType("")
                     .nextFocus("")
+                    .nextItemType("")
+                    .nextItemName("")
+                    .nextProjectPoint("")
                     .targetDomainCode("")
                     .targetDomainName("")
                     .newCoveredDomains(safeCoveredDomains(output.getNewCoveredDomains()))
@@ -116,6 +122,9 @@ public class DecisionExecutionPlanBuilder {
                 .strategyCode(strategyCode)
                 .targetQuestionType(targetQuestionType)
                 .nextFocus(nextFocus)
+                .nextItemType(nextItemType)
+                .nextItemName(nextItemName)
+                .nextProjectPoint(nextProjectPoint)
                 .targetDomainCode(targetDomainCode)
                 .targetDomainName(targetDomainName)
                 .newCoveredDomains(safeCoveredDomains(output.getNewCoveredDomains()))

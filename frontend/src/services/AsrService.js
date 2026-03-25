@@ -1,3 +1,5 @@
+import { buildApiUrl, resolveBackendUrl } from '../api/base.js'
+
 /**
  * AsrService — 后端代理 ASR 封装
  *
@@ -8,7 +10,7 @@
  * 4. 前端只接收 ready/interim/segment_final/final/error 五类事件
  */
 
-const ASR_TOKEN_URL = '/api/v1/asr/token'
+const ASR_TOKEN_URL = buildApiUrl('/asr/token')
 const DEFAULT_AUDIO_CONFIG = {
   format: 'pcm',
   sampleRate: 16000,
@@ -77,7 +79,7 @@ export class AsrService {
         },
       })
 
-      await this._connectWebSocket(token.wsUrl)
+      await this._connectWebSocket(resolveBackendUrl(token.wsUrl))
       await this._sendStartAndWaitReady(questionType, token.protocolVersion || 'v1', audioConfig, context)
       this._startAudioCapture(audioConfig)
 

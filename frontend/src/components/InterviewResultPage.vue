@@ -129,8 +129,8 @@
               <div v-for="domain in domainWeakSpots" :key="domain.name" class="domain-item">
                 <div class="domain-header">
                   <h4>{{ domain.name }}</h4>
-                  <span v-if="domain.delta != null" class="score-delta" :class="domain.delta >= 0 ? 'positive' : 'negative'">
-                    {{ domain.delta >= 0 ? '+' : '' }}{{ domain.delta }} 分
+                  <span v-if="domain.scoreText" class="domain-score">
+                    {{ domain.scoreText }}
                   </span>
                 </div>
                 <p class="domain-weak">{{ domain.weakPoints }}</p>
@@ -166,6 +166,11 @@
 <script>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { getLearningRecommendations } from '../api/resume'
+import {
+  getInterviewQuestionCommentaryFallback,
+  getInterviewQuestionStatusText,
+  mapInterviewReportSkillDomains
+} from '../utils/interviewResultDisplay'
 
 const RADAR_DIMENSIONS = [
   { key: 'fundamentals', label: '基础原理掌握' },
@@ -370,15 +375,7 @@ export default {
     const domainWeakSpots = computed(() => {
       const reportScores = props.resultData?.report?.skillDomainScores
       if (Array.isArray(reportScores) && reportScores.length) {
-        return reportScores.slice(0, RADAR_DIMENSIONS.length).map((item) => {
-          const scoreNum = Number(item?.score)
-          const hasNumericScore = Number.isFinite(scoreNum)
-          return {
-            name: item?.domainName || item?.domainCode || '通用能力',
-            weakPoints: String(item?.commentary || '').trim() || '正式报告未提供该知识域点评。',
-            delta: hasNumericScore ? Math.round(scoreNum - 70) : null
-          }
-        })
+        return mapInterviewReportSkillDomains(reportScores.slice(0, RADAR_DIMENSIONS.length))
       }
       return []
     })
@@ -418,10 +415,7 @@ export default {
     }
 
     const getStatusText = (status) => {
-      const normalized = normalizeAnswerStatus(status)
-      if (normalized === 'answered') return '已完成'
-      if (normalized === 'skipped') return '已跳过'
-      return '待同步'
+      return getInterviewQuestionStatusText(status)
     }
 
     const getScoreClass = (s) => {
@@ -433,19 +427,7 @@ export default {
     }
 
     const getAnswerComment = (item) => {
-      const commentary = String(item?.commentary || '').trim()
-      if (commentary) return commentary
-
-      const status = normalizeAnswerStatus(item?.status)
-      const score = Number(item?.score)
-      const hasNumericScore = Number.isFinite(score)
-      if (!hasNumericScore) {
-        if (status === 'answered') return '本题复盘信息暂时缺失，请稍后重试或查看单题详情。'
-        if (status === 'skipped') return '本题已跳过，建议优先补强该知识点。'
-        return '本题尚未作答或结果待同步。'
-      }
-
-      return '本题正式评分已生成，但当前缺少单题点评文案，请查看正式报告或稍后重试。'
+      return getInterviewQuestionCommentaryFallback(item)
     }
 
     const goToQuestionDetail = (index) => {
@@ -863,13 +845,11 @@ export default {
   margin: 0;
 }
 
-.score-delta {
+.domain-score {
   font-size: 14px;
   font-weight: 600;
+  color: var(--text-primary);
 }
-
-.score-delta.positive { color: #10b981; }
-.score-delta.negative { color: #ef4444; }
 
 .domain-empty {
   padding: 14px 16px;

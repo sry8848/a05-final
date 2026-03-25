@@ -18,6 +18,21 @@ spring:
     username: root
     password: ${DB_PASSWORD:123456}
 
+  mail:
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    protocol: smtp
+    default-encoding: UTF-8
+    properties:
+      "[mail.smtp.auth]": ${SMTP_AUTH:true}
+      "[mail.smtp.starttls.enable]": ${SMTP_STARTTLS_ENABLE:true}
+      "[mail.smtp.ssl.enable]": ${SMTP_SSL_ENABLE:false}
+      "[mail.smtp.connectiontimeout]": ${SMTP_CONNECTION_TIMEOUT_MS:5000}
+      "[mail.smtp.timeout]": ${SMTP_TIMEOUT_MS:5000}
+      "[mail.smtp.writetimeout]": ${SMTP_WRITE_TIMEOUT_MS:5000}
+
   data:
     redis:
       host: localhost
@@ -165,3 +180,8 @@ speech:
     cache-ttl-seconds: ${TTS_CACHE_TTL:3600}
     #TODO 语音合成超时（毫秒），默认 10s
     timeout-ms: ${TTS_TIMEOUT_MS:10000}
+
+auth:
+  mail:
+    from: ${SMTP_FROM:}
+    startup-check-enabled: ${SMTP_STARTUP_CHECK_ENABLED:true}

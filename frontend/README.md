@@ -1,26 +1,92 @@
-# 前端隔离区（Frontend Isolation）
+# Frontend
 
-## 用途
+Vue 3 + Vite 前端工程。
 
-本目录为**前端隔离区**，用于导入现有前端项目代码，作为**视觉风格与 UI 组件的复用参考**。
+## 当前形态
 
-- **正式开发**在仓库根目录的 `frontend/` 中进行。
-- 本目录仅作参考：从此处复用或借鉴布局、样式、组件设计，再在 `frontend/` 中按产品与后端规范实现功能，避免直接改动本区代码导致与上游脱节。
+- 当前是单页状态切换应用，根组件为 [frontend/src/App.vue](/D:/a05-cursor/frontend/src/App.vue)
+- 目前没有引入 Vue Router
+- 用户端通过 `currentPage` 和若干 overlay 状态切换页面
+- 管理端通过 `AdminLayout` 内部状态切换模块
 
-## 使用方式
+## 启动方式
 
-1. **导入**：将现有前端项目（你希望保留视觉与 UI 的那一版）拷贝或链接到本目录下，保持其原有结构即可。
-2. **参考**：在 `frontend/` 中开发或修改页面时，对照本目录中的对应页面/组件，复用欢迎语、布局、配色、组件结构等。
-3. **不改动**：本区以「只读参考」为主，功能对齐与接口对接均在 `frontend/` 中完成，避免本区与现有前端项目产生分歧。
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-## 与 frontend 的关系
+## API 基地址规则
 
-| 项目 | 说明 |
-|------|------|
-| `frontend/` | 与后端联调、对接 API、按 product-scope / page-list / api-design 实现功能的正式前端工程。 |
-| `frontend-isolation/` | 现有前端项目的镜像/拷贝，仅用于参考 UI 与交互，不要求与后端或文档完全一致。 |
+前端统一通过 [frontend/src/api/base.js](/D:/a05-cursor/frontend/src/api/base.js) 解析 API 地址。
 
-## 文档参考
+- 未配置 `VITE_API_BASE_URL`：默认访问 `/api/v1`，由 Vite 代理到 `http://localhost:8080`
+- 配置了 `VITE_API_BASE_URL=http://localhost:8080`：自动补成 `http://localhost:8080/api/v1`
+- 配置了 `VITE_API_BASE_URL=http://localhost:8080/api/v1`：直接使用
 
-- 页面与流程：`docs/page-list.md`
-- 开发阶段与复用策略：`docs/development-plan.md` 中的「前端隔离区与复用策略」一节。
+当前 `vite.config.js` 设置了：
+
+- `envDir: '..'`
+- `/api` 代理到 `http://localhost:8080`
+
+所以根目录 `.env` 会被前端开发环境读取。
+
+## 目录约定
+
+```text
+src/
+├── api/         # HTTP API 封装
+├── assets/      # 静态资源
+├── components/  # 页面级与复用组件
+├── services/    # ASR / TTS 等服务封装
+├── utils/       # 展示模型、状态转换、存储工具
+├── App.vue      # 应用根组件
+└── main.js
+```
+
+## 当前主要页面入口
+
+用户端侧栏页面：
+
+- `growth`
+- `interview`
+- `history`
+- `questionBank`
+- `resumes`
+- `analysis`
+- `settings`
+
+用户端 overlay / 临时页：
+
+- 报告生成页
+- 报告页
+- 单题详情页
+- 雷达图页
+- 分数趋势页
+
+管理端页面：
+
+- `dashboard`
+- `prompt`
+- `model`
+- `rag`
+- `monitor`
+- `analysis`
+
+详细说明见 [docs/page-list.md](/D:/a05-cursor/docs/page-list.md)。
+
+## 开发约定
+
+- 当前协作文档以 `npm` 为准，不要混用 `pnpm`
+- 业务接口、头像地址、音频地址统一通过 `base.js` 解析
+- 用户认证和管理员认证是两套 token
+- 面试主链路是：
+  `POST /interviews/{sessionId}/attempts` -> `GET /interviews/{sessionId}/questions/stream?attemptId=...`
+
+## 相关文档
+
+- 根目录联调说明：[README.md](/D:/a05-cursor/README.md)
+- API 文档：[docs/api-design.md](/D:/a05-cursor/docs/api-design.md)
+- 页面与状态流转：[docs/page-list.md](/D:/a05-cursor/docs/page-list.md)
+- 项目结构：[docs/project-structure.md](/D:/a05-cursor/docs/project-structure.md)
