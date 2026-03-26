@@ -141,6 +141,17 @@
 
 - `file`
 
+当前支持格式：
+
+- `pdf`
+- `docx`
+- `md`
+
+当前行为：
+
+- `pdf` / `docx` 上传后先返回 `parseStatus=parsing`，再通过状态接口轮询结果
+- `md` 上传后直接返回 `parseStatus=parsed`，`parsedText` 保留 Markdown 原文
+
 ### `GET /resumes/{resumeId}/parse-status`
 
 查询解析状态。

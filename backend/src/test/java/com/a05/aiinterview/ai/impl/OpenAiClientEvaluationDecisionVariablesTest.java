@@ -3,6 +3,7 @@ package com.a05.aiinterview.ai.impl;
 import com.a05.aiinterview.ai.config.PromptProperties;
 import com.a05.aiinterview.ai.contract.AiOutputContractValidator;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionInput;
+import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
 import com.a05.aiinterview.ai.prompt.PromptTemplateService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
@@ -73,5 +74,33 @@ class OpenAiClientEvaluationDecisionVariablesTest {
                 .contains("\"samePointContinue\"")
                 .contains("\"used\":1")
                 .contains("\"max\":1");
+    }
+
+    @Test
+    @DisplayName("buildQuestionRoleContext should not duplicate experienceLevel into roleContext")
+    void buildQuestionRoleContext_shouldNotDuplicateExperienceLevelIntoRoleContext() {
+        OpenAiClient client = new OpenAiClient(
+                mock(ChatModel.class),
+                mock(PromptTemplateService.class),
+                new PromptProperties(),
+                new ObjectMapper(),
+                new AiOutputContractValidator(new ObjectMapper())
+        );
+
+        QuestionGenerationInput input = QuestionGenerationInput.builder()
+                .experienceLevel("SENIOR")
+                .build();
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> roleContext = ReflectionTestUtils.invokeMethod(
+                client,
+                "buildQuestionRoleContext",
+                input
+        );
+
+        assertThat(roleContext)
+                .containsEntry("roundType", "")
+                .containsEntry("style", "efficiency")
+                .containsOnlyKeys("roundType", "style");
     }
 }

@@ -198,7 +198,7 @@ git commit -m "feat(backend): include lightweight question summaries in intervie
 - `questionStem`
 - `questionType`
 - `domainName`
-- `targetDepth`
+- `difficulty`
 - `userAnswer`
 - `answerStatus`
 - `score`（可为 `null`）

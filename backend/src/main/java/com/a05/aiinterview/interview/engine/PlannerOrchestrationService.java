@@ -53,6 +53,7 @@ public class PlannerOrchestrationService {
     private final PlannerHistoryBuilderService plannerHistoryBuilderService;
     private final PlannerDomainNormalizationService plannerDomainNormalizationService;
     private final PlannerHistoryDedupService plannerHistoryDedupService;
+    private final ResumeExperienceMergeService resumeExperienceMergeService;
     private final InterviewSyllabusAssembler interviewSyllabusAssembler;
     private final InterviewDebugTraceService interviewDebugTraceService;
     private final ObjectMapper objectMapper;
@@ -107,6 +108,7 @@ public class PlannerOrchestrationService {
                     plannerDomainNormalizationService.normalize(plannerOutput, domains);
             plannerOutput = normalizationResult.normalizedOutput();
             recordPlannerNormalization(sessionId, normalizationResult);
+            plannerOutput = resumeExperienceMergeService.mergeIntoPlannerOutput(resumeText, plannerOutput);
             plannerOutput = plannerHistoryDedupService.deduplicate(
                     plannerOutput,
                     domains,
@@ -143,6 +145,7 @@ public class PlannerOrchestrationService {
                     syllabus,
                     domains
             );
+            session.setStateLedgerJson(ledger);
 
             // 7. 生成第一道题目
             InterviewQuestion firstQuestion = firstQuestionGenerationService.generateAndSave(session, plannerOutput);

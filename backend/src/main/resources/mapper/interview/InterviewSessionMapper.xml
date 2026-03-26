@@ -111,7 +111,9 @@
         FROM interview_sessions
         WHERE user_id = #{userId}
           AND target_role = #{targetRole}
-          AND COALESCE(finished_at, updated_at, created_at) &gt;= #{dateFrom}
+          <if test="dateFrom != null">
+              AND COALESCE(finished_at, updated_at, created_at) &gt;= #{dateFrom}
+          </if>
           <if test="excludeSessionId != null">
               AND id != #{excludeSessionId}
           </if>

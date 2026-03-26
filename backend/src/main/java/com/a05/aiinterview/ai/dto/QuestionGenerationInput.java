@@ -41,7 +41,6 @@ public class QuestionGenerationInput {
     @AllArgsConstructor
     public static class RoleContext {
         private String roundType;
-        private String candidateLevel;
         private String style;
     }
 

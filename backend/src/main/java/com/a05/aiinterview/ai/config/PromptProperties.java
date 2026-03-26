@@ -17,10 +17,10 @@ import java.util.Map;
 public class PromptProperties {
 
     private String planner = "v2";
-    private String questionGenerationStream = "v1";
+    private String questionGenerationStream = "v2";
     private String evaluationDecision = "v2";
     private String reportGeneration = "v1";
-    private String introRewrite = "v1";
+    private String introRewrite = "v2";
     private String questionDetailEvaluation = "v1";
 
     public String resolveVersion(String promptCode) {

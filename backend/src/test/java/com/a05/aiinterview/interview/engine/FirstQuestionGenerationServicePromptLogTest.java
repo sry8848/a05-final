@@ -18,6 +18,7 @@ import org.springframework.dao.DuplicateKeyException;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -76,6 +77,52 @@ class FirstQuestionGenerationServicePromptLogTest {
         assertThat(logLine).contains("\"promptCode\":\"intro_rewrite\"");
         assertThat(logLine).contains("\"interviewId\":1");
         assertThat(logLine).contains("\"fallbackReason\":\"exception\"");
+    }
+
+    @Test
+    @DisplayName("intro rewrite should receive persisted interviewer archetype")
+    void generateAndSave_shouldPassInterviewerArchetypeToRewriteInput() {
+        AiClient aiClient = mock(AiClient.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        IntroQuestionStrategyService strategyService = mock(IntroQuestionStrategyService.class);
+        AtomicReference<IntroRewriteInput> capturedInput = new AtomicReference<>();
+
+        when(strategyService.selectIntroForUser(2L)).thenReturn(IntroQuestionStrategyService.IntroQuestionSelection.builder()
+                .variantId("INTRO_V5")
+                .basePrompt("base-intro")
+                .recentPrompts(List.of())
+                .avoidPhrases(List.of())
+                .historyAvoidCount(0)
+                .build());
+        when(aiClient.callIntroRewrite(any(IntroRewriteInput.class))).thenAnswer(invocation -> {
+            IntroRewriteInput input = invocation.getArgument(0);
+            capturedInput.set(input);
+            return AiCallResult.<String>builder()
+                    .output("嗯，请你先简单介绍一下最近做的项目。")
+                    .promptCode("intro_rewrite")
+                    .promptVersion("v2")
+                    .build();
+        });
+        doAnswer(invocation -> {
+            InterviewQuestion question = invocation.getArgument(0);
+            question.setId(124L);
+            return 1;
+        }).when(questionMapper).insert(any(InterviewQuestion.class));
+
+        FirstQuestionGenerationService service = new FirstQuestionGenerationService(
+                aiClient,
+                new PromptProperties(),
+                strategyService,
+                questionMapper
+        );
+
+        InterviewSession session = buildSession();
+        session.setStateLedgerJson(new LinkedHashMap<>(java.util.Map.of("interviewer_archetype", "guiding")));
+        InterviewQuestion saved = service.generateAndSave(session, new PlannerOutput());
+
+        assertThat(capturedInput.get()).isNotNull();
+        assertThat(capturedInput.get().getInterviewerArchetype()).isEqualTo("guiding");
+        assertThat(saved.getGenerationContextJson()).containsEntry("interviewerArchetype", "guiding");
     }
 
     @Test

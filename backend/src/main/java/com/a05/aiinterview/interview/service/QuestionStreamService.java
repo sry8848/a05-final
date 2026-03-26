@@ -12,6 +12,7 @@ import com.a05.aiinterview.interview.dto.SseDoneEvent;
 import com.a05.aiinterview.interview.dto.SseErrorEvent;
 import com.a05.aiinterview.interview.dto.SseStartEvent;
 import com.a05.aiinterview.interview.dto.SseTtsReadyEvent;
+import com.a05.aiinterview.interview.engine.InterviewerArchetypeSupport;
 import com.a05.aiinterview.interview.engine.QuotaStateSupport;
 import com.a05.aiinterview.interview.entity.InterviewAttempt;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
@@ -98,7 +99,6 @@ public class QuestionStreamService {
     private static final String STATUS_ERROR = "error";
     private static final long SEGMENT_TTS_DRAIN_TIMEOUT_SECONDS = 12;
     private static final int ASKED_QUESTIONS_MAX_CHARS = 4000;
-    private static final String DEFAULT_DIFFICULTY = "L3";
     private static final String RAG_CONTEXT_FALLBACK =
             "无外部参考资料，请严格依赖你自身的工程师知识库进行出题。";
 
@@ -637,8 +637,7 @@ public class QuestionStreamService {
                 .experienceLevel(session.getExperienceLevel())
                 .roleContext(QuestionGenerationInput.RoleContext.builder()
                         .roundType("")
-                        .candidateLevel(session.getExperienceLevel())
-                        .style("natural_followup")
+                        .style(InterviewerArchetypeSupport.resolveFromLedger(session.getStateLedgerJson()))
                         .build())
                 .projectContext(QuestionGenerationInput.ProjectContext.builder()
                         .activeItemKey(resolvedItem.itemKey)
@@ -699,6 +698,7 @@ public class QuestionStreamService {
         ResolvedItem resolvedItem = resolveActiveItem(session, plan);
         String questionType = firstNonBlank(plan.getTargetQuestionType(), "PRINCIPLE");
         resolvedDomain = ensureQuestionDomain(session, currentQuestion, questionType, resolvedDomain);
+        String interviewerArchetype = InterviewerArchetypeSupport.resolveFromLedger(session.getStateLedgerJson());
 
         InterviewQuestion question = new InterviewQuestion();
         question.setSessionId(session.getId());
@@ -723,6 +723,7 @@ public class QuestionStreamService {
         ctx.put("activeItemName", resolvedItem.itemName);
         ctx.put("questionFamilyId", buildQuestionFamilyId(questionType, plan.getNextFocus()));
         ctx.put("generatedByStream", true);
+        ctx.put("interviewerArchetype", interviewerArchetype);
         question.setGenerationContextJson(ctx);
 
         question.setCreatedAt(LocalDateTime.now());
@@ -732,6 +733,7 @@ public class QuestionStreamService {
         Map<String, Object> nextLedger = session.getStateLedgerJson() != null
                 ? new LinkedHashMap<>(session.getStateLedgerJson())
                 : new LinkedHashMap<>();
+        nextLedger.putIfAbsent(InterviewerArchetypeSupport.LEDGER_KEY, interviewerArchetype);
         nextLedger.put("asked_total", existingQuestions.size() + 1);
         Map<String, Object> quotaState = QuotaStateSupport.ensureQuotaState(nextLedger, existingQuestions);
         if (!"SYSTEM_FALLBACK".equalsIgnoreCase(plan.getEffectiveDecisionSource())) {

@@ -185,7 +185,7 @@ AI 能顺着候选人回答继续问，而不是只按预设路径切题。
 ```json
 {
   "round_type": "technical_first",
-  "difficulty_band": ["L2", "L3"],
+  "difficultyHint": "L3",
   "required_domains": ["mysql", "java_basic"],
   "remaining_turn_budget": 8,
   "avoid_recent_question_families": [
@@ -199,7 +199,7 @@ AI 能顺着候选人回答继续问，而不是只按预设路径切题。
 
 说明：
 
-- `difficulty_band` 不是写死本场所有题目的固定难度，而是“允许波动的难度包络”
+- `difficultyHint` 不是写死本场所有题目的固定难度，而是当前轮或当前阶段优先探测的目标深度提示；本场通常应问到的区间仍由 `experienceLevel` 决定
 - 对于实习生/应届生，允许在定标后上探到高于初始预估的深度；对承压明显的候选人，也允许在包络内适度回落
 - `required_domains` 不是自由挑选，而是来自现有知识域体系、评分体系和岗位要求的交集约束
 - `remaining_turn_budget` 建议理解为软预算而不是硬预算；它主要用于防止无限追问，不应阻止高价值补问
@@ -307,7 +307,7 @@ AI 能顺着候选人回答继续问，而不是只按预设路径切题。
   "current_focus": "状态账本设计",
   "turn_index": 4,
   "remaining_turn_budget": 7,
-  "difficulty_band": ["L2", "L3"],
+  "difficultyHint": "L3",
   "covered_domains": ["java_basic", "mysql"],
   "covered_points": [
     "project:ai_interview:state_ledger",
@@ -330,7 +330,7 @@ AI 能顺着候选人回答继续问，而不是只按预设路径切题。
 - `current_focus`：当前主要讨论点
 - `turn_index`：当前轮次
 - `remaining_turn_budget`：剩余轮次预算
-- `difficulty_band`：本场允许的难度范围
+- `difficultyHint`：当前轮正在优先探测的目标深度提示
 - `covered_domains`：已覆盖的域
 - `covered_points`：已覆盖的更细粒度点
 - `weak_signals`：最近暴露出的薄弱点
@@ -518,8 +518,8 @@ AI 能顺着候选人回答继续问，而不是只按预设路径切题。
 {
   "role_context": {
     "round_type": "technical_first",
-    "candidate_level": "intern_or_new_grad",
-    "difficulty_band": ["L2", "L3"],
+    "experienceLevel": "FRESH_GRAD",
+    "difficultyHint": "L3",
     "style": "natural_followup"
   },
   "project_context": {
@@ -562,7 +562,7 @@ AI 能顺着候选人回答继续问，而不是只按预设路径切题。
 保留两步的主要原因：
 
 - 当前项目已经存在独立的 `evaluation_decision` 和 `question_generation_stream`
-- RAG 检索当前依赖 `domainCode / questionType / focusPoint / targetDepth` 一类中间信号
+- RAG 检索当前依赖 `domainCode / questionType / focusPoint / difficultyHint` 一类中间信号
 - 两步拆开后，日志、回放、调试和失败降级更容易做
 - 对于后续 prompt 调优，更容易定位问题是“判断错了”还是“问法不自然”
 
@@ -608,7 +608,7 @@ Question Generator Prompt 应重点约束：
 考虑到当前后端、前端和报告系统依赖题型，建议 `QuestionGenerationInput` 仍保留：
 
 - `questionType`
-- `targetDepth`
+- `difficultyHint`
 - `targetSkill`
 - `expectedPoints`
 
@@ -654,7 +654,7 @@ Question Generator Prompt 应重点约束：
   "weakness_replay_candidates": [
     "mysql.transaction.boundary"
   ],
-  "difficulty_band": ["L2", "L3"]
+  "difficultyHint": "L3"
 }
 ```
 
@@ -914,7 +914,7 @@ Reducer 只保留事实合并逻辑：
 - `weak_signals`
 - `remaining_turn_budget`
 - `recent_question_families`
-- `difficulty_band`
+- `difficultyHint`
 
 ## 13.2 重写 Decision Prompt
 

@@ -141,13 +141,13 @@ spring:
 
 ```java
 /**
- * 输入：nextDomainCode + focusPoint + targetDepth + questionType
+ * 输入：nextDomainCode + focusPoint + difficultyHint + questionType
  * 输出：ragContext（正向证据 + 反证提示，供注入出题 Prompt）
  */
 RagContext retrieve(RagRetrievalRequest request);
 ```
 
-- 实现多路召回：按 `domainCode`、`questionType`、`targetDepth`、`focusPoint` 多维度过滤
+- 实现多路召回：按 `domainCode`、`questionType`、`difficultyHint`、`focusPoint` 多维度编译查询和排序
 - 检索结果按 score 降序，聚合成可注入 Prompt 的字符串
 - 检索异常必须降级（`log.error(..., e)` 记录完整堆栈，返回空 context，不阻断主链路）
 - `rag.enabled=false` 时直接跳过，返回空 context

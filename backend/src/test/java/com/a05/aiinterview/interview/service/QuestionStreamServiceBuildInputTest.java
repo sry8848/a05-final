@@ -105,7 +105,8 @@ class QuestionStreamServiceBuildInputTest {
                 "active_item_type", "PROJECT",
                 "active_item_name", "订单系统",
                 "current_focus", "缓存击穿",
-                "recent_question_families", List.of("redis.breakdown.definition")
+                "recent_question_families", List.of("redis.breakdown.definition"),
+                "interviewer_archetype", "stress"
         ));
 
         InterviewAttempt attempt = new InterviewAttempt();
@@ -147,7 +148,10 @@ class QuestionStreamServiceBuildInputTest {
                 RagContext.empty()
         );
 
-        assertEquals("SENIOR", input.getRoleContext().getCandidateLevel());
+        assertEquals("SENIOR", input.getExperienceLevel());
+        assertThat(new ObjectMapper().convertValue(input.getRoleContext(), Map.class))
+                .containsEntry("style", "stress")
+                .containsOnlyKeys("roundType", "style");
         assertEquals("item-order", input.getProjectContext().getActiveItemKey());
         assertEquals("PROJECT", input.getProjectContext().getItemType());
         assertEquals("缓存击穿", input.getProjectContext().getCurrentFocus());
@@ -403,7 +407,8 @@ class QuestionStreamServiceBuildInputTest {
                         "projectTotal", 0,
                         "scenarioTotal", 0,
                         "behavioralTotal", 0
-                ))
+                )),
+                "interviewer_archetype", "guiding"
         )));
 
         QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
@@ -433,6 +438,7 @@ class QuestionStreamServiceBuildInputTest {
         );
 
         assertThat(saved.getId()).isEqualTo(901L);
+        assertThat(saved.getGenerationContextJson()).containsEntry("interviewerArchetype", "guiding");
         assertThat(session.getCurrentQuestionNo()).isEqualTo(2);
         @SuppressWarnings("unchecked")
         Map<String, Object> quotaState = (Map<String, Object>) session.getStateLedgerJson().get("quota_state");
@@ -490,7 +496,8 @@ class QuestionStreamServiceBuildInputTest {
                         "projectTotal", 1,
                         "scenarioTotal", 0,
                         "behavioralTotal", 0
-                ))
+                )),
+                "interviewer_archetype", "efficiency"
         )));
 
         QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
@@ -630,7 +637,8 @@ class QuestionStreamServiceBuildInputTest {
                 .containsEntry("activeItemKey", "project_chabst")
                 .containsEntry("activeItemType", "PROJECT")
                 .containsEntry("activeItemName", "Chabst")
-                .containsEntry("projectPoint", "RabbitMQ 延迟消息处理超时订单");
+                .containsEntry("projectPoint", "RabbitMQ 延迟消息处理超时订单")
+                .containsEntry("interviewerArchetype", "efficiency");
     }
 
     private QuestionStreamService newService() {

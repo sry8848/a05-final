@@ -9,11 +9,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
 
 @Component
 @RequiredArgsConstructor
 public class DecisionRepairOrchestrator {
+
+    private static final Pattern STRATEGY_CODE_PATTERN = Pattern.compile("\\bS_[A-Z_]+\\b");
 
     private final AiClient aiClient;
     private final DecisionExecutionPlanBuilder planBuilder;
@@ -79,9 +85,67 @@ public class DecisionRepairOrchestrator {
                 .recentInterviewMemory(originalInput.getRecentInterviewMemory())
                 .repairMode(true)
                 .repairAttemptNo(1)
-                .rawDecisionOutput(rawDecisionOutput == null ? "" : rawDecisionOutput)
+                .rawDecisionOutput(buildRepairDecisionSummary(rawDecisionOutput))
                 .validationErrors(validationErrors == null ? List.of() : List.copyOf(validationErrors))
                 .build();
+    }
+
+    private String buildRepairDecisionSummary(String rawDecisionOutput) {
+        if (rawDecisionOutput == null || rawDecisionOutput.isBlank()) {
+            return "";
+        }
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> parsed = objectMapper.readValue(rawDecisionOutput, Map.class);
+            return objectMapper.writerWithDefaultPrettyPrinter()
+                    .writeValueAsString(sanitizeDecisionSummary(parsed));
+        } catch (Exception ignored) {
+            return redactStrategyCodes(rawDecisionOutput);
+        }
+    }
+
+    private Map<String, Object> sanitizeDecisionSummary(Map<String, Object> parsed) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("decisionReason", sanitizeValue(parsed.get("decisionReason")));
+        summary.put("interviewAction", sanitizeValue(parsed.get("interviewAction")));
+        summary.put("finalDecision", "[REDACTED_USE_AVAILABLE_STRATEGIES]");
+        summary.put("nextFocus", sanitizeValue(parsed.get("nextFocus")));
+        summary.put("nextItemType", sanitizeValue(parsed.get("nextItemType")));
+        summary.put("nextItemName", sanitizeValue(parsed.get("nextItemName")));
+        summary.put("nextProjectPoint", sanitizeValue(parsed.get("nextProjectPoint")));
+        summary.put("targetDomainCode", sanitizeValue(parsed.get("targetDomainCode")));
+        summary.put("newCoveredDomains", sanitizeValue(parsed.get("newCoveredDomains")));
+        summary.put("newCoveredPoints", sanitizeValue(parsed.get("newCoveredPoints")));
+        summary.put("retrievalPlans", sanitizeValue(parsed.get("retrievalPlans")));
+        return summary;
+    }
+
+    private Object sanitizeValue(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof String text) {
+            return redactStrategyCodes(text);
+        }
+        if (value instanceof List<?> list) {
+            List<Object> sanitized = new ArrayList<>(list.size());
+            for (Object item : list) {
+                sanitized.add(sanitizeValue(item));
+            }
+            return sanitized;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> sanitized = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                sanitized.put(String.valueOf(entry.getKey()), sanitizeValue(entry.getValue()));
+            }
+            return sanitized;
+        }
+        return value;
+    }
+
+    private String redactStrategyCodes(String text) {
+        return STRATEGY_CODE_PATTERN.matcher(text).replaceAll("[REDACTED_STRATEGY]");
     }
 
     public record RepairResult(boolean success,

@@ -23,8 +23,8 @@ public class RagRetrievalRequest {
     /** 目标题目类型，如 PRINCIPLE / SCENARIO，可用于进一步过滤 */
     private String questionType;
 
-    /** 目标深度等级，如 L3 */
-    private String targetDepth;
+    /** 当前轮希望探到的目标深度提示，如 L3；只作为软提示参与查询/排序 */
+    private String difficultyHint;
 
     /**
      * 核心考察焦点（自然语言）。

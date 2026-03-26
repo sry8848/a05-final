@@ -650,6 +650,7 @@ import {
 import { formatLoadingProgress } from '../utils/interviewLoadingProgress'
 import { buildPendingInterviewResult } from '../utils/interviewResultState'
 import { buildInterviewCreatePayload } from '../utils/interviewSessionPayload'
+import { isResumeParsed, resolvePreferredResumeId } from '../utils/resumeState'
 import {
   getResumes,
   createInterviewSession,
@@ -681,7 +682,7 @@ export default {
       jobType: 'frontend',
       totalQuestions: 10,
       mode: 'chat',
-      resumeId: 'default',
+      resumeId: null,
       companyName: '',
       experience: 'intern',
       salaryMin: '',
@@ -931,7 +932,9 @@ export default {
     })
 
     const resumeOptions = computed(() =>
-      resumeList.value.map(r => ({ value: r.id, label: r.name || `简历 ${r.id}` }))
+      resumeList.value
+        .filter(isResumeParsed)
+        .map(r => ({ value: r.id, label: r.name || `简历 ${r.id}` }))
     )
     const positionOptions = computed(() =>
       jobOptions.map(job => ({ value: job.value, label: job.label }))
@@ -996,21 +999,21 @@ export default {
     const PREPARE_CONFIG_KEY = 'aiInterviewPrepareConfig'
 
     const loadPrepareConfig = () => {
+      let rememberedResumeId = null
       try {
         const raw = localStorage.getItem(PREPARE_CONFIG_KEY)
-        if (!raw) return
+        if (!raw) return null
         const data = JSON.parse(raw)
         if (data.jobType) config.jobType = data.jobType
         if (data.experience) config.experience = data.experience
         if (data.jobDescription != null) config.jobDescription = data.jobDescription
         if (data.interviewMode) config.interviewMode = data.interviewMode
         if (Array.isArray(data.knowledgePoints)) config.knowledgePoints = data.knowledgePoints
-        if (data.resumeId != null && resumeList.value.some(r => r.id === data.resumeId)) {
-          config.resumeId = data.resumeId
-        }
+        rememberedResumeId = data.resumeId ?? null
         if (data.pressure) config.pressure = data.pressure
         if (data.voiceType) config.voiceType = data.voiceType
       } catch (_) {}
+      return rememberedResumeId
     }
 
     const savePrepareConfig = () => {
@@ -1039,7 +1042,11 @@ export default {
 
     onMounted(async () => {
       await loadResumes()
-      loadPrepareConfig()
+      const rememberedResumeId = loadPrepareConfig()
+      config.resumeId = resolvePreferredResumeId({
+        resumes: resumeList.value,
+        rememberedResumeId
+      })
       ttsPlayerService.onVolume = (level, speaking) => {
         aiVoiceLevel.value = level
         isAiSpeaking.value = speaking || isAiSpeaking.value
@@ -2409,6 +2416,10 @@ export default {
       inputMode.value = normalizeInputMode(mode, inputMode.value)
     }, { immediate: true })
 
+    watch(() => config.resumeId, () => {
+      savePrepareConfig()
+    })
+
     watch(inputMode, (mode) => {
       const normalized = normalizeInputMode(config.interviewMode, mode)
       if (mode !== normalized) {
@@ -3762,7 +3773,7 @@ export default {
 
 .message.user {
   flex-direction: row-reverse;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .message-avatar {
@@ -3799,7 +3810,6 @@ export default {
 }
 
 .message.user .message-content {
-  width: 70%;
   max-width: 70%;
   min-height: 44px;
   box-sizing: border-box;

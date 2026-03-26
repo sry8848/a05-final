@@ -25,6 +25,7 @@ public class IntroRewriteInput {
     private String positionCode;
     private String experienceLevel;
     private String mode;
+    private String interviewerArchetype;
 
     /** 题库底稿原文 */
     private String basePrompt;

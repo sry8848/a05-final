@@ -55,6 +55,7 @@ public class FirstQuestionGenerationService {
      */
     public InterviewQuestion generateAndSave(InterviewSession session, PlannerOutput plannerOutput) {
         log.info("开始生成首题（固定 INTRO）, sessionId={}", session.getId());
+        String interviewerArchetype = InterviewerArchetypeSupport.resolveFromLedger(session.getStateLedgerJson());
 
         IntroQuestionStrategyService.IntroQuestionSelection selection =
                 introQuestionStrategyService.selectIntroForUser(session.getUserId());
@@ -80,6 +81,7 @@ public class FirstQuestionGenerationService {
                     .positionCode(session.getTargetRole())
                     .experienceLevel(session.getExperienceLevel())
                     .mode(session.getMode())
+                    .interviewerArchetype(interviewerArchetype)
                     .basePrompt(basePrompt)
                     .recentPrompts(selection.getRecentPrompts())
                     .avoidPhrases(selection.getAvoidPhrases())
@@ -129,7 +131,8 @@ public class FirstQuestionGenerationService {
                 aiResultStatus,
                 fallbackReason,
                 rewritePromptCode,
-                rewritePromptVersion
+                rewritePromptVersion,
+                interviewerArchetype
         );
         try {
             interviewQuestionMapper.insert(question);
@@ -161,7 +164,8 @@ public class FirstQuestionGenerationService {
                                                  String aiResultStatus,
                                                  String fallbackReason,
                                                  String rewritePromptCode,
-                                                 String rewritePromptVersion) {
+                                                 String rewritePromptVersion,
+                                                 String interviewerArchetype) {
         InterviewQuestion question = new InterviewQuestion();
         question.setSessionId(sessionId);
         question.setQuestionNo(questionNo);
@@ -183,6 +187,7 @@ public class FirstQuestionGenerationService {
         ctx.put("historyAvoidCount", selection.getHistoryAvoidCount());
         ctx.put("rewritePromptCode", rewritePromptCode);
         ctx.put("rewritePromptVersion", rewritePromptVersion);
+        ctx.put("interviewerArchetype", interviewerArchetype);
         question.setGenerationContextJson(ctx);
 
         question.setCreatedAt(LocalDateTime.now());

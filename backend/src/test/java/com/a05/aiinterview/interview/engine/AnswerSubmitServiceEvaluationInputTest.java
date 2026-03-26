@@ -422,7 +422,7 @@ class AnswerSubmitServiceEvaluationInputTest {
         when(sessionMapper.selectPlannerRecentSessions(
                 org.mockito.ArgumentMatchers.eq(1L),
                 org.mockito.ArgumentMatchers.eq("JAVA_BACKEND"),
-                org.mockito.ArgumentMatchers.eq(List.of("completed", "report_generating")),
+                org.mockito.ArgumentMatchers.isNull(),
                 any(),
                 org.mockito.ArgumentMatchers.eq(120L),
                 org.mockito.ArgumentMatchers.eq(3)
@@ -430,7 +430,7 @@ class AnswerSubmitServiceEvaluationInputTest {
         when(sessionMapper.selectPlannerRecentSessions(
                 1L,
                 "JAVA_BACKEND",
-                List.of("completed", "report_generating"),
+                null,
                 null,
                 120L,
                 2
@@ -462,6 +462,125 @@ class AnswerSubmitServiceEvaluationInputTest {
         assertThat(input.getProjectAndInternshipSummary()).hasSize(1);
         assertThat(input.getProjectAndInternshipSummary().getFirst().getBlockedEntryPoints())
                 .containsExactly("RabbitMQ 延迟消息处理超时订单");
+    }
+
+    @Test
+    @DisplayName("buildEvaluationInput should keep all syllabus projects and only block matched project entry points")
+    void buildEvaluationInput_shouldKeepAllProjectsAndOnlyBlockMatchedProjectEntryPoints() {
+        AiClient aiClient = mock(AiClient.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        PlannerHistoryBuilderService plannerHistoryBuilderService =
+                new PlannerHistoryBuilderService(sessionMapper, questionMapper);
+        AnswerSubmitService service = new AnswerSubmitService(
+                aiClient,
+                sessionMapper,
+                questionMapper,
+                mock(InterviewAttemptMapper.class),
+                mock(AnswerSubmitPersistenceService.class),
+                mock(ReportGenerationService.class),
+                new InterviewDebugTraceService(new ObjectMapper()),
+                new RemainingDomainMenuBuilder(),
+                new AvailableStrategyAssembler(),
+                new DecisionExecutionPlanBuilder(),
+                new DecisionRepairOrchestrator(aiClient, new DecisionExecutionPlanBuilder()),
+                new SystemFallbackPlanBuilder(),
+                plannerHistoryBuilderService
+        );
+
+        InterviewSession session = new InterviewSession();
+        session.setId(130L);
+        session.setUserId(1L);
+        session.setTargetRole("JAVA_BACKEND");
+        session.setExperienceLevel("FRESH_GRAD");
+        session.setStateLedgerJson(Map.of(
+                "quota_state", QuotaStateSupport.initialQuotaState(),
+                "max_questions", 14,
+                "domain_states", List.of(Map.of("domainCode", "DOMAIN_SPRING", "status", "UNASKED"))
+        ));
+        session.setSyllabusJson(Map.of(
+                "domains", List.of(
+                        Map.of(
+                                "domainCode", "DOMAIN_SPRING",
+                                "domainName", "Spring 框架",
+                                "focusPoints", List.of("事务传播")
+                        )
+                ),
+                "experienceItems", List.of(
+                        Map.of(
+                                "itemType", "PROJECT",
+                                "itemName", "AI 模拟面试系统",
+                                "resumeDescription", "项目描述A",
+                                "techHooks", List.of("Redis缓存多轮对话上下文", "流式出题状态管理")
+                        ),
+                        Map.of(
+                                "itemType", "PROJECT",
+                                "itemName", "苍穹外卖（企业级餐饮外卖平台）",
+                                "resumeDescription", "项目描述B",
+                                "techHooks", List.of("JWT 令牌实现双端登录鉴权")
+                        )
+                )
+        ));
+
+        InterviewSession projectHistory = new InterviewSession();
+        projectHistory.setId(129L);
+        projectHistory.setFinishedAt(java.time.LocalDateTime.of(2026, 3, 26, 10, 0));
+        projectHistory.setStateLedgerJson(Map.of());
+
+        InterviewQuestion projectQuestion = new InterviewQuestion();
+        projectQuestion.setId(7101L);
+        projectQuestion.setSessionId(129L);
+        projectQuestion.setQuestionNo(2);
+        projectQuestion.setQuestionType("PROJECT_DEEP_DIVE");
+        projectQuestion.setGenerationContextJson(Map.of(
+                "activeItemType", "PROJECT",
+                "activeItemName", "AI 模拟面试系统",
+                "projectPoint", "Redis缓存多轮对话上下文"
+        ));
+
+        when(sessionMapper.selectPlannerRecentSessions(
+                org.mockito.ArgumentMatchers.eq(1L),
+                org.mockito.ArgumentMatchers.eq("JAVA_BACKEND"),
+                org.mockito.ArgumentMatchers.isNull(),
+                any(),
+                org.mockito.ArgumentMatchers.eq(130L),
+                org.mockito.ArgumentMatchers.eq(3)
+        )).thenReturn(List.of());
+        when(sessionMapper.selectPlannerRecentSessions(
+                1L,
+                "JAVA_BACKEND",
+                null,
+                null,
+                130L,
+                2
+        )).thenReturn(List.of(projectHistory));
+        when(questionMapper.selectList(any())).thenReturn(List.of(projectQuestion));
+
+        InterviewQuestion currentQuestion = new InterviewQuestion();
+        currentQuestion.setQuestionType("INTRO");
+        currentQuestion.setId(902L);
+        currentQuestion.setStem("请做自我介绍");
+        currentQuestion.setExpectedPoints(List.of("项目"));
+        currentQuestion.setGenerationContextJson(Map.of(
+                "domainCode", "intro"
+        ));
+
+        EvaluationDecisionInput input = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildEvaluationInput",
+                session,
+                currentQuestion,
+                List.of(currentQuestion),
+                List.<InterviewAttempt>of(),
+                "回答"
+        );
+
+        assertThat(input.getProjectAndInternshipSummary())
+                .extracting(EvaluationDecisionInput.ProjectAndInternshipItem::getItemName)
+                .containsExactly("AI 模拟面试系统", "苍穹外卖（企业级餐饮外卖平台）");
+        assertThat(input.getProjectAndInternshipSummary().get(0).getBlockedEntryPoints())
+                .containsExactly("Redis缓存多轮对话上下文");
+        assertThat(input.getProjectAndInternshipSummary().get(1).getBlockedEntryPoints()).isEmpty();
     }
 
     private AnswerSubmitService buildService() {

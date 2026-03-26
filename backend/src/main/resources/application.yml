@@ -117,10 +117,10 @@ ai:
   prompt:
     version:
       planner: ${AI_PROMPT_PLANNER_VERSION:v2}
-      question-generation-stream: ${AI_PROMPT_QUESTION_GENERATION_STREAM_VERSION:v1}
+      question-generation-stream: ${AI_PROMPT_QUESTION_GENERATION_STREAM_VERSION:v2}
       evaluation-decision: ${AI_PROMPT_EVALUATION_DECISION_VERSION:v2}
       report-generation: ${AI_PROMPT_REPORT_GENERATION_VERSION:v1}
-      intro-rewrite: ${AI_PROMPT_INTRO_REWRITE_VERSION:v1}
+      intro-rewrite: ${AI_PROMPT_INTRO_REWRITE_VERSION:v2}
       question-detail-evaluation: ${AI_PROMPT_QUESTION_DETAIL_EVALUATION_VERSION:v1}
 
 # RAG 配置

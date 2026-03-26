@@ -200,7 +200,7 @@ spring:
 
 - 按 `domainCode`
 - 按 `questionType`
-- 按 `targetDepth`
+- 按 `difficultyHint`
 - 按 `focusPoint`
 - 按 `resume/project` 关键词
 
@@ -763,7 +763,7 @@ Pipeline 效果：用户听第一句时，后端已在合成第二句，主观�
 实现方式：
 
 - 基于面试报告和逐题评估结果抽取薄弱点
-- 用 `domainCode + targetDepth + focusPoint + wrongPattern` 生成推荐查询
+- 用 `domainCode + difficultyHint + focusPoint + wrongPattern` 生成推荐查询
 - 从学习资源向量库中召回相关资料
 - 再按规则做过滤和排序
 

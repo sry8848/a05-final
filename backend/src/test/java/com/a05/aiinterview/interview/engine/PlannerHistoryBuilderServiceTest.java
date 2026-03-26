@@ -36,7 +36,7 @@ class PlannerHistoryBuilderServiceTest {
 
         InterviewSession historySession = new InterviewSession();
         historySession.setId(69L);
-        historySession.setStatus("completed");
+        historySession.setStatus("aborted");
         historySession.setFinishedAt(LocalDateTime.of(2026, 3, 20, 12, 0));
         historySession.setUpdatedAt(LocalDateTime.of(2026, 3, 20, 12, 5));
         historySession.setCreatedAt(LocalDateTime.of(2026, 3, 20, 11, 0));
@@ -49,7 +49,7 @@ class PlannerHistoryBuilderServiceTest {
         when(sessionMapper.selectPlannerRecentSessions(
                 1L,
                 "JAVA_BACKEND",
-                List.of("completed", "report_generating"),
+                null,
                 expectedDateFrom,
                 70L,
                 3
@@ -57,7 +57,7 @@ class PlannerHistoryBuilderServiceTest {
         when(sessionMapper.selectPlannerRecentSessions(
                 1L,
                 "JAVA_BACKEND",
-                List.of("completed", "report_generating"),
+                null,
                 null,
                 70L,
                 2
@@ -68,7 +68,7 @@ class PlannerHistoryBuilderServiceTest {
         verify(sessionMapper).selectPlannerRecentSessions(
                 1L,
                 "JAVA_BACKEND",
-                List.of("completed", "report_generating"),
+                null,
                 expectedDateFrom,
                 70L,
                 3
@@ -110,7 +110,7 @@ class PlannerHistoryBuilderServiceTest {
         when(sessionMapper.selectPlannerRecentSessions(
                 2L,
                 "JAVA_BACKEND",
-                List.of("completed", "report_generating"),
+                null,
                 now.minusDays(30),
                 80L,
                 3
@@ -118,7 +118,7 @@ class PlannerHistoryBuilderServiceTest {
         when(sessionMapper.selectPlannerRecentSessions(
                 2L,
                 "JAVA_BACKEND",
-                List.of("completed", "report_generating"),
+                null,
                 null,
                 80L,
                 2
@@ -151,5 +151,48 @@ class PlannerHistoryBuilderServiceTest {
                     assertThat(item.getDiscussedItems().getFirst().getEntryPoints())
                             .containsExactly("RabbitMQ 延迟消息处理超时订单");
                 });
+    }
+
+    @Test
+    @DisplayName("should ignore sessions without seen-question facts even when status is recent")
+    void buildRecentHistory_shouldIgnoreSessionsWithoutSeenQuestionFacts() {
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        PlannerHistoryBuilderService service = new PlannerHistoryBuilderService(sessionMapper, questionMapper);
+
+        InterviewSession currentSession = new InterviewSession();
+        currentSession.setId(90L);
+        currentSession.setUserId(3L);
+        currentSession.setTargetRole("JAVA_BACKEND");
+
+        InterviewSession planningSession = new InterviewSession();
+        planningSession.setId(89L);
+        planningSession.setStatus("planning");
+        planningSession.setUpdatedAt(LocalDateTime.of(2026, 3, 25, 10, 0));
+        planningSession.setStateLedgerJson(Map.of());
+
+        LocalDateTime now = LocalDateTime.of(2026, 3, 26, 10, 0);
+        when(sessionMapper.selectPlannerRecentSessions(
+                3L,
+                "JAVA_BACKEND",
+                null,
+                now.minusDays(30),
+                90L,
+                3
+        )).thenReturn(List.of(planningSession));
+        when(sessionMapper.selectPlannerRecentSessions(
+                3L,
+                "JAVA_BACKEND",
+                null,
+                null,
+                90L,
+                2
+        )).thenReturn(List.of(planningSession));
+        when(questionMapper.selectList(org.mockito.ArgumentMatchers.<LambdaQueryWrapper<InterviewQuestion>>any()))
+                .thenReturn(List.of());
+
+        List<PlannerInput.HistoryInterviewItem> result = service.buildRecentHistory(currentSession, now);
+
+        assertThat(result).isEmpty();
     }
 }

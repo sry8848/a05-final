@@ -44,11 +44,11 @@ async function uploadRequest(path, formData) {
  * @param {number} status - HTTP 状态码
  * @param {string} rawMessage - 服务端或浏览器返回的原始文案
  */
-function toResumeUploadMessage(status, rawMessage) {
-  if (status === 413) return '上传文件过大，请选择不超过 20MB 的 PDF 或 DOCX 文件'
+export function toResumeUploadMessage(status, rawMessage) {
+  if (status === 413) return '上传文件过大，请选择不超过 20MB 的 PDF、DOCX 或 MD 文件'
   const lower = (rawMessage || '').toLowerCase()
   if (/maximum.*size|size.*exceeded|exceeded.*size|file.*too large|payload too large/.test(lower)) {
-    return '上传文件过大，请选择不超过 20MB 的 PDF 或 DOCX 文件'
+    return '上传文件过大，请选择不超过 20MB 的 PDF、DOCX 或 MD 文件'
   }
   return rawMessage || '上传失败'
 }
@@ -68,7 +68,7 @@ export function getResumes() {
 
 /**
  * 上传简历并发起解析
- * @param {File} file - PDF 或 DOCX
+ * @param {File} file - PDF、DOCX 或 MD
  * @returns {Promise<{ resumeId: number, parseStatus: string }>}
  */
 export function uploadResume(file) {

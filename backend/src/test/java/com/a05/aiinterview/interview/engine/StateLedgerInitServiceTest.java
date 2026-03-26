@@ -55,6 +55,7 @@ class StateLedgerInitServiceTest {
         assertThat(ledger.get("covered_domains")).isEqualTo(List.of());
         assertThat(ledger.get("covered_points")).isEqualTo(List.of());
         assertThat(ledger.get("recent_question_families")).isEqualTo(List.of());
+        assertThat(ledger.get("interviewer_archetype")).isEqualTo(InterviewerArchetypeSupport.chooseForSession(6L));
         assertThat(ledger.get("max_questions")).isEqualTo(16);
         assertThat(ledger.get("quota_state")).isEqualTo(Map.of(
                 "samePointContinue", 0,

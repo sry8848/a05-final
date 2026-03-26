@@ -9,7 +9,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
@@ -22,7 +21,7 @@ import java.util.List;
  *
  * <p>检索策略：
  * <ol>
- *   <li>以 focusPoint + domainCode + questionType + targetDepth 拼接查询文本</li>
+ *   <li>以 focusPoint + domainCode + questionType + difficultyHint 拼接查询文本</li>
  *   <li>按 {@code domain_code} 进行 metadata 精确过滤，降低跨域噪声</li>
  *   <li>按 score 降序排列，取 top-k 结果</li>
  *   <li>聚合为可注入 Prompt 的段落文本</li>
@@ -40,9 +39,9 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
 
     @Override
     public RagContext retrieve(RagRetrievalRequest request) {
-        log.info("RAG 检索开始, domainCode={}, questionType={}, targetDepth={}, focusPoint={}",
+        log.info("RAG 检索开始, domainCode={}, questionType={}, difficultyHint={}, focusPoint={}",
                 request.getDomainCode(), request.getQuestionType(),
-                request.getTargetDepth(), request.getFocusPoint());
+                request.getDifficultyHint(), request.getFocusPoint());
         try {
             String queryText = buildQueryText(request);
             SearchRequest searchRequest = buildSearchRequest(queryText, request);
@@ -88,8 +87,8 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
         if (request.getQuestionType() != null && !request.getQuestionType().isBlank()) {
             sb.append(" ").append(request.getQuestionType());
         }
-        if (request.getTargetDepth() != null && !request.getTargetDepth().isBlank()) {
-            sb.append(" 深度 ").append(request.getTargetDepth());
+        if (request.getDifficultyHint() != null && !request.getDifficultyHint().isBlank()) {
+            sb.append(" 深度 ").append(request.getDifficultyHint());
         }
 
         String query = sb.toString().trim();
@@ -99,6 +98,7 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
 
     /**
      * 构建 SearchRequest，优先按 domain_code 做 metadata 过滤，降低跨域噪声。
+     * difficultyHint 只参与 query 文本，不参与 metadata 等值硬过滤。
      * 过滤表达式使用 Spring AI 可移植的文本 DSL，Qdrant 会自动转为原生过滤器。
      */
     private SearchRequest buildSearchRequest(String queryText, RagRetrievalRequest request) {

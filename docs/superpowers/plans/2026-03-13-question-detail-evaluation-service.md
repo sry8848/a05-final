@@ -230,7 +230,7 @@ git commit -m "feat(backend): trigger async question detail evaluation after fin
 - `questionStem`
 - `domainName`
 - `questionType`
-- `targetDepth`
+- `difficulty`
 - `userAnswer`
 - `answerStatus`
 - `evaluationStatus`

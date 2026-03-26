@@ -200,7 +200,6 @@ public class PlannerExperienceItem {
 - `title`
 - `questionMixPlan`
 - `focusAreas`
-- `targetDepth`
 - `priority`
 - `projectId`
 - `bizGoal`
@@ -288,7 +287,7 @@ public class SyllabusExperienceItem {
 2. 修改 `PlannerInput` 和 `PlannerOutput` DTO
 3. 新增 `Planner -> InterviewSyllabus` 组装层
 4. 修改 `PlannerOrchestrationService` 持久化 `syllabus` 的逻辑
-5. 修改 `StateLedgerInitService`，去掉对 `questionMixPlan`、`targetDepth` 等旧字段的依赖
+5. 修改 `StateLedgerInitService`，去掉对 `questionMixPlan`、旧难度字段等旧字段的依赖
 6. 补充最小契约测试和组装测试
 
 ## 待后续确认的问题

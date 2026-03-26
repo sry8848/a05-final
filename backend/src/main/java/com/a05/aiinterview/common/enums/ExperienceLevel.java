@@ -7,7 +7,7 @@ import java.util.Locale;
 
 /**
  * 工作年限分层枚举。
- * 决定 AI 出题的难度基准和知识域目标深度。
+ * 决定面试节奏、题型配额和初始预期范围，不直接等于题目难度。
  */
 @Getter
 public enum ExperienceLevel implements IEnum<String> {

@@ -10,12 +10,13 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.stream.Collectors;
 
 /**
- * 简历文件解析：PDF 与 DOCX 提取纯文本。
+ * 简历文件解析：PDF / DOCX 提取纯文本，Markdown 保留原文。
  * PDF 使用 Apache PDFBox，DOCX 使用 Apache POI。
  */
 @Slf4j
@@ -35,6 +36,9 @@ public class ResumeFileParser {
             throw new IllegalArgumentException("文件不存在或不可读: " + filePath);
         }
         String name = filePath.getFileName().toString().toLowerCase();
+        if (name.endsWith(".md")) {
+            return parseMarkdown(filePath);
+        }
         try (InputStream in = Files.newInputStream(filePath)) {
             if (name.endsWith(".pdf")) {
                 return parsePdf(in);
@@ -43,7 +47,7 @@ public class ResumeFileParser {
                 return parseDocx(in);
             }
         }
-        throw new IllegalArgumentException("不支持的文件格式，仅支持 .pdf 与 .docx");
+        throw new IllegalArgumentException("不支持的文件格式，仅支持 .pdf、.docx 与 .md");
     }
 
     /**
@@ -67,6 +71,13 @@ public class ResumeFileParser {
                     .collect(Collectors.joining("\n"));
             return truncate(text);
         }
+    }
+
+    /**
+     * Markdown 解析：按 UTF-8 原样读取文本，不清洗语法。
+     */
+    private String parseMarkdown(Path filePath) throws IOException {
+        return truncate(Files.readString(filePath, StandardCharsets.UTF_8));
     }
 
     private static String truncate(String s) {

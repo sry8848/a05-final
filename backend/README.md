@@ -25,7 +25,7 @@ src/main/java/com/a05/aiinterview/
 ## 配置文件
 
 - `src/main/resources/application.yml`
-  公共基础配置，包含数据库、Redis、RabbitMQ、JWT、AI、RAG、语音默认项
+  公共基础配置，包含数据库、Redis、RabbitMQ、JWT、SMTP、AI、RAG、语音默认项
 - `src/main/resources/application-local.yml`
   本地真实联调配置，使用百炼兼容 OpenAI 接口，适合 `mvn spring-boot:run -Dspring-boot.run.profiles=local`
 - `src/main/resources/application-dev.yml`
@@ -39,8 +39,13 @@ src/main/java/com/a05/aiinterview/
 - MySQL 8
 - Redis
 - RabbitMQ
-- 可选：Qdrant
-- 可选：阿里云百炼 API Key
+- Qdrant
+- 阿里云百炼 API Key
+- SMTP 邮件配置
+
+这里的 SMTP 不是可选项。
+
+当前项目默认会在启动阶段检查 SMTP 是否能连接和认证；如果没配好，后端可能直接启动失败。
 
 数据库脚本位置：
 
@@ -69,16 +74,31 @@ java -jar target/aiinterview-backend-0.0.1-SNAPSHOT.jar --spring.profiles.active
 常用变量包括：
 
 - `AI_BAILIAN_API_KEY`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USERNAME`
+- `SMTP_PASSWORD`
+- `SMTP_FROM`
+- `SMTP_STARTUP_CHECK_ENABLED`
 - `RAG_ENABLED`
 - `QDRANT_HOST`
 - `QDRANT_PORT`
 - `QDRANT_COLLECTION`
 - `ASR_ENABLED`
-- `ASR_API_KEY`
 - `TTS_ENABLED`
-- `TTS_API_KEY`
 
 这些变量可以从根目录 `.env` 导入到当前终端，或者直接写到 IDEA 的运行配置里。
+
+关于 SMTP，再提醒一次：
+
+- `SMTP_PASSWORD` 往往是授权码，不一定是邮箱网页登录密码
+- `SMTP_FROM` 通常和 `SMTP_USERNAME` 相同
+- `587 + STARTTLS` 和 `465 + SSL` 不要混着配
+
+关于语音，再提醒一次：
+
+- 当前推荐的 `local` 流程里，ASR / TTS 默认直接复用 `AI_BAILIAN_API_KEY`
+- 所以第一次部署通常不用再额外准备 `ASR_API_KEY`、`TTS_API_KEY`
 
 ## 数据与资源目录
 
@@ -101,6 +121,7 @@ java -jar target/aiinterview-backend-0.0.1-SNAPSHOT.jar --spring.profiles.active
 
 ```text
 GET http://localhost:8080/api/v1/system/ping
+POST http://localhost:8080/api/v1/auth/email-code/send
 ```
 
 ## 常见问题
@@ -109,12 +130,21 @@ GET http://localhost:8080/api/v1/system/ping
 
 通常是数据库还没初始化，先执行根 README 里的 `db-init`。
 
-### `VerificationCodeStore` Bean 找不到
+### 启动时报 SMTP 相关错误
 
-当前仓库已经通过 `VerificationCodeStoreConfig` 显式处理 Redis / 内存两套实现；如果还报错，优先检查：
+优先检查：
 
-- `auth.config` 包是否被正确扫描
-- Redis 配置是否被手动排除
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USERNAME`
+- `SMTP_PASSWORD`
+- `SMTP_FROM`
+
+再检查：
+
+- 你是不是改了 `.env` 但没有重新导入环境变量
+- `SMTP_PASSWORD` 是不是填成了邮箱登录密码，而不是授权码
+- 你是不是把 `587 + STARTTLS` 和 `465 + SSL` 配反了
 
 ### Qdrant 相关 Bean 启动报错
 

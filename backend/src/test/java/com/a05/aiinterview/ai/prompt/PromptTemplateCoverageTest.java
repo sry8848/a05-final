@@ -38,14 +38,16 @@ class PromptTemplateCoverageTest {
                 .contains("只能从输入提供的岗位知识域列表中选择")
                 .contains("coveredKnowledgePoints")
                 .contains("不要把整个 domain 删掉")
-                .contains("如果历史 discussedItems 为空，不要臆造项目去重信息");
+                .contains("如果历史 discussedItems 为空，不要臆造项目去重信息")
+                .contains("experienceItems 必须覆盖简历中所有真实存在")
+                .contains("不允许把整个项目从 experienceItems 中删掉");
     }
 
     @Test
     @DisplayName("question_generation_stream template should load and render")
     void renderQuestionGenerationStream_shouldLoad() {
-        RenderedPrompt rendered = service.render("question_generation_stream", "v1", Map.ofEntries(
-                Map.entry("roleContext", "{\"roundType\":\"\",\"candidateLevel\":\"SENIOR\",\"style\":\"natural_followup\"}"),
+        RenderedPrompt rendered = service.render("question_generation_stream", "v2", Map.ofEntries(
+                Map.entry("roleContext", "{\"roundType\":\"\",\"style\":\"guiding\"}"),
                 Map.entry("projectContext", "{\"activeItemKey\":\"item_order\",\"itemType\":\"PROJECT\",\"itemName\":\"订单系统\",\"currentFocus\":\"线程池调优\"}"),
                 Map.entry("recentContext", "{\"lastQuestion\":\"线程池参数怎么配？\",\"lastAnswerSummary\":\"候选人讲了核心参数，但拒绝策略和容量评估偏空。\",\"recentTurnsSummary\":\"最近两轮都在项目主线内追问。\",\"lastAnswerHighlights\":[\"corePoolSize\",\"队列容量\"]}"),
                 Map.entry("nextQuestionGoal", "{\"questionType\":\"PRINCIPLE\",\"nextFocus\":\"拒绝策略与容量评估\",\"goalSummary\":\"继续验证线程池在项目里的取舍能力\",\"relatedDomainId\":1,\"relatedDomainCode\":\"concurrency\",\"relatedDomainName\":\"Concurrency\",\"relatedItemKey\":\"item_order\",\"relatedItemType\":\"PROJECT\",\"relatedItemName\":\"订单系统\",\"expectedAnswerPoints\":[\"拒绝策略\",\"容量评估\"]}"),
@@ -60,7 +62,16 @@ class PromptTemplateCoverageTest {
         ));
 
         assertThat(rendered.getPromptCode()).isEqualTo("question_generation_stream");
-        assertThat(rendered.getUserPrompt()).contains("下一问目标").contains("拒绝策略与容量评估");
+        assertThat(rendered.getUserPrompt())
+                .contains("下一问目标")
+                .contains("拒绝策略与容量评估")
+                .contains("{\"roundType\":\"\",\"style\":\"guiding\"}");
+        assertThat(rendered.getSystemPrompt())
+                .contains("efficiency")
+                .contains("guiding")
+                .contains("stress")
+                .contains("2-6")
+                .contains("不做精确概率控制");
     }
 
     @Test
@@ -117,6 +128,7 @@ class PromptTemplateCoverageTest {
                 .contains("近期跨场禁选知识点")
                 .contains("blockedEntryPoints")
                 .contains("历史问题、回答概要、回答评价")
+                .contains("不表示该项目本身被禁选")
                 .doesNotContain("知识域及知识点状态")
                 .doesNotContain("\"possibleNextMoves\"")
                 .doesNotContain("\"newCandidatePointsByDomain\"")
@@ -165,14 +177,16 @@ class PromptTemplateCoverageTest {
     @Test
     @DisplayName("intro_rewrite template should load and render")
     void renderIntroRewrite_shouldLoad() {
-        RenderedPrompt rendered = service.render("intro_rewrite", "v1", Map.of(
+        RenderedPrompt rendered = service.render("intro_rewrite", "v2", Map.of(
                 "candidateContext", "context",
+                "interviewerArchetype", "stress",
                 "basePrompt", "base-prompt",
                 "recentPrompts", "- q1\n- q2",
                 "avoidPhrases", "- phrase-1"
         ));
 
         assertThat(rendered.getPromptCode()).isEqualTo("intro_rewrite");
-        assertThat(rendered.getUserPrompt()).contains("base-prompt");
+        assertThat(rendered.getUserPrompt()).contains("base-prompt").contains("stress");
+        assertThat(rendered.getSystemPrompt()).contains("efficiency").contains("guiding").contains("stress");
     }
 }

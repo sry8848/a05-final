@@ -78,7 +78,13 @@ class DecisionRepairOrchestratorTest {
                 input,
                 currentQuestion,
                 List.of("STRATEGY_NOT_IN_AVAILABLE_POOL"),
-                "{\"finalDecision\":\"BAD\"}"
+                """
+                        {
+                          "decisionReason": "candidate prefers S_ENTER_PROJECT",
+                          "finalDecision": "S_ENTER_PROJECT",
+                          "nextFocus": "缓存一致性"
+                        }
+                        """
         );
 
         assertThat(result.success()).isTrue();
@@ -92,6 +98,7 @@ class DecisionRepairOrchestratorTest {
         assertThat(repairInput.getRepairMode()).isTrue();
         assertThat(repairInput.getRepairAttemptNo()).isEqualTo(1);
         assertThat(repairInput.getValidationErrors()).containsExactly("STRATEGY_NOT_IN_AVAILABLE_POOL");
-        assertThat(repairInput.getRawDecisionOutput()).contains("BAD");
+        assertThat(repairInput.getRawDecisionOutput()).contains("缓存一致性");
+        assertThat(repairInput.getRawDecisionOutput()).doesNotContain("S_ENTER_PROJECT");
     }
 }

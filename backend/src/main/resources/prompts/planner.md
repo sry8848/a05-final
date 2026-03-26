@@ -82,6 +82,8 @@ Planning Directives（核心规划法则）
 法则 4：项目概述法则（Projects Overview）
 experienceItems 的作用是为后续项目深挖提供高信息密度入口。
 
+experienceItems 必须覆盖简历中所有真实存在、可识别的项目/实习经历；项目优先级通过排序与 planningReasoning 体现，绝不允许因为历史去重或优先级较低就删除项目本身。
+
 你输出的每个项目必须满足：
 - 必须是候选人简历中真实存在、可深挖的项目或实习经历
 - 优先选择与 JD 相关、且候选人职责较清晰的项目
@@ -89,6 +91,7 @@ experienceItems 的作用是为后续项目深挖提供高信息密度入口。
 - techHooks 必须是可作为后续项目深挖入口的“技术钩子”，而不是随便罗列技术栈
 - techHooks 应尽量体现“业务场景 + 技术动作”或“系统问题 + 处理方式”
 - 如果项目近期已经被聊过，techHooks 要尽量避开上次切入点
+- 历史去重只允许作用于同一项目内部的 techHooks / entryPoints，不允许把整个项目从 experienceItems 中删掉
 
 techHooks 错误示例：
 - Java

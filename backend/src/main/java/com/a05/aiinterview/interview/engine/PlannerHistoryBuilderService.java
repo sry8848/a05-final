@@ -24,7 +24,6 @@ public class PlannerHistoryBuilderService {
     static final int RECENT_HISTORY_LIMIT = 3;
     static final int RECENT_HISTORY_DAYS = 30;
     static final int RECENT_PROJECT_HISTORY_LIMIT = 2;
-    private static final List<String> INCLUDED_STATUSES = List.of("completed", "report_generating");
     private static final String PROJECT_QUESTION_TYPE = "PROJECT_DEEP_DIVE";
 
     private final InterviewSessionMapper interviewSessionMapper;
@@ -57,6 +56,7 @@ public class PlannerHistoryBuilderService {
                 .forEach(session -> sessionsById.put(session.getId(), session));
         projectSessions.stream()
                 .filter(Objects::nonNull)
+                .filter(session -> discussedItemsBySession.containsKey(session.getId()))
                 .forEach(session -> sessionsById.putIfAbsent(session.getId(), session));
 
         return sessionsById.values().stream()
@@ -98,18 +98,20 @@ public class PlannerHistoryBuilderService {
         return defaultSessions(interviewSessionMapper.selectPlannerRecentSessions(
                 currentSession.getUserId(),
                 currentSession.getTargetRole(),
-                INCLUDED_STATUSES,
+                null,
                 now.minusDays(RECENT_HISTORY_DAYS),
                 currentSession.getId(),
                 RECENT_HISTORY_LIMIT
-        ));
+        )).stream()
+                .filter(session -> !extractCoveredKnowledgePoints(session.getStateLedgerJson()).isEmpty())
+                .toList();
     }
 
     private List<InterviewSession> selectProjectHistorySessions(InterviewSession currentSession) {
         return defaultSessions(interviewSessionMapper.selectPlannerRecentSessions(
                 currentSession.getUserId(),
                 currentSession.getTargetRole(),
-                INCLUDED_STATUSES,
+                null,
                 null,
                 currentSession.getId(),
                 RECENT_PROJECT_HISTORY_LIMIT

@@ -64,7 +64,7 @@ promptVersion: v2
 结构必须为："[评估] {对现状的极简定性} [意图] {下一步想干什么}"
 
 ❌ 错误示例（太长，包含复述废话）：
-"候选人自我介绍清晰覆盖了技术方向（Java后端分布式）、代表项目（Chabst）及关键贡献（Seata AT拦截器...），三类expectedPoints全部命中。当前急需补全理论基线，从可用策略池看，S_ENTER_PROJECT最契合..."
+"候选人自我介绍清晰覆盖了技术方向（Java后端分布式）、代表项目（Chabst）及关键贡献（Seata AT拦截器...），三类expectedPoints全部命中。当前急需补全理论基线，从可用策略池看，最契合的是继续沿高信息密度主线推进..."
 
 ✅ 正确示例（探顶/探底）：
 "[评估]自我介绍包含Chabst高并发项目及分布式中间件，命中要点。[意图]需切入真实场景验证技术深度。"
@@ -74,7 +74,7 @@ promptVersion: v2
 - 这不是让你重做整轮评估，而是要求你在**尽量保留原始决策意图**的前提下，只修复不合法的字段。
 - Repair 时你仍然只能从当前注入的 `availableStrategies` 中选择 `finalDecision`，绝不允许输出池外编码。
 - Repair 时你要重点阅读：
-  - `rawDecisionOutput`
+  - `rawDecisionOutput`（上一轮失败决策的脱敏摘要，不是原始 JSON 原文）
   - `validationErrors`
 - Repair 时不要重新依赖长篇 RAG 资料做技术判断；如果系统给你的 `retrievedMaterials` 为空，这是正常的。
 
@@ -84,7 +84,7 @@ promptVersion: v2
 
 [字段级严格约束]
 **务必严格遵循以下规则，违反将导致面试系统崩溃**：
-1. 策略枚举防篡改：`finalDecision` 必须严格使用系统动态注入的策略编码（StrategyCode，如：`S_J_PRESSURE`），绝不允许输出中文名称、缩写或自行捏造的代码。
+1. 策略枚举防篡改：`finalDecision` 必须严格使用系统动态注入的策略编码（StrategyCode，即当前 `availableStrategies` 中出现的合法编码），绝不允许输出中文名称、缩写或自行捏造的代码。
 2. 状态互斥：`interviewAction` 只能是 `CONTINUE` 或 `WRAPUP`。
 - 若为 `WRAPUP`，则 `finalDecision` 必须是结束面试的策略编码，且 `nextFocus`、`targetDomainCode`、`retrievalPlans` 必须为空。
 - 若为 `CONTINUE`，则 `finalDecision` 绝不允许是结束面试的策略编码。
@@ -109,7 +109,7 @@ promptVersion: v2
 {
   "decisionReason": "严格遵循 5 步工作流生成的思维链。",
   "interviewAction": "CONTINUE | WRAPUP",
-  "finalDecision": "S_J_PRESSURE",
+  "finalDecision": "从当前 availableStrategies 中选择的合法策略编码",
   "nextFocus": "主从延迟导致双删失败的兜底防御",
   "nextItemType": "",
   "nextItemName": "",
@@ -174,7 +174,7 @@ promptVersion: v2
 【Repair 次数】
 {{repairAttemptNo}}
 
-【上一轮原始决策输出（仅 Repair 模式使用）】
+【上一轮失败决策摘要（仅 Repair 模式使用，已脱敏）】
 {{rawDecisionOutput}}
 
 【上一轮校验错误码（仅 Repair 模式使用）】
@@ -185,7 +185,9 @@ promptVersion: v2
 
 说明：
 - 其中 `blockedEntryPoints` 表示该项目在同岗位最近两场面试里已经使用过的跨场禁选切口
-- 这些切口仅用于跨场去重参考；你可以继续选择同一个项目，但应优先更换到未被禁选的新切口
+- 这些切口仅用于跨场去重参考，不表示该项目本身被禁选
+- 你可以继续选择同一个项目，但应优先更换到未被禁选的新切口
+- 不要因为某个项目存在 blockedEntryPoints，就把整个项目视为不能再问
 
 【近期跨场禁选知识点】
 {{crossSessionBlockedKnowledgePoints}}

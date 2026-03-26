@@ -8,7 +8,9 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -35,10 +37,21 @@ public class ResumeService {
     private static final String PARSE_STATUS_FAILED = "failed";
     private static final String SOURCE_TYPE_FILE = "file";
     private static final int PREVIEW_MAX_LEN = 500;
+    private static final String EXT_PDF = ".pdf";
+    private static final String EXT_DOCX = ".docx";
+    private static final String EXT_MD = ".md";
 
     private final ResumeMapper resumeMapper;
     private final ResumeStorageConfig storageConfig;
     private final ResumeFileParser resumeFileParser;
+    private TaskExecutor resumeParseTaskExecutor = new SimpleAsyncTaskExecutor("resume-parse-");
+
+    @Autowired(required = false)
+    void setResumeParseTaskExecutor(TaskExecutor resumeParseTaskExecutor) {
+        if (resumeParseTaskExecutor != null) {
+            this.resumeParseTaskExecutor = resumeParseTaskExecutor;
+        }
+    }
 
     /**
      * 获取当前用户的简历列表，按创建时间倒序。
@@ -56,10 +69,11 @@ public class ResumeService {
     }
 
     /**
-     * 上传简历：落库、存文件、异步解析。
+     * 上传简历：落库、存文件并解析。
+     * PDF / DOCX 走异步解析；Markdown 直接读取原文并返回 parsed。
      *
      * @param userId 当前用户ID
-     * @param file   上传文件（PDF/DOCX）
+     * @param file   上传文件（PDF/DOCX/MD）
      * @return 简历ID与解析状态
      */
     @Transactional(rollbackFor = Exception.class)
@@ -72,9 +86,11 @@ public class ResumeService {
             throw new IllegalArgumentException("文件名不能为空");
         }
         String lower = originalName.toLowerCase();
-        if (!lower.endsWith(".pdf") && !lower.endsWith(".docx")) {
-            throw new IllegalArgumentException("仅支持 PDF、DOCX 格式");
+        String ext = resolveSupportedExtension(lower);
+        if (ext == null) {
+            throw new IllegalArgumentException("仅支持 PDF、DOCX、MD 格式");
         }
+        boolean markdownUpload = EXT_MD.equals(ext);
 
         Resume resume = new Resume();
         resume.setUserId(userId);
@@ -93,7 +109,6 @@ public class ResumeService {
             log.error("创建简历存储目录失败, userId={}, resumeId={}", userId, resumeId, e);
             throw new IllegalStateException("存储目录创建失败");
         }
-        String ext = lower.endsWith(".pdf") ? ".pdf" : ".docx";
         String relativePath = userId + "/" + resumeId + ext;
         Path targetFile = baseDir.resolve(resumeId + ext);
         try {
@@ -107,14 +122,30 @@ public class ResumeService {
         resumeMapper.updateById(resume);
 
         log.info("简历上传成功, userId={}, resumeId={}, name={}", userId, resumeId, originalName);
-        runAsyncParse(resumeId);
+        if (markdownUpload) {
+            try {
+                String text = resumeFileParser.parse(targetFile);
+                resume.setParsedText(text);
+                resume.setParseStatus(PARSE_STATUS_PARSED);
+                resumeMapper.updateById(resume);
+                log.info("Markdown 简历解析完成, resumeId={}, length={}", resumeId, text != null ? text.length() : 0);
+                return new ResumeUploadResponseDto(resumeId, PARSE_STATUS_PARSED);
+            } catch (Exception e) {
+                log.error("Markdown 简历解析失败, resumeId={}, path={}", resumeId, targetFile, e);
+                resume.setParseStatus(PARSE_STATUS_FAILED);
+                resumeMapper.updateById(resume);
+                return new ResumeUploadResponseDto(resumeId, PARSE_STATUS_FAILED);
+            }
+        }
+
+        resumeParseTaskExecutor.execute(() -> runAsyncParse(resumeId));
         return new ResumeUploadResponseDto(resumeId, PARSE_STATUS_PARSING);
     }
 
     /**
-     * 异步解析简历文件并更新 parsedText / parseStatus。
+     * 解析简历文件并更新 parsedText / parseStatus。
+     * 由 TaskExecutor 异步调度，避免类内 self-invocation 导致 @Async 失效。
      */
-    @Async
     public void runAsyncParse(Long resumeId) {
         Resume resume = resumeMapper.selectById(resumeId);
         if (resume == null || !PARSE_STATUS_PARSING.equals(resume.getParseStatus())) {
@@ -212,6 +243,19 @@ public class ResumeService {
         }
         resumeMapper.deleteById(resumeId);
         log.info("简历已删除, userId={}, resumeId={}", userId, resumeId);
+    }
+
+    private String resolveSupportedExtension(String lowerName) {
+        if (lowerName.endsWith(EXT_PDF)) {
+            return EXT_PDF;
+        }
+        if (lowerName.endsWith(EXT_DOCX)) {
+            return EXT_DOCX;
+        }
+        if (lowerName.endsWith(EXT_MD)) {
+            return EXT_MD;
+        }
+        return null;
     }
 
     private Resume getOwnedResume(Long userId, Long resumeId) {

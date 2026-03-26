@@ -580,6 +580,7 @@ public class OpenAiClient implements AiClient {
     private Map<String, Object> buildIntroRewriteVariables(IntroRewriteInput input) {
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("candidateContext", buildCandidateContext(input));
+        variables.put("interviewerArchetype", safeString(input.getInterviewerArchetype()));
         variables.put("basePrompt", safeString(input.getBasePrompt()));
         variables.put("recentPrompts", formatBulletLines(input.getRecentPrompts()));
         variables.put("avoidPhrases", formatBulletLines(input.getAvoidPhrases()));
@@ -649,8 +650,7 @@ public class OpenAiClient implements AiClient {
         }
         Map<String, Object> context = new LinkedHashMap<>();
         context.put("roundType", "");
-        context.put("candidateLevel", input.getExperienceLevel());
-        context.put("style", "natural_followup");
+        context.put("style", "efficiency");
         return context;
     }
 
@@ -967,14 +967,6 @@ public class OpenAiClient implements AiClient {
             }
         }
         return result;
-    }
-
-    private String normalizeDepth(String depth) {
-        if (depth == null || depth.isBlank()) {
-            return "L2";
-        }
-        String normalized = depth.trim().toUpperCase();
-        return normalized.matches("L[1-5]") ? normalized : "L2";
     }
 
     private String stringifyAsJson(Object value) {

@@ -27,7 +27,7 @@
 | `interview` | `InterviewPage` | 面试准备、设备检测、加载、面试中的统一入口 |
 | `history` | `HistoryPage` | 面试记录与报告入口 |
 | `questionBank` | `QuestionBankPage` | 收藏题目与重做入口 |
-| `resumes` | `ResumesPage` | 简历列表、上传、编辑、默认设置 |
+| `resumes` | `ResumesPage` | 简历列表、上传、编辑、解析状态展示，支持 PDF / DOCX / MD |
 | `analysis` | `AnalysisPage` | 当前存在的用户端数据分析页 |
 | `settings` | `SettingsPage` | 个人设置 |
 

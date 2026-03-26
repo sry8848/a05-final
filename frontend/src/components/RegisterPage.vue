@@ -148,6 +148,7 @@
 <script>
 import { ref, reactive } from 'vue'
 import { sendEmailCode, register } from '@/api/auth'
+import { getEmailValidationError } from '@/utils/emailValidation'
 
 export default {
   name: 'RegisterPage',
@@ -204,12 +205,8 @@ export default {
     }
 
     const validateEmail = () => {
-      if (!form.email) {
-        errors.email = '请输入邮箱'
-        return false
-      }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-        errors.email = '请输入有效的邮箱地址'
+      errors.email = getEmailValidationError(form.email)
+      if (errors.email) {
         return false
       }
       errors.email = ''
@@ -303,14 +300,14 @@ export default {
       loading.value = true
       try {
         await register({
-          email: form.email,
+          email: form.email.trim(),
           code: form.code.trim(),
           nickname: form.username.trim(),
           password: form.password
         })
         emit('registerSuccess', {
           username: form.username,
-          email: form.email
+          email: form.email.trim()
         })
       } catch (e) {
         alert(e.message || '注册失败')
@@ -323,7 +320,7 @@ export default {
       if (!validateEmail()) return
       sendingCode.value = true
       try {
-        await sendEmailCode(form.email, 'register')
+        await sendEmailCode(form.email.trim(), 'register')
         countdown.value = 60
         const timer = setInterval(() => {
           countdown.value--
