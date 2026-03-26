@@ -79,3 +79,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# ==========================================
+# 7. Git Worktrees
+# ==========================================
+worktrees/
