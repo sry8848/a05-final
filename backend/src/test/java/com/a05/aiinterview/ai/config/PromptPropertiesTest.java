@@ -18,10 +18,10 @@ class PromptPropertiesTest {
         PromptProperties properties = new PromptProperties();
 
         assertThat(properties.getPlanner()).isEqualTo("v2");
-        assertThat(properties.getQuestionGenerationStream()).isEqualTo("v1");
+        assertThat(properties.getQuestionGenerationStream()).isEqualTo("v2");
         assertThat(properties.getEvaluationDecision()).isEqualTo("v2");
         assertThat(properties.getReportGeneration()).isEqualTo("v1");
-        assertThat(properties.getIntroRewrite()).isEqualTo("v1");
+        assertThat(properties.getIntroRewrite()).isEqualTo("v2");
         assertThat(properties.getQuestionDetailEvaluation()).isEqualTo("v1");
     }
 

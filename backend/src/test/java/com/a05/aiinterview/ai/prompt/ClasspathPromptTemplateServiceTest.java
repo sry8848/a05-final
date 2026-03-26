@@ -91,7 +91,7 @@ class ClasspathPromptTemplateServiceTest {
         PromptTemplateMetadata metadata = service.loadMetadata("intro_rewrite");
 
         assertThat(metadata.promptCode()).isEqualTo("intro_rewrite");
-        assertThat(metadata.promptVersion()).isEqualTo("v1");
+        assertThat(metadata.promptVersion()).isEqualTo("v2");
         assertThat(metadata.sourcePath()).contains("prompts/intro-rewrite.md");
     }
 }
