@@ -125,6 +125,7 @@ SMTP_FROM=
 其余变量如果你不确定，先保持 `.env.example` 默认值。
 
 当前推荐主流程里，百炼大模型、ASR、TTS 默认共用同一个 `AI_BAILIAN_API_KEY`，所以你第一次部署通常不需要再找第二套、第三套 Key。
+如果你后面要切到别的 OpenAI-compatible 服务，再额外覆盖 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL` 即可。
 
 ### SMTP 为什么现在就必须填
 
@@ -376,6 +377,7 @@ docker compose --profile tools run --rm db-init
 ### 后端提示缺少 `AI_BAILIAN_API_KEY`
 
 说明你只改了 `.env`，但没有把变量导入当前终端，或者 IDEA 启动项没填环境变量。
+如果你不是走百炼，而是接了别的 OpenAI-compatible 服务，也可以检查 `OPENAI_API_KEY` 是否已经正确注入。
 
 ### 后端启动时报 SMTP 相关错误
 

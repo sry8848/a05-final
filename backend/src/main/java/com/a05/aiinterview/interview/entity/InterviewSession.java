@@ -29,7 +29,7 @@ public class InterviewSession {
     private String title;
 
     /** 目标岗位枚举值，如 JAVA_BACKEND */
-    private String targetRole;
+    private String positionCode;
 
     /** 工作年限分层枚举值，如 SENIOR */
     private String experienceLevel;

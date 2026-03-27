@@ -69,7 +69,7 @@ public class InterviewController {
             @RequestParam(value = "page", defaultValue = "1") int page,
             @RequestParam(value = "pageSize", defaultValue = "10") int pageSize,
             @RequestParam(value = "status", required = false) String status,
-            @RequestParam(value = "targetRole", required = false) String targetRole,
+            @RequestParam(value = "positionCode", required = false) String positionCode,
             @RequestParam(value = "dateFrom", required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime dateFrom,
             @RequestParam(value = "dateTo", required = false)
@@ -77,7 +77,7 @@ public class InterviewController {
             @RequestParam(value = "sortBy", required = false) String sortBy,
             @RequestParam(value = "sortOrder", required = false) String sortOrder) {
         return ApiResponse.ok(interviewHistoryService.list(
-                userId, page, pageSize, status, targetRole, dateFrom, dateTo, sortBy, sortOrder));
+                userId, page, pageSize, status, positionCode, dateFrom, dateTo, sortBy, sortOrder));
     }
 
     /**

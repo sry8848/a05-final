@@ -11,9 +11,9 @@ import lombok.Data;
 @Schema(description = "Create interview request")
 public class CreateInterviewRequest {
 
-    @NotBlank(message = "targetRole is required")
+    @NotBlank(message = "positionCode is required")
     @Schema(description = "Target role enum", example = "JAVA_BACKEND", requiredMode = Schema.RequiredMode.REQUIRED)
-    private String targetRole;
+    private String positionCode;
 
     @NotBlank(message = "experienceLevel is required")
     @Schema(description = "Experience level enum", example = "SENIOR", requiredMode = Schema.RequiredMode.REQUIRED)

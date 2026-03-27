@@ -30,10 +30,10 @@ public class KnowledgeDocument {
     private String knowledgeType;
 
     @NotBlank
-    @Schema(description = "所属知识域编码，与 position_skill_domains.domain_code 对应", example = "java_memory_model")
+    @Schema(description = "所属知识域编码，与 position_skill_domains.domain_code 对应", example = "concurrency")
     private String domainCode;
 
-    @Schema(description = "所属岗位编码，如 backend_java", example = "backend_java")
+    @Schema(description = "所属岗位编码，如 JAVA_BACKEND", example = "JAVA_BACKEND")
     private String positionCode;
 
     @Schema(description = "知识难度等级：L1~L5", example = "L3")

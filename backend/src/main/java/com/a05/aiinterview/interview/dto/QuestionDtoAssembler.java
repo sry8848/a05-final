@@ -27,7 +27,7 @@ public final class QuestionDtoAssembler {
         dto.setDomainCode(question.getDomainCode());
         dto.setDomainName(resolveDomainName(question, session));
         dto.setStem(question.getStem());
-        dto.setTargetSkill(question.getTargetSkill());
+        dto.setFocusPoint(resolveFocusPoint(question));
         dto.setAiResultStatus(resolveAiResultStatus(question));
         dto.setHintAvailable(true);
         return dto;
@@ -44,7 +44,7 @@ public final class QuestionDtoAssembler {
         dto.setDomainCode(toStr(snapshot.get("domainCode")));
         dto.setDomainName(toStr(snapshot.get("domainName")));
         dto.setStem(toStr(snapshot.get("stem")));
-        dto.setTargetSkill(toStr(snapshot.get("targetSkill")));
+        dto.setFocusPoint(toStr(snapshot.get("focusPoint")));
         dto.setAiResultStatus(toStr(snapshot.get("aiResultStatus")));
         Object hintAvailable = snapshot.get("hintAvailable");
         dto.setHintAvailable(hintAvailable instanceof Boolean bool ? bool : true);
@@ -66,7 +66,7 @@ public final class QuestionDtoAssembler {
         snapshot.put("domainCode", dto.getDomainCode());
         snapshot.put("domainName", dto.getDomainName());
         snapshot.put("stem", dto.getStem());
-        snapshot.put("targetSkill", dto.getTargetSkill());
+        snapshot.put("focusPoint", dto.getFocusPoint());
         snapshot.put("aiResultStatus", dto.getAiResultStatus());
         snapshot.put("hintAvailable", dto.getHintAvailable());
         return snapshot;
@@ -92,7 +92,7 @@ public final class QuestionDtoAssembler {
                 return specialDomainName;
             }
         }
-        return "";
+        return InterviewDomainDisplaySupport.resolveQuestionTypeLabel(question.getQuestionType());
     }
 
     @SuppressWarnings("unchecked")
@@ -117,6 +117,13 @@ public final class QuestionDtoAssembler {
 
     private static String resolveAiResultStatus(InterviewQuestion question) {
         return readContextString(question, "aiResultStatus");
+    }
+
+    private static String resolveFocusPoint(InterviewQuestion question) {
+        return firstNonBlank(
+                readContextString(question, "focusPoint"),
+                question == null ? "" : question.getFocusPoint()
+        );
     }
 
     private static String readContextString(InterviewQuestion question, String key) {

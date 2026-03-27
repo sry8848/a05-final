@@ -125,7 +125,7 @@
 | `GET /api/v1/positions` | 岗位列表 | api-design §6 |
 | `GET /api/v1/positions/{code}/skill-domains` | 某岗位知识域列表（准备页可选侧重时用） | api-design |
 | 会话与偏好表 | `interview_sessions`、`interview_preferences` 表就绪 | db-schema §4.5, §4.6 |
-| `POST /api/v1/interviews` | 创建会话：校验 `targetRole`、`experienceLevel`、`mode`、JD、简历等，写入会话并初始化状态为 `planning`；异步触发考纲生成 | api-design §7 |
+| `POST /api/v1/interviews` | 创建会话：校验 `positionCode`、`experienceLevel`、`mode`、JD、简历等，写入会话并初始化状态为 `planning`；异步触发考纲生成 | api-design §7 |
 | 考纲生成（Planner） | 在面试创建或加载页轮询时：调用 AI Planner 生成主考纲，写入 `syllabus_json`，初始化 `state_ledger_json`；主考纲需包含题型配额、知识域目标深度、项目锚点 | product-scope §4, §7.3 |
 
 ### 5.2 前端
@@ -134,7 +134,7 @@
 |-----|------|------|
 | 路由 | `/interviews/new` 开始面试页 | page-list §2.5 |
 | 表单 | 岗位枚举、工作年限分层枚举、面试模式（练习/专业）、JD 输入、简历选择、侧重知识点（练习模式可选） | page-list §2.5 |
-| URL 预填 | 支持 `auto_focus`、`auto_mode`、`auto_target_role` 等查询参数预填 | page-list §2.5, §5 |
+| URL 预填 | 支持 `auto_focus`、`auto_mode`、`auto_position_code` 等查询参数预填 | page-list §2.5, §5 |
 | 下一步 | 点击「下一步」调用 `POST /api/v1/interviews` 创建会话，成功后跳转 `/interview-test?sessionId=xxx`（面试测试页） | page-list §3 |
 | API 与类型 | `apis/position.ts`、`apis/interview.ts`，会话/岗位类型定义 | page-list §5 |
 
@@ -274,7 +274,7 @@
 
 | 任务 | 说明 | 参考 |
 |-----|------|------|
-| `GET /api/v1/interviews` | 分页列表，筛选（岗位、日期、状态）、排序（时间、得分）；返回 `sessionId, title, targetRole, mode, overallScore, questionCount, status, createdAt` 等 | api-design §7, page-list §2.10 |
+| `GET /api/v1/interviews` | 分页列表，筛选（岗位、日期、状态）、排序（时间、得分）；返回 `sessionId, title, positionCode, mode, overallScore, questionCount, status, createdAt` 等 | api-design §7, page-list §2.10 |
 
 ### 10.2 前端
 

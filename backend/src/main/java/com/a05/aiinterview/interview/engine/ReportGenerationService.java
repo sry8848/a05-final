@@ -12,6 +12,7 @@ import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.a05.aiinterview.interview.service.InterviewSessionStatusService;
+import com.a05.aiinterview.interview.service.support.InterviewDomainDisplaySupport;
 import com.a05.aiinterview.interview.service.support.InterviewOverallScoreSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
@@ -94,7 +95,7 @@ public class ReportGenerationService {
                     .interviewId(session.getId())
                     .questionId(null)
                     .variantId(null)
-                    .positionCode(session.getTargetRole())
+                    .positionCode(session.getPositionCode())
                     .experienceLevel(session.getExperienceLevel())
                     .mode(session.getMode())
                     .sessionTitle(session.getTitle())
@@ -178,7 +179,7 @@ public class ReportGenerationService {
 
         return questions.stream().map(q -> {
             String domainCode = extractDomainCode(q);
-            String domainName = domainNameMap.getOrDefault(domainCode, domainCode);
+            String domainName = resolveDomainName(q, domainCode, domainNameMap);
             return ReportGenerationInput.QuestionAnswerPair.builder()
                     .questionId(q.getId())
                     .questionNo(q.getQuestionNo())
@@ -229,11 +230,44 @@ public class ReportGenerationService {
     }
 
     /**
-     * 从题目的 generationContextJson 中取 domainCode，兜底返回 "intro"。
+     * 从题目快照中提取 domainCode；仅 INTRO 允许使用 intro 例外值。
      */
     private String extractDomainCode(InterviewQuestion q) {
-        if (q.getGenerationContextJson() == null) return "intro";
-        Object code = q.getGenerationContextJson().get("domainCode");
-        return (code instanceof String s && !s.isBlank()) ? s : "intro";
+        if (q == null) {
+            return "";
+        }
+        if (q.getGenerationContextJson() != null) {
+            Object code = q.getGenerationContextJson().get("domainCode");
+            if (code instanceof String s && !s.isBlank()) {
+                return s;
+            }
+        }
+        if (q.getDomainCode() != null && !q.getDomainCode().isBlank()) {
+            return q.getDomainCode();
+        }
+        return "INTRO".equalsIgnoreCase(q.getQuestionType()) ? "intro" : "";
+    }
+
+    private String resolveDomainName(InterviewQuestion question,
+                                     String domainCode,
+                                     Map<String, String> domainNameMap) {
+        if (question != null && question.getGenerationContextJson() != null) {
+            Object rawDomainName = question.getGenerationContextJson().get("domainName");
+            if (rawDomainName instanceof String s && !s.isBlank()) {
+                return s;
+            }
+        }
+        if (domainCode != null && !domainCode.isBlank()) {
+            String syllabusDomainName = domainNameMap.get(domainCode);
+            if (syllabusDomainName != null && !syllabusDomainName.isBlank()) {
+                return syllabusDomainName;
+            }
+            String specialDomainName = InterviewDomainDisplaySupport.resolveSpecialDomainName(domainCode);
+            if (!specialDomainName.isBlank()) {
+                return specialDomainName;
+            }
+        }
+        return InterviewDomainDisplaySupport.resolveQuestionTypeLabel(
+                question == null ? null : question.getQuestionType());
     }
 }

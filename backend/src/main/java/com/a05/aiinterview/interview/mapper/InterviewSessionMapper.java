@@ -26,7 +26,7 @@ public interface InterviewSessionMapper extends BaseMapper<InterviewSession> {
 
     List<InterviewHistoryItemDto> selectHistoryPage(@Param("userId") Long userId,
                                                     @Param("status") String status,
-                                                    @Param("targetRole") String targetRole,
+                                                    @Param("positionCode") String positionCode,
                                                     @Param("dateFrom") LocalDateTime dateFrom,
                                                     @Param("dateTo") LocalDateTime dateTo,
                                                     @Param("sortBy") String sortBy,
@@ -36,12 +36,12 @@ public interface InterviewSessionMapper extends BaseMapper<InterviewSession> {
 
     Long countHistory(@Param("userId") Long userId,
                       @Param("status") String status,
-                      @Param("targetRole") String targetRole,
+                      @Param("positionCode") String positionCode,
                       @Param("dateFrom") LocalDateTime dateFrom,
                       @Param("dateTo") LocalDateTime dateTo);
 
     List<InterviewSession> selectPlannerRecentSessions(@Param("userId") Long userId,
-                                                       @Param("targetRole") String targetRole,
+                                                       @Param("positionCode") String positionCode,
                                                        @Param("statuses") List<String> statuses,
                                                        @Param("dateFrom") LocalDateTime dateFrom,
                                                        @Param("excludeSessionId") Long excludeSessionId,

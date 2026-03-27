@@ -90,14 +90,14 @@ public class PlannerHistoryBuilderService {
     private boolean isValidCurrentSession(InterviewSession currentSession) {
         return currentSession != null
                 && currentSession.getUserId() != null
-                && currentSession.getTargetRole() != null
-                && !currentSession.getTargetRole().isBlank();
+                && currentSession.getPositionCode() != null
+                && !currentSession.getPositionCode().isBlank();
     }
 
     private List<InterviewSession> selectKnowledgeHistorySessions(InterviewSession currentSession, LocalDateTime now) {
         return defaultSessions(interviewSessionMapper.selectPlannerRecentSessions(
                 currentSession.getUserId(),
-                currentSession.getTargetRole(),
+                currentSession.getPositionCode(),
                 null,
                 now.minusDays(RECENT_HISTORY_DAYS),
                 currentSession.getId(),
@@ -110,7 +110,7 @@ public class PlannerHistoryBuilderService {
     private List<InterviewSession> selectProjectHistorySessions(InterviewSession currentSession) {
         return defaultSessions(interviewSessionMapper.selectPlannerRecentSessions(
                 currentSession.getUserId(),
-                currentSession.getTargetRole(),
+                currentSession.getPositionCode(),
                 null,
                 null,
                 currentSession.getId(),

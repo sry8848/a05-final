@@ -47,7 +47,7 @@ class ReportGenerationServiceTest {
         InterviewSession session = new InterviewSession();
         session.setId(1L);
         session.setMode("professional");
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setExperienceLevel("SENIOR");
         session.setTitle("Java 后端模拟面试");
         session.setSyllabusJson(Map.of("domains", List.of(
@@ -153,7 +153,7 @@ class ReportGenerationServiceTest {
         InterviewSession session = new InterviewSession();
         session.setId(2L);
         session.setMode("practice");
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setExperienceLevel("JUNIOR");
         session.setTitle("练习模式");
         when(sessionMapper.selectById(2L)).thenReturn(session);
@@ -208,7 +208,7 @@ class ReportGenerationServiceTest {
         InterviewSession session = new InterviewSession();
         session.setId(3L);
         session.setMode("practice");
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setExperienceLevel("JUNIOR");
         when(sessionMapper.selectById(3L)).thenReturn(session);
         when(reportMapper.selectBySessionId(3L)).thenReturn(null);
@@ -250,5 +250,63 @@ class ReportGenerationServiceTest {
         verify(aiClient).callReportGeneration(inputCaptor.capture());
         assertThat(inputCaptor.getValue().getQuestionAnswerPairs()).hasSize(1);
         assertThat(inputCaptor.getValue().getQuestionAnswerPairs().getFirst().getAnswerText()).isEqualTo("我当时先调研，再拍板。");
+    }
+
+    @Test
+    void generateAsync_shouldKeepBehavioralQuestionTypeWithoutForgingBehavioralDomainCode() {
+        AiClient aiClient = mock(AiClient.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
+        ReportGenerationService service = new ReportGenerationService(
+                aiClient, sessionMapper, questionMapper, attemptMapper, reportMapper, statusService
+        );
+
+        InterviewSession session = new InterviewSession();
+        session.setId(4L);
+        session.setMode("practice");
+        session.setPositionCode("JAVA_BACKEND");
+        session.setExperienceLevel("JUNIOR");
+        when(sessionMapper.selectById(4L)).thenReturn(session);
+        when(reportMapper.selectBySessionId(4L)).thenReturn(null);
+
+        InterviewQuestion question = new InterviewQuestion();
+        question.setId(41L);
+        question.setQuestionNo(1);
+        question.setQuestionType("BEHAVIORAL");
+        question.setStem("请分享一次你推动协作达成结果的经历。");
+        question.setGenerationContextJson(Map.of());
+        when(questionMapper.selectList(any())).thenReturn(List.of(question));
+
+        InterviewAttempt attempt = new InterviewAttempt();
+        attempt.setQuestionId(41L);
+        attempt.setAnswerText("我先统一目标，再拆分行动项。");
+        attempt.setIsFinal(true);
+        attempt.setCreatedAt(LocalDateTime.now());
+        when(attemptMapper.selectList(any())).thenReturn(List.of(attempt));
+
+        ReportGenerationOutput output = ReportGenerationOutput.builder()
+                .overallScore(BigDecimal.valueOf(75))
+                .summary("ok")
+                .strengths(List.of())
+                .weaknesses(List.of())
+                .improvementSuggestions(List.of())
+                .skillDomainScores(List.of())
+                .build();
+        when(aiClient.callReportGeneration(any())).thenReturn(
+                AiCallResult.<ReportGenerationOutput>builder().output(output).build()
+        );
+
+        service.generateAsync(4L);
+
+        ArgumentCaptor<ReportGenerationInput> inputCaptor = ArgumentCaptor.forClass(ReportGenerationInput.class);
+        verify(aiClient).callReportGeneration(inputCaptor.capture());
+        assertThat(inputCaptor.getValue().getQuestionAnswerPairs()).singleElement().satisfies(pair -> {
+            assertThat(pair.getQuestionType()).isEqualTo("BEHAVIORAL");
+            assertThat(pair.getDomainCode()).isBlank();
+            assertThat(pair.getDomainName()).isEqualTo("行为题");
+        });
     }
 }

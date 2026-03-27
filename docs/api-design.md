@@ -218,7 +218,7 @@
 
 字段包括：
 
-- `targetRole`
+- `positionCode`
 - `experienceLevel`
 - `mode`
 - `focusTopics`
@@ -236,7 +236,7 @@
 - `page`
 - `pageSize`
 - `status`
-- `targetRole`
+- `positionCode`
 - `dateFrom`
 - `dateTo`
 - `sortBy`
@@ -248,7 +248,7 @@
 
 请求字段：
 
-- `targetRole`
+- `positionCode`
 - `experienceLevel`
 - `mode`
 - `jobDescription`
@@ -271,7 +271,7 @@
 
 - `id`
 - `title`
-- `targetRole`
+- `positionCode`
 - `experienceLevel`
 - `mode`
 - `currentQuestionNo`

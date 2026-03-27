@@ -40,7 +40,7 @@ class InterviewServiceExperienceLevelCompatibilityTest {
                 mock(com.a05.aiinterview.interview.engine.PlannerOrchestrationService.class)
         );
         CreateInterviewRequest request = new CreateInterviewRequest();
-        request.setTargetRole("JAVA_BACKEND");
+        request.setPositionCode("JAVA_BACKEND");
         request.setExperienceLevel("STAFF");
         request.setMode("practice");
 

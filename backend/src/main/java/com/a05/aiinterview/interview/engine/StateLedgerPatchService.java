@@ -92,7 +92,7 @@ public class StateLedgerPatchService {
         String currentDomainCode = resolveCurrentDomainCode(session, currentQuestion);
         String currentFocus = firstNonBlank(
                 asString(generationContext.get("focusPoint")),
-                currentQuestion.getTargetSkill(),
+                currentQuestion.getFocusPoint(),
                 asString(ledger.get("current_focus")));
 
         String currentItemKey = firstNonBlank(

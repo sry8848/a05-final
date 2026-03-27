@@ -44,7 +44,7 @@ class InterviewReportServiceTest {
         session.setId(sessionId);
         session.setUserId(userId);
         session.setMode("professional");
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         when(sessionMapper.selectById(sessionId)).thenReturn(session);
         when(statusService.resolveAndSync(session)).thenReturn("completed");
 
@@ -93,7 +93,7 @@ class InterviewReportServiceTest {
 
         assertNotNull(dto);
         assertEquals("professional", dto.getMode());
-        assertEquals("JAVA_BACKEND", dto.getTargetRole());
+        assertEquals("JAVA_BACKEND", dto.getPositionCode());
         assertNotNull(dto.getComprehensiveRadarScores());
         assertEquals(2, dto.getComprehensiveRadarScores().size());
         assertEquals("fundamentals", dto.getComprehensiveRadarScores().get(0).getDimensionKey());
@@ -244,7 +244,7 @@ class InterviewReportServiceTest {
         session.setUserId(userId);
         session.setStatus("completed");
         session.setMode("practice");
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         when(sessionMapper.selectById(sessionId)).thenReturn(session);
         when(statusService.resolveAndSync(session)).thenReturn("completed");
 

@@ -14,7 +14,7 @@
                 property="secondaryDomainCodes"
                 typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
         <result column="stem" property="stem"/>
-        <result column="target_skill" property="targetSkill"/>
+        <result column="focus_point" property="focusPoint"/>
         <result column="expected_points"
                 property="expectedPoints"
                 typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>

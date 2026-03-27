@@ -82,8 +82,7 @@ class QuestionBankServiceTest {
         question.setSessionId(1L);
         question.setStem("请解释线程池拒绝策略");
         question.setQuestionType("PRINCIPLE");
-        question.setTargetSkill("并发");
-        question.setGenerationContextJson(Map.of("domainCode", "concurrency"));
+        question.setGenerationContextJson(Map.of("domainCode", "concurrency", "focusPoint", "并发"));
         when(questionMapper.selectById(2L)).thenReturn(question);
 
         when(itemMapper.selectOne(any())).thenReturn(null);
@@ -112,6 +111,11 @@ class QuestionBankServiceTest {
         assertEquals("PRINCIPLE", snapshot.get("questionType"));
         assertEquals("2026-03-01T09:00", snapshot.get("sourceCreatedAt"));
         assertEquals(true, snapshot.containsKey("domainCode"));
+        assertEquals("并发", snapshot.get("focusPoint"));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.Set.of("questionStem", "domainCode", "domainName", "questionType", "focusPoint", "answerSummary", "sourceCreatedAt"),
+                snapshot.keySet()
+        );
     }
 
     @Test
@@ -133,8 +137,7 @@ class QuestionBankServiceTest {
         question.setQuestionType("INTRO");
         question.setDomainCode("intro");
         question.setStem("请先做一个简短的自我介绍");
-        question.setTargetSkill("沟通表达与项目概述");
-        question.setGenerationContextJson(Map.of("domainCode", "intro"));
+        question.setGenerationContextJson(Map.of("domainCode", "intro", "focusPoint", "沟通表达与项目概述"));
         when(questionMapper.selectById(2L)).thenReturn(question);
 
         when(itemMapper.selectOne(any())).thenReturn(null);
@@ -156,6 +159,11 @@ class QuestionBankServiceTest {
         verify(itemMapper).insert(itemCaptor.capture());
         assertEquals("intro", itemCaptor.getValue().getDomainCode());
         assertEquals("自我介绍", itemCaptor.getValue().getSourceSnapshotJson().get("domainName"));
+        assertEquals("沟通表达与项目概述", itemCaptor.getValue().getSourceSnapshotJson().get("focusPoint"));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.Set.of("questionStem", "domainCode", "domainName", "questionType", "focusPoint", "answerSummary", "sourceCreatedAt"),
+                itemCaptor.getValue().getSourceSnapshotJson().keySet()
+        );
     }
 
     @Test

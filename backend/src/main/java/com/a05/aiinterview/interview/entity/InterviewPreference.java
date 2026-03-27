@@ -23,7 +23,7 @@ public class InterviewPreference {
     private Long userId;
 
     /** 最近选择的岗位枚举，如 JAVA_BACKEND */
-    private String targetRole;
+    private String positionCode;
 
     /** 最近选择的工作年限枚举，如 SENIOR */
     private String experienceLevel;

@@ -5,13 +5,11 @@ import com.a05.aiinterview.common.enums.QuestionType;
 import java.util.Locale;
 
 /**
- * 统一处理不在岗位知识域表中的特殊 domainCode 显示名。
+ * 统一处理知识域显示例外与题型标签显示。
  */
 public final class InterviewDomainDisplaySupport {
 
     private static final String INTRO_DOMAIN_CODE = "intro";
-    private static final String BEHAVIORAL_DOMAIN_CODE = "behavioral";
-    private static final String PROJECT_DELIVERY_DOMAIN_CODE = "project_delivery";
 
     private InterviewDomainDisplaySupport() {
     }
@@ -22,8 +20,6 @@ public final class InterviewDomainDisplaySupport {
         }
         return switch (domainCode.trim().toLowerCase(Locale.ROOT)) {
             case INTRO_DOMAIN_CODE -> QuestionType.INTRO.getDesc();
-            case BEHAVIORAL_DOMAIN_CODE -> QuestionType.BEHAVIORAL.getDesc();
-            case PROJECT_DELIVERY_DOMAIN_CODE -> "项目落地";
             default -> "";
         };
     }
@@ -34,9 +30,21 @@ public final class InterviewDomainDisplaySupport {
         }
         return switch (questionType.trim().toUpperCase(Locale.ROOT)) {
             case "INTRO" -> domainIdentity(INTRO_DOMAIN_CODE);
-            case "BEHAVIORAL" -> domainIdentity(BEHAVIORAL_DOMAIN_CODE);
-            case "PROJECT_DEEP_DIVE" -> domainIdentity(PROJECT_DELIVERY_DOMAIN_CODE);
             default -> new DomainIdentity("", "");
+        };
+    }
+
+    public static String resolveQuestionTypeLabel(String questionType) {
+        if (questionType == null || questionType.isBlank()) {
+            return "";
+        }
+        return switch (questionType.trim().toUpperCase(Locale.ROOT)) {
+            case "INTRO" -> QuestionType.INTRO.getDesc();
+            case "PROJECT_DEEP_DIVE" -> QuestionType.PROJECT_DEEP_DIVE.getDesc();
+            case "SCENARIO" -> QuestionType.SCENARIO.getDesc();
+            case "PRINCIPLE" -> QuestionType.PRINCIPLE.getDesc();
+            case "BEHAVIORAL" -> QuestionType.BEHAVIORAL.getDesc();
+            default -> "";
         };
     }
 

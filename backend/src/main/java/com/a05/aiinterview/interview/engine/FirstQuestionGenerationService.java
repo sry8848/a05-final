@@ -35,7 +35,7 @@ public class FirstQuestionGenerationService {
     private static final ObjectMapper AUDIT_OBJECT_MAPPER = new ObjectMapper();
     private static final String INTRO_DOMAIN_CODE = "intro";
     private static final String INTRO_QUESTION_TYPE = "INTRO";
-    private static final String INTRO_TARGET_SKILL = "沟通表达与项目概述";
+    private static final String INTRO_FOCUS_POINT = "沟通表达与项目概述";
     private static final String INTRO_REWRITE_PROMPT_CODE = "intro_rewrite";
     private static final int INTRO_REWRITE_MAX_LEN = 180;
     private static final int RESPONSE_PREVIEW_MAX_LEN = 120;
@@ -79,7 +79,7 @@ public class FirstQuestionGenerationService {
                     .interviewId(session.getId())
                     .questionId(null)
                     .variantId(selection.getVariantId())
-                    .positionCode(session.getTargetRole())
+                    .positionCode(session.getPositionCode())
                     .experienceLevel(session.getExperienceLevel())
                     .mode(session.getMode())
                     .interviewerArchetype(interviewerArchetype)
@@ -173,7 +173,7 @@ public class FirstQuestionGenerationService {
         question.setQuestionType(INTRO_QUESTION_TYPE);
         question.setDomainCode(INTRO_DOMAIN_CODE);
         question.setStem(safePrompt(stem));
-        question.setTargetSkill(INTRO_TARGET_SKILL);
+        question.setFocusPoint(INTRO_FOCUS_POINT);
         question.setExpectedPoints(INTRO_EXPECTED_POINTS);
         question.setStatus("asked");
 
@@ -181,6 +181,7 @@ public class FirstQuestionGenerationService {
         ctx.put("domainCode", INTRO_DOMAIN_CODE);
         ctx.put("domainName", InterviewDomainDisplaySupport.resolveSpecialDomainName(INTRO_DOMAIN_CODE));
         ctx.put("questionType", INTRO_QUESTION_TYPE);
+        ctx.put("focusPoint", INTRO_FOCUS_POINT);
         ctx.put("variantId", selection.getVariantId());
         ctx.put("basePromptText", selection.getBasePrompt());
         ctx.put("rewritten", rewritten);

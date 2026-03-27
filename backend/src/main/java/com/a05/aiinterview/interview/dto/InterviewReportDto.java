@@ -25,7 +25,7 @@ public class InterviewReportDto {
     private Long sessionId;
 
     @Schema(description = "岗位编码", example = "JAVA_BACKEND")
-    private String targetRole;
+    private String positionCode;
 
     @Schema(description = "面试模式", example = "professional")
     private String mode;

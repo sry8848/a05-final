@@ -102,7 +102,7 @@ class QuestionDetailEvaluationServiceTest {
 
         InterviewSession session = new InterviewSession();
         session.setId(1L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setExperienceLevel("SENIOR");
         session.setMode("professional");
         session.setContextWindowSize(5);
@@ -187,7 +187,7 @@ class QuestionDetailEvaluationServiceTest {
 
         InterviewSession session = new InterviewSession();
         session.setId(1L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setExperienceLevel("SENIOR");
         session.setMode("professional");
         session.setContextWindowSize(5);
@@ -259,7 +259,7 @@ class QuestionDetailEvaluationServiceTest {
 
         InterviewSession session = new InterviewSession();
         session.setId(1L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setExperienceLevel("SENIOR");
         session.setMode("professional");
         when(sessionMapper.selectById(1L)).thenReturn(session);

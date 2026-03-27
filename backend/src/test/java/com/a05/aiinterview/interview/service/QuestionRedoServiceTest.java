@@ -41,7 +41,7 @@ class QuestionRedoServiceTest {
         InterviewSession session = new InterviewSession();
         session.setId(11L);
         session.setUserId(9L);
-        session.setTargetRole("FRONTEND");
+        session.setPositionCode("FRONTEND");
         session.setExperienceLevel("JUNIOR");
         session.setMode("practice");
         session.setSyllabusJson(Map.of(
@@ -56,9 +56,8 @@ class QuestionRedoServiceTest {
         question.setQuestionType("PRINCIPLE");
         question.setDomainCode("browser");
         question.setStem("请解释浏览器渲染流水线。");
-        question.setTargetSkill("渲染流水线");
         question.setExpectedPoints(List.of("Parse", "Layout", "Paint"));
-        question.setGenerationContextJson(Map.of("domainCode", "browser"));
+        question.setGenerationContextJson(Map.of("domainCode", "browser", "focusPoint", "渲染流水线"));
         when(questionMapper.selectById(22L)).thenReturn(question);
 
         doAnswer(invocation -> {
@@ -89,6 +88,13 @@ class QuestionRedoServiceTest {
         assertEquals("PRINCIPLE", inserted.getSourceSnapshotJson().get("questionType"));
         assertEquals("浏览器原理", inserted.getSourceSnapshotJson().get("domainName"));
         assertEquals(List.of("Parse", "Layout", "Paint"), inserted.getSourceSnapshotJson().get("expectedPoints"));
+        assertEquals("渲染流水线", inserted.getSourceSnapshotJson().get("focusPoint"));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.Set.of(
+                        "questionId", "questionNo", "questionStem", "questionType", "domainCode",
+                        "domainName", "focusPoint", "expectedPoints", "positionCode", "experienceLevel", "mode"),
+                inserted.getSourceSnapshotJson().keySet()
+        );
         assertEquals("FRONTEND", inserted.getSourceSnapshotJson().get("positionCode"));
         assertEquals("JUNIOR", inserted.getSourceSnapshotJson().get("experienceLevel"));
         assertEquals("practice", inserted.getSourceSnapshotJson().get("mode"));

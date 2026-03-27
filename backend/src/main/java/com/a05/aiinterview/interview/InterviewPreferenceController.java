@@ -56,7 +56,7 @@ public class InterviewPreferenceController {
 
     private InterviewPreferenceDto toDto(InterviewPreference pref) {
         InterviewPreferenceDto dto = new InterviewPreferenceDto();
-        dto.setTargetRole(pref.getTargetRole());
+        dto.setPositionCode(pref.getPositionCode());
         dto.setExperienceLevel(pref.getExperienceLevel());
         dto.setMode(pref.getMode());
         dto.setFocusTopics(pref.getFocusTopics());
@@ -67,7 +67,7 @@ public class InterviewPreferenceController {
 
     private InterviewPreference toEntity(InterviewPreferenceDto dto) {
         InterviewPreference pref = new InterviewPreference();
-        pref.setTargetRole(dto.getTargetRole());
+        pref.setPositionCode(dto.getPositionCode());
         pref.setExperienceLevel(dto.getExperienceLevel());
         pref.setMode(dto.getMode());
         pref.setFocusTopics(dto.getFocusTopics());

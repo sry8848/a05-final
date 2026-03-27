@@ -389,7 +389,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
         InterviewSession session = new InterviewSession();
         session.setId(8L);
         session.setUserId(1L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setExperienceLevel("FRESH_GRAD");
         session.setMode("practice");
         session.setFocusTopics("vue");
@@ -442,10 +442,10 @@ class PlannerOrchestrationServiceJsonUpdateTest {
         question.setQuestionType("INTRO");
         question.setDomainCode("intro");
         question.setStem("请你先做一个简短的自我介绍。");
-        question.setTargetSkill("沟通表达与项目概述");
 
         Map<String, Object> generationContext = new LinkedHashMap<>();
         generationContext.put("domainCode", "intro");
+        generationContext.put("focusPoint", "沟通表达与项目概述");
         generationContext.put("aiResultStatus", "success");
         question.setGenerationContextJson(generationContext);
         return question;

@@ -23,8 +23,8 @@ class SystemFallbackPlanBuilderTest {
         assertThat(plan.getEffectiveDecisionSource()).isEqualTo(DecisionExecutionPlan.EffectiveDecisionSource.SYSTEM_FALLBACK);
         assertThat(plan.getStrategyCode()).isEqualTo(StrategyCode.S_ENTER_BEHAVIORAL.code());
         assertThat(plan.getTargetQuestionType()).isEqualTo("BEHAVIORAL");
-        assertThat(plan.getTargetDomainCode()).isEqualTo("behavioral");
-        assertThat(plan.getTargetDomainName()).isEqualTo("行为题");
+        assertThat(plan.getTargetDomainCode()).isBlank();
+        assertThat(plan.getTargetDomainName()).isBlank();
         assertThat(plan.getFallbackRotationIndex()).isZero();
         assertThat(plan.getFallbackDimension()).isEqualTo(SystemFallbackPlanBuilder.FallbackDimension.REFLECTION.name());
         assertThat(plan.getNextFocus()).contains("复盘");
@@ -40,8 +40,8 @@ class SystemFallbackPlanBuilderTest {
 
         assertThat(plan.getStrategyCode()).isEqualTo(StrategyCode.S_B_NEW_DECISION.code());
         assertThat(plan.getTargetQuestionType()).isEqualTo("BEHAVIORAL");
-        assertThat(plan.getTargetDomainCode()).isEqualTo("behavioral");
-        assertThat(plan.getTargetDomainName()).isEqualTo("行为题");
+        assertThat(plan.getTargetDomainCode()).isBlank();
+        assertThat(plan.getTargetDomainName()).isBlank();
         assertThat(plan.getFallbackDimension()).isEqualTo(SystemFallbackPlanBuilder.FallbackDimension.DECISION.name());
     }
 }

@@ -38,8 +38,8 @@ public class InterviewQuestion {
     /** 题目正文 */
     private String stem;
 
-    /** 核心考察点，如 "缓存击穿" */
-    private String targetSkill;
+    /** 当前题目焦点，如 "缓存击穿" */
+    private String focusPoint;
 
     /** 理想回答要点列表（JSON 数组），如 ["布隆过滤器原理", "误判率控制"] */
     @TableField(typeHandler = JacksonTypeHandler.class)

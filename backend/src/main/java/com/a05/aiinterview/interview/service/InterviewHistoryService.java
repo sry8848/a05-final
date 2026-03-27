@@ -32,7 +32,7 @@ public class InterviewHistoryService {
                                         int page,
                                         int pageSize,
                                         String status,
-                                        String targetRole,
+                                        String positionCode,
                                         LocalDateTime dateFrom,
                                         LocalDateTime dateTo,
                                         String sortBy,
@@ -42,7 +42,7 @@ public class InterviewHistoryService {
         int offset = (safePage - 1) * safePageSize;
 
         String normalizedStatus = normalize(status);
-        String normalizedTargetRole = normalize(targetRole);
+        String normalizedTargetRole = normalize(positionCode);
         String safeSortBy = normalizeSortBy(sortBy);
         String safeSortOrder = normalizeSortOrder(sortOrder);
 
@@ -85,7 +85,7 @@ public class InterviewHistoryService {
 
     private List<InterviewHistoryItemDto> selectAndSortByEffectiveOverallScore(Long userId,
                                                                                String status,
-                                                                               String targetRole,
+                                                                               String positionCode,
                                                                                LocalDateTime dateFrom,
                                                                                LocalDateTime dateTo,
                                                                                String sortOrder,
@@ -99,7 +99,7 @@ public class InterviewHistoryService {
         List<InterviewHistoryItemDto> candidates = new ArrayList<>(interviewSessionMapper.selectHistoryPage(
                 userId,
                 status,
-                targetRole,
+                positionCode,
                 dateFrom,
                 dateTo,
                 "createdAt",

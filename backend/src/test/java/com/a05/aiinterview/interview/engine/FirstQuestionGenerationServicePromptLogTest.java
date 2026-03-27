@@ -219,7 +219,7 @@ class FirstQuestionGenerationServicePromptLogTest {
         InterviewSession session = new InterviewSession();
         session.setId(1L);
         session.setUserId(2L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setExperienceLevel("SENIOR");
         session.setMode("professional");
         session.setModelProvider("openai");

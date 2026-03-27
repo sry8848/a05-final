@@ -18,7 +18,7 @@ public class InterviewDetailDto {
     private String title;
 
     @Schema(description = "目标岗位枚举值", example = "JAVA_BACKEND")
-    private String targetRole;
+    private String positionCode;
 
     @Schema(description = "工作年限枚举值", example = "SENIOR")
     private String experienceLevel;

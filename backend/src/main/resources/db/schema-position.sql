@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS position_skill_domains (
     id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-    position_code   VARCHAR(64)  NOT NULL COMMENT '岗位编码，对应 target_role 枚举，如 JAVA_BACKEND',
+    position_code   VARCHAR(64)  NOT NULL COMMENT '岗位编码，对应系统岗位枚举，如 JAVA_BACKEND',
     position_name   VARCHAR(128) NOT NULL COMMENT '岗位中文名，如 Java 后端开发',
     version         INT          NOT NULL DEFAULT 1 COMMENT '知识域定义版本，当前阶段固定使用 1',
     domain_code     VARCHAR(64)  NOT NULL COMMENT '知识域编码，如 java_core',

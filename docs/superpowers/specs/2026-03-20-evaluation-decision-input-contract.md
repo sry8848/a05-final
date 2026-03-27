@@ -10,6 +10,7 @@
 - prompt 输入 DTO 与后端运行态分层设计。
 - 当前题、历史题、剩余知识域菜单统一使用 `domainCode` 和 `domainName`。
 - 知识域状态只保留 `UNASKED` 和 `COVERED` 两档。
+- 当前唯一例外是 `INTRO -> intro`；`BEHAVIORAL` 和 `PROJECT_DEEP_DIVE` 不再伪造知识域编码。
 
 ## 业务 DTO
 

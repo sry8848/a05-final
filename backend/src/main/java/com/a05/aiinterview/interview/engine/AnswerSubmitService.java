@@ -180,7 +180,7 @@ public class AnswerSubmitService {
 
     private EvaluationDecisionInput.InterviewMeta buildInterviewMeta(InterviewSession session) {
         return EvaluationDecisionInput.InterviewMeta.builder()
-                .positionCode(session.getTargetRole())
+                .positionCode(session.getPositionCode())
                 .experienceLevel(session.getExperienceLevel())
                 .roundType("")
                 .build();

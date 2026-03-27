@@ -609,7 +609,7 @@ Question Generator Prompt 应重点约束：
 
 - `questionType`
 - `difficultyHint`
-- `targetSkill`
+- `focusPoint`
 - `expectedPoints`
 
 但它们的来源从“强编排状态机决定”改为：

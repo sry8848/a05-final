@@ -30,7 +30,7 @@ class LearningRecommendationServiceTest {
         InterviewSession session = new InterviewSession();
         session.setId(2001L);
         session.setUserId(99L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         when(sessionMapper.selectById(2001L)).thenReturn(session);
 
         InterviewReport report = new InterviewReport();

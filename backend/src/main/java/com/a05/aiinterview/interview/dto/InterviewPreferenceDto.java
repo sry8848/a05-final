@@ -11,7 +11,7 @@ import lombok.Data;
 public class InterviewPreferenceDto {
 
     @Schema(description = "最近选择的目标岗位", example = "JAVA_BACKEND")
-    private String targetRole;
+    private String positionCode;
 
     @Schema(description = "最近选择的工作年限", example = "SENIOR")
     private String experienceLevel;

@@ -28,8 +28,8 @@ public class QuestionDto {
     @Schema(description = "题目正文", example = "请先做一个简单的自我介绍...")
     private String stem;
 
-    @Schema(description = "核心考察点", example = "项目经验表达")
-    private String targetSkill;
+    @Schema(description = "当前题目焦点", example = "项目经验表达")
+    private String focusPoint;
 
     @Schema(description = "AI 结果状态：success/fallback", example = "success")
     private String aiResultStatus;

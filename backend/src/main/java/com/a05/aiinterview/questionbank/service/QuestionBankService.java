@@ -63,6 +63,7 @@ public class QuestionBankService {
         snapshot.put("domainCode", resolveDomainCode(question));
         snapshot.put("domainName", resolveDomainName(session, question));
         snapshot.put("questionType", question.getQuestionType());
+        snapshot.put("focusPoint", resolveFocusPoint(question));
         snapshot.put("answerSummary", summarizeAnswer(latestAttempt != null ? latestAttempt.getAnswerText() : null));
         snapshot.put("sourceCreatedAt", session.getCreatedAt() != null ? session.getCreatedAt().toString() : null);
 
@@ -231,10 +232,28 @@ public class QuestionBankService {
         if (StringUtils.hasText(specialDomainName)) {
             return specialDomainName;
         }
-        if (StringUtils.hasText(question.getTargetSkill())) {
-            return question.getTargetSkill();
+        String questionTypeLabel = InterviewDomainDisplaySupport.resolveQuestionTypeLabel(
+                question == null ? null : question.getQuestionType());
+        if (StringUtils.hasText(questionTypeLabel)) {
+            return questionTypeLabel;
+        }
+        if (StringUtils.hasText(question.getFocusPoint())) {
+            return question.getFocusPoint();
         }
         return "unknown";
+    }
+
+    private String resolveFocusPoint(InterviewQuestion question) {
+        if (question != null && question.getGenerationContextJson() != null) {
+            Object focusPoint = question.getGenerationContextJson().get("focusPoint");
+            if (focusPoint instanceof String s && StringUtils.hasText(s)) {
+                return s;
+            }
+        }
+        if (question == null) {
+            return null;
+        }
+        return question.getFocusPoint();
     }
 
     private String resolveDomainCode(InterviewQuestion question) {

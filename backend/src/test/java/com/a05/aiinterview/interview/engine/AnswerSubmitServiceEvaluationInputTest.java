@@ -36,7 +36,7 @@ class AnswerSubmitServiceEvaluationInputTest {
 
         InterviewSession session = new InterviewSession();
         session.setId(65L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
                         Map.of(
@@ -52,7 +52,7 @@ class AnswerSubmitServiceEvaluationInputTest {
         question.setId(101L);
         question.setQuestionType("PRINCIPLE");
         question.setStem("请解释 Seata AT 的边界。");
-        question.setTargetSkill("Seata AT 模式边界");
+        question.setFocusPoint("Seata AT 模式边界");
         question.setGenerationContextJson(Map.of(
                 "domainCode", "spring",
                 "focusPoint", "Seata AT模式边界"
@@ -111,7 +111,7 @@ class AnswerSubmitServiceEvaluationInputTest {
 
         InterviewSession session = new InterviewSession();
         session.setId(77L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setExperienceLevel("FRESH_GRAD");
         session.setStateLedgerJson(Map.of(
                 "quota_state", QuotaStateSupport.initialQuotaState(),
@@ -201,7 +201,7 @@ class AnswerSubmitServiceEvaluationInputTest {
 
         InterviewSession session = new InterviewSession();
         session.setId(88L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setExperienceLevel("JUNIOR");
         session.setCurrentQuestionNo(4);
         session.setStateLedgerJson(new java.util.LinkedHashMap<>(Map.of(
@@ -376,7 +376,7 @@ class AnswerSubmitServiceEvaluationInputTest {
         InterviewSession session = new InterviewSession();
         session.setId(120L);
         session.setUserId(1L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setExperienceLevel("FRESH_GRAD");
         session.setStateLedgerJson(Map.of(
                 "quota_state", QuotaStateSupport.initialQuotaState(),
@@ -496,7 +496,7 @@ class AnswerSubmitServiceEvaluationInputTest {
         InterviewSession session = new InterviewSession();
         session.setId(130L);
         session.setUserId(1L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setExperienceLevel("FRESH_GRAD");
         session.setStateLedgerJson(Map.of(
                 "quota_state", QuotaStateSupport.initialQuotaState(),

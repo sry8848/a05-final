@@ -38,8 +38,6 @@ public class SystemFallbackPlanBuilder {
                                                    InterviewQuestion currentQuestion,
                                                    int rotationIndex) {
         FallbackDimension dimension = resolveDimension(sessionId, rotationIndex);
-        InterviewDomainDisplaySupport.DomainIdentity behavioralDomain =
-                InterviewDomainDisplaySupport.resolveSpecialDomainForQuestionType("BEHAVIORAL");
         String currentType = currentQuestion == null || currentQuestion.getQuestionType() == null
                 ? ""
                 : currentQuestion.getQuestionType().trim().toUpperCase();
@@ -51,8 +49,8 @@ public class SystemFallbackPlanBuilder {
                 .strategyCode(strategyCode)
                 .targetQuestionType("BEHAVIORAL")
                 .nextFocus(dimension.focus())
-                .targetDomainCode(behavioralDomain.domainCode())
-                .targetDomainName(behavioralDomain.domainName())
+                .targetDomainCode("")
+                .targetDomainName("")
                 .newCoveredDomains(List.of())
                 .newCoveredPoints(List.of())
                 .retrievalPlans(List.of())

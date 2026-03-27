@@ -32,7 +32,7 @@ class PlannerHistoryBuilderServiceTest {
         InterviewSession currentSession = new InterviewSession();
         currentSession.setId(70L);
         currentSession.setUserId(1L);
-        currentSession.setTargetRole("JAVA_BACKEND");
+        currentSession.setPositionCode("JAVA_BACKEND");
 
         InterviewSession historySession = new InterviewSession();
         historySession.setId(69L);
@@ -92,7 +92,7 @@ class PlannerHistoryBuilderServiceTest {
         InterviewSession currentSession = new InterviewSession();
         currentSession.setId(80L);
         currentSession.setUserId(2L);
-        currentSession.setTargetRole("JAVA_BACKEND");
+        currentSession.setPositionCode("JAVA_BACKEND");
 
         InterviewSession knowledgeSession = new InterviewSession();
         knowledgeSession.setId(79L);
@@ -163,7 +163,7 @@ class PlannerHistoryBuilderServiceTest {
         InterviewSession currentSession = new InterviewSession();
         currentSession.setId(90L);
         currentSession.setUserId(3L);
-        currentSession.setTargetRole("JAVA_BACKEND");
+        currentSession.setPositionCode("JAVA_BACKEND");
 
         InterviewSession planningSession = new InterviewSession();
         planningSession.setId(89L);

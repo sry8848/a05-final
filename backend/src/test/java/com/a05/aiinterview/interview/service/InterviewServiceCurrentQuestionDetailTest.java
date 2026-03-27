@@ -50,7 +50,7 @@ class InterviewServiceCurrentQuestionDetailTest {
         currentQuestion.setQuestionType("PROJECT_DEEP_DIVE");
         currentQuestion.setDomainCode("redis");
         currentQuestion.setStem("结合项目讲讲缓存击穿的治理。");
-        currentQuestion.setTargetSkill("缓存击穿");
+        currentQuestion.setGenerationContextJson(Map.of("focusPoint", "缓存击穿"));
 
         when(sessionMapper.selectById(10L)).thenReturn(session);
         when(questionMapper.selectOne(any())).thenReturn(currentQuestion);
@@ -62,7 +62,14 @@ class InterviewServiceCurrentQuestionDetailTest {
         assertEquals(2, detail.getCurrentQuestion().getQuestionNo());
         assertEquals("PROJECT_DEEP_DIVE", detail.getCurrentQuestion().getQuestionType());
         assertEquals("Redis", detail.getCurrentQuestion().getDomainName());
-        assertEquals("缓存击穿", detail.getCurrentQuestion().getTargetSkill());
+        Map<String, Object> currentQuestionJson = new com.fasterxml.jackson.databind.ObjectMapper()
+                .convertValue(detail.getCurrentQuestion(), Map.class);
+        assertEquals("缓存击穿", currentQuestionJson.get("focusPoint"));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.Set.of("questionId", "questionNo", "questionType", "domainCode", "domainName",
+                        "stem", "focusPoint", "aiResultStatus", "hintAvailable"),
+                currentQuestionJson.keySet()
+        );
     }
 
     @Test
@@ -85,8 +92,7 @@ class InterviewServiceCurrentQuestionDetailTest {
         currentQuestion.setQuestionType("PRINCIPLE");
         currentQuestion.setDomainCode(null);
         currentQuestion.setStem("请讲讲事件循环。");
-        currentQuestion.setTargetSkill("前端基础");
-        currentQuestion.setGenerationContextJson(Map.of("domainName", "前端基础"));
+        currentQuestion.setGenerationContextJson(Map.of("domainName", "前端基础", "focusPoint", "前端基础"));
 
         when(sessionMapper.selectById(20L)).thenReturn(session);
         when(questionMapper.selectOne(any())).thenReturn(currentQuestion);
@@ -97,7 +103,14 @@ class InterviewServiceCurrentQuestionDetailTest {
         assertEquals(301L, detail.getCurrentQuestion().getQuestionId());
         assertEquals("PRINCIPLE", detail.getCurrentQuestion().getQuestionType());
         assertEquals("前端基础", detail.getCurrentQuestion().getDomainName());
-        assertEquals("前端基础", detail.getCurrentQuestion().getTargetSkill());
+        Map<String, Object> singleQuestionJson = new com.fasterxml.jackson.databind.ObjectMapper()
+                .convertValue(detail.getCurrentQuestion(), Map.class);
+        assertEquals("前端基础", singleQuestionJson.get("focusPoint"));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.Set.of("questionId", "questionNo", "questionType", "domainCode", "domainName",
+                        "stem", "focusPoint", "aiResultStatus", "hintAvailable"),
+                singleQuestionJson.keySet()
+        );
     }
 
     @Test
@@ -120,8 +133,7 @@ class InterviewServiceCurrentQuestionDetailTest {
         currentQuestion.setQuestionType("INTRO");
         currentQuestion.setDomainCode("intro");
         currentQuestion.setStem("请先做一个简短的自我介绍");
-        currentQuestion.setTargetSkill("沟通表达与项目概述");
-        currentQuestion.setGenerationContextJson(Map.of("domainCode", "intro"));
+        currentQuestion.setGenerationContextJson(Map.of("domainCode", "intro", "focusPoint", "沟通表达与项目概述"));
 
         when(sessionMapper.selectById(25L)).thenReturn(session);
         when(questionMapper.selectOne(any())).thenReturn(currentQuestion);
@@ -150,7 +162,7 @@ class InterviewServiceCurrentQuestionDetailTest {
                 "questionType", "INTRO",
                 "domainName", "",
                 "stem", "请做一个简短自我介绍",
-                "targetSkill", "沟通表达与项目概述",
+                "focusPoint", "沟通表达与项目概述",
                 "hintAvailable", true
         ));
 

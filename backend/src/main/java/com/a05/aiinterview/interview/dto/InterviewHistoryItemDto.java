@@ -12,7 +12,7 @@ public class InterviewHistoryItemDto {
 
     private Long sessionId;
     private String title;
-    private String targetRole;
+    private String positionCode;
     private String mode;
     private BigDecimal overallScore;
     private Integer questionCount;

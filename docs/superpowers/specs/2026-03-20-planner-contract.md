@@ -48,6 +48,8 @@ public class DomainInfo {
 约束：
 
 - `domainCode` 必须直接来自岗位知识域配置。
+- 当前唯一例外是 `INTRO -> intro`，仅用于首题自我介绍快照。
+- `BEHAVIORAL` 和 `PROJECT_DEEP_DIVE` 不允许伪造额外知识域编码。
 - `domainName` 只作为展示字段。
 - prompt 不允许输出输入列表之外的编码。
 

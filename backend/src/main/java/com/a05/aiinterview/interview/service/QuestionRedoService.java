@@ -109,9 +109,9 @@ public class QuestionRedoService {
         }
         snapshot.put("domainCode", domainCode);
         snapshot.put("domainName", questionDto != null ? questionDto.getDomainName() : "");
-        snapshot.put("targetSkill", question.getTargetSkill());
+        snapshot.put("focusPoint", questionDto != null ? questionDto.getFocusPoint() : "");
         snapshot.put("expectedPoints", question.getExpectedPoints() != null ? question.getExpectedPoints() : List.of());
-        snapshot.put("positionCode", session.getTargetRole());
+        snapshot.put("positionCode", session.getPositionCode());
         snapshot.put("experienceLevel", session.getExperienceLevel());
         snapshot.put("mode", session.getMode());
         return snapshot;

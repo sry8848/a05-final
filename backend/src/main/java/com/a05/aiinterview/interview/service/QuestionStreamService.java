@@ -353,7 +353,7 @@ public class QuestionStreamService {
                 questionType,
                 resolvedDomain.domainName(),
                 firstNonBlank(plan.getNextFocus(), resolvedDomain.domainName(), "核心技术能力"),
-                session.getTargetRole());
+                session.getPositionCode());
 
         InterviewQuestion question = saveQuestion(session, currentQuestionId, attemptId, plan, fallbackStem);
         String chunksKey = String.format(KEY_CHUNKS, attemptId);
@@ -633,7 +633,7 @@ public class QuestionStreamService {
         QuestionGenerationInput input = QuestionGenerationInput.builder()
                 .interviewId(session.getId())
                 .questionId(null)
-                .positionCode(session.getTargetRole())
+                .positionCode(session.getPositionCode())
                 .mode(session.getMode())
                 .experienceLevel(session.getExperienceLevel())
                 .roleContext(QuestionGenerationInput.RoleContext.builder()
@@ -706,7 +706,7 @@ public class QuestionStreamService {
         question.setQuestionType(questionType);
         question.setDomainCode(resolvedDomain.domainCode);
         question.setStem(stem);
-        question.setTargetSkill(firstNonBlank(plan.getNextProjectPoint(), plan.getNextFocus(), resolvedDomain.domainName));
+        question.setFocusPoint(firstNonBlank(plan.getNextProjectPoint(), plan.getNextFocus(), resolvedDomain.domainName));
         question.setExpectedPoints(List.of());
         question.setStatus("asked");
 
@@ -714,9 +714,8 @@ public class QuestionStreamService {
         ctx.put("domainCode", resolvedDomain.domainCode);
         ctx.put("domainName", resolvedDomain.domainName);
         ctx.put("questionType", questionType);
-        ctx.put("focusPoint", plan.getNextFocus());
+        ctx.put("focusPoint", question.getFocusPoint());
         ctx.put("projectPoint", firstNonBlank(plan.getNextProjectPoint(), ""));
-        ctx.put("targetSkill", question.getTargetSkill());
         ctx.put("expectedPoints", question.getExpectedPoints());
         ctx.put("activeItemKey", resolvedItem.itemKey);
         ctx.put("activeItemType", resolvedItem.itemType);
@@ -776,7 +775,7 @@ public class QuestionStreamService {
                     && specialDomain.domainName() != null && !specialDomain.domainName().isBlank()) {
                 return new ResolvedDomain(specialDomain.domainCode(), specialDomain.domainName());
             }
-            return resolvedDomain;
+            return resolvedDomain == null ? new ResolvedDomain("", "") : resolvedDomain;
         }
         ResolvedDomain recovered = recoverPrincipleDomain(currentQuestion, session);
         if (recovered != null
@@ -1046,10 +1045,10 @@ public class QuestionStreamService {
     static String buildFallbackQuestionStem(
             String questionType,
             String nextDomainName,
-            String targetSkill,
-            String targetRole) {
-        String roleLabel = resolveRoleLabel(targetRole);
-        String focus = firstNonBlank(targetSkill, nextDomainName, "核心技术能力");
+            String focusPoint,
+            String positionCode) {
+        String roleLabel = resolveRoleLabel(positionCode);
+        String focus = firstNonBlank(focusPoint, nextDomainName, "核心技术能力");
         String normalizedType = questionType == null ? "" : questionType.trim().toUpperCase(Locale.ROOT);
         return switch (normalizedType) {
             case "INTRO" -> "请你先做一个 1 到 2 分钟的自我介绍，重点说明你作为" + roleLabel
@@ -1067,11 +1066,11 @@ public class QuestionStreamService {
         };
     }
 
-    private static String resolveRoleLabel(String targetRole) {
-        if (targetRole == null || targetRole.isBlank()) {
+    private static String resolveRoleLabel(String positionCode) {
+        if (positionCode == null || positionCode.isBlank()) {
             return "研发工程师";
         }
-        return switch (targetRole.trim().toUpperCase(Locale.ROOT)) {
+        return switch (positionCode.trim().toUpperCase(Locale.ROOT)) {
             case "JAVA_BACKEND", "GO_BACKEND" -> "后端工程师";
             case "FRONTEND" -> "前端工程师";
             case "DATA_ENGINEER" -> "数据工程师";

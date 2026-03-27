@@ -64,8 +64,8 @@ public class InterviewService {
      * @return 会话 ID 和初始状态
      */
     public CreateInterviewResponse createInterview(Long userId, CreateInterviewRequest request) {
-        log.info("创建面试会话, userId={}, targetRole={}, experienceLevel={}, mode={}",
-                userId, request.getTargetRole(), request.getExperienceLevel(), request.getMode());
+        log.info("创建面试会话, userId={}, positionCode={}, experienceLevel={}, mode={}",
+                userId, request.getPositionCode(), request.getExperienceLevel(), request.getMode());
 
         // 1. 校验枚举合法性
         validateEnums(request);
@@ -121,7 +121,7 @@ public class InterviewService {
         InterviewDetailDto dto = new InterviewDetailDto();
         dto.setId(session.getId());
         dto.setTitle(session.getTitle());
-        dto.setTargetRole(session.getTargetRole());
+        dto.setPositionCode(session.getPositionCode());
         dto.setExperienceLevel(session.getExperienceLevel());
         dto.setMode(session.getMode());
         dto.setCurrentQuestionNo(session.getCurrentQuestionNo());
@@ -142,9 +142,9 @@ public class InterviewService {
     // ==================== 私有方法 ====================
     private void validateEnums(CreateInterviewRequest request) {
         try {
-            TargetRole.valueOf(request.getTargetRole());
+            TargetRole.valueOf(request.getPositionCode());
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("targetRole 不合法：" + request.getTargetRole());
+            throw new IllegalArgumentException("positionCode 不合法：" + request.getPositionCode());
         }
         try {
             ExperienceLevel.valueOf(request.getExperienceLevel());
@@ -162,7 +162,7 @@ public class InterviewService {
         InterviewSession session = new InterviewSession();
         session.setUserId(userId);
         session.setResumeId(request.getResumeId());
-        session.setTargetRole(request.getTargetRole());
+        session.setPositionCode(request.getPositionCode());
         session.setExperienceLevel(request.getExperienceLevel());
         session.setMode(request.getMode());
         session.setJobDescription(request.getJobDescription());
@@ -175,7 +175,7 @@ public class InterviewService {
         session.setModelProvider(mockEnabled ? "mock" : "openai");
         session.setModelName(aiModel);
         // 生成标题：岗位中文名 + 模拟面试 + 日期
-        session.setTitle(resolvePositionName(request.getTargetRole()) + " 模拟面试 - " + LocalDate.now());
+        session.setTitle(resolvePositionName(request.getPositionCode()) + " 模拟面试 - " + LocalDate.now());
         session.setCreatedAt(LocalDateTime.now());
         session.setUpdatedAt(LocalDateTime.now());
         return session;
@@ -183,7 +183,7 @@ public class InterviewService {
 
     private void savePreference(Long userId, CreateInterviewRequest request) {
         InterviewPreference pref = new InterviewPreference();
-        pref.setTargetRole(request.getTargetRole());
+        pref.setPositionCode(request.getPositionCode());
         pref.setExperienceLevel(request.getExperienceLevel());
         pref.setMode(request.getMode());
         pref.setFocusTopics(request.getFocusTopics());
@@ -265,15 +265,15 @@ public class InterviewService {
         );
     }
 
-    private String resolvePositionName(String targetRole) {
-        return switch (targetRole) {
+    private String resolvePositionName(String positionCode) {
+        return switch (positionCode) {
             case "JAVA_BACKEND" -> "Java 后端开发";
             case "GO_BACKEND" -> "Go 后端开发";
             case "FRONTEND" -> "前端开发";
             case "DATA_ENGINEER" -> "数据工程师";
             case "QA" -> "测试工程师";
             case "DEVOPS" -> "DevOps 工程师";
-            default -> targetRole;
+            default -> positionCode;
         };
     }
 

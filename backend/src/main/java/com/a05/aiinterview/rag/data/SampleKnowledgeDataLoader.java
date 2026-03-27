@@ -15,7 +15,7 @@ import java.util.List;
  * 样本知识数据加载器。
  *
  * <p>仅当 {@code rag.enabled=true AND rag.init-sample-data=true} 时在应用启动后执行一次，
- * 向 Qdrant 注入覆盖"Java 内存模型"和"JVM 垃圾回收"两个知识域的内置样本数据，
+ * 向 Qdrant 注入覆盖 Java 后端合法知识域的内置样本数据，
  * 满足 T1.2 DoD 中"至少 2 个知识域有样本数据入库"的要求。
  *
  * <p>生产环境请通过 {@code POST /api/v1/admin/knowledge/ingest} 接口管理真实知识库，
@@ -44,16 +44,16 @@ public class SampleKnowledgeDataLoader implements ApplicationRunner {
     /**
      * 内置样本数据：覆盖 Java 后端岗位的两个核心知识域。
      *
-     * <p>知识域 1：{@code java_memory_model}（Java 内存模型）
-     * <p>知识域 2：{@code jvm_gc}（JVM 垃圾回收）
+     * <p>知识域 1：{@code concurrency}（并发编程）
+     * <p>知识域 2：{@code jvm}（Java 虚拟机）
      */
     private List<KnowledgeDocument> buildSampleDocuments() {
         return List.of(
-                // ── 知识域 1：Java 内存模型 ─────────────────────────────
+                // ── 知识域 1：并发编程（以 JMM / volatile 为样本主题） ────────────
                 KnowledgeDocument.builder()
                         .knowledgeType("job_knowledge")
-                        .domainCode("java_memory_model")
-                        .positionCode("backend_java")
+                        .domainCode("concurrency")
+                        .positionCode("JAVA_BACKEND")
                         .difficulty("L3")
                         .source("jsr133_jmm")
                         .version("v1")
@@ -86,8 +86,8 @@ public class SampleKnowledgeDataLoader implements ApplicationRunner {
 
                 KnowledgeDocument.builder()
                         .knowledgeType("interview_question")
-                        .domainCode("java_memory_model")
-                        .positionCode("backend_java")
+                        .domainCode("concurrency")
+                        .positionCode("JAVA_BACKEND")
                         .difficulty("L3")
                         .questionType("PRINCIPLE")
                         .source("team_internal")
@@ -111,11 +111,11 @@ public class SampleKnowledgeDataLoader implements ApplicationRunner {
                                 """)
                         .build(),
 
-                // ── 知识域 2：JVM 垃圾回收 ─────────────────────────────
+                // ── 知识域 2：Java 虚拟机（以 GC / OOM 排障为样本主题） ───────────
                 KnowledgeDocument.builder()
                         .knowledgeType("job_knowledge")
-                        .domainCode("jvm_gc")
-                        .positionCode("backend_java")
+                        .domainCode("jvm")
+                        .positionCode("JAVA_BACKEND")
                         .difficulty("L3")
                         .source("oracle_jvm_spec")
                         .version("v1")
@@ -150,8 +150,8 @@ public class SampleKnowledgeDataLoader implements ApplicationRunner {
 
                 KnowledgeDocument.builder()
                         .knowledgeType("interview_question")
-                        .domainCode("jvm_gc")
-                        .positionCode("backend_java")
+                        .domainCode("jvm")
+                        .positionCode("JAVA_BACKEND")
                         .difficulty("L4")
                         .questionType("SCENARIO")
                         .source("team_internal")

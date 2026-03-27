@@ -9,7 +9,7 @@
         <result column="user_id" property="userId"/>
         <result column="resume_id" property="resumeId"/>
         <result column="title" property="title"/>
-        <result column="target_role" property="targetRole"/>
+        <result column="position_code" property="positionCode"/>
         <result column="experience_level" property="experienceLevel"/>
         <result column="mode" property="mode"/>
         <result column="job_description" property="jobDescription"/>
@@ -46,7 +46,7 @@
     <resultMap id="InterviewHistoryItemResultMap" type="com.a05.aiinterview.interview.dto.InterviewHistoryItemDto">
         <result column="session_id" property="sessionId"/>
         <result column="title" property="title"/>
-        <result column="target_role" property="targetRole"/>
+        <result column="position_code" property="positionCode"/>
         <result column="mode" property="mode"/>
         <result column="overall_score" property="overallScore"/>
         <result column="question_count" property="questionCount"/>
@@ -59,8 +59,8 @@
         <if test="status != null and status != ''">
             AND s.status = #{status}
         </if>
-        <if test="targetRole != null and targetRole != ''">
-            AND s.target_role = #{targetRole}
+        <if test="positionCode != null and positionCode != ''">
+            AND s.position_code = #{positionCode}
         </if>
         <if test="dateFrom != null">
             AND s.created_at &gt;= #{dateFrom}
@@ -73,7 +73,7 @@
     <select id="selectHistoryPage" resultMap="InterviewHistoryItemResultMap">
         SELECT s.id AS session_id,
                s.title,
-               s.target_role,
+               s.position_code,
                s.mode,
                r.overall_score,
                s.current_question_no AS question_count,
@@ -109,7 +109,7 @@
         SELECT *
         FROM interview_sessions
         WHERE user_id = #{userId}
-          AND target_role = #{targetRole}
+          AND position_code = #{positionCode}
           <if test="dateFrom != null">
               AND COALESCE(finished_at, updated_at, created_at) &gt;= #{dateFrom}
           </if>

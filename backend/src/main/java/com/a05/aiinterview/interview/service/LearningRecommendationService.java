@@ -192,11 +192,11 @@ public class LearningRecommendationService {
 
         LearningRecommendationDto.Item roadmap = new LearningRecommendationDto.Item();
         roadmap.setItemId("long-term-1");
-        roadmap.setTitle(resolveRoleName(session.getTargetRole()) + " 能力升级路线");
+        roadmap.setTitle(resolveRoleName(session.getPositionCode()) + " 能力升级路线");
         roadmap.setReason("围绕目标岗位补齐系统设计、项目深挖和表达能力，形成可持续提升闭环。");
         roadmap.setResourceType("project");
         roadmap.setEstimatedMinutes(180);
-        roadmap.setLink(buildSearchLink(resolveRoleName(session.getTargetRole()) + " 面试 进阶路线"));
+        roadmap.setLink(buildSearchLink(resolveRoleName(session.getPositionCode()) + " 面试 进阶路线"));
         items.add(roadmap);
 
         List<String> suggestions = report.getImprovementSuggestions();
@@ -241,18 +241,18 @@ public class LearningRecommendationService {
         return "https://www.google.com/search?q=" + encoded;
     }
 
-    private String resolveRoleName(String targetRole) {
-        if (targetRole == null) {
+    private String resolveRoleName(String positionCode) {
+        if (positionCode == null) {
             return "目标岗位";
         }
-        return switch (targetRole) {
+        return switch (positionCode) {
             case "JAVA_BACKEND" -> "Java 后端";
             case "GO_BACKEND" -> "Go 后端";
             case "FRONTEND" -> "前端";
             case "DATA_ENGINEER" -> "数据工程";
             case "QA" -> "测试";
             case "DEVOPS" -> "DevOps";
-            default -> targetRole;
+            default -> positionCode;
         };
     }
 

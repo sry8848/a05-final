@@ -182,7 +182,7 @@ class AnswerSubmitServiceDecisionFlowTest {
         session.setId(1L);
         session.setUserId(7L);
         session.setStatus("in_progress");
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setExperienceLevel("FRESH_GRAD");
         session.setCurrentQuestionNo(1);
         session.setStateLedgerJson(ledger);

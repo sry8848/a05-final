@@ -116,7 +116,7 @@ public class InterviewReportService {
         InterviewReportDto dto = InterviewReportDto.fromEntity(report);
         dto.setOverallScore(InterviewOverallScoreSupport.resolveOverallScore(report));
         dto.setMode(session.getMode());
-        dto.setTargetRole(session.getTargetRole());
+        dto.setPositionCode(session.getPositionCode());
         if (!"professional".equalsIgnoreCase(session.getMode())) {
             dto.setComprehensiveRadarScores(null);
         }

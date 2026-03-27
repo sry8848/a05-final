@@ -92,7 +92,7 @@ class QuestionStreamServiceBuildInputTest {
 
         InterviewSession session = new InterviewSession();
         session.setId(100L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setMode("professional");
         session.setExperienceLevel("SENIOR");
         session.setSyllabusJson(Map.of(
@@ -172,7 +172,7 @@ class QuestionStreamServiceBuildInputTest {
 
         InterviewSession session = new InterviewSession();
         session.setId(101L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setMode("practice");
         session.setExperienceLevel("JUNIOR");
         session.setSyllabusJson(Map.of(
@@ -226,7 +226,7 @@ class QuestionStreamServiceBuildInputTest {
 
         InterviewSession session = new InterviewSession();
         session.setId(200L);
-        session.setTargetRole("JAVA_BACKEND");
+        session.setPositionCode("JAVA_BACKEND");
         session.setMode("practice");
         session.setExperienceLevel("FRESH_GRAD");
         session.setSyllabusJson(Map.of(
@@ -323,7 +323,7 @@ class QuestionStreamServiceBuildInputTest {
         question.setQuestionType("BEHAVIORAL");
         question.setDomainCode("behavior");
         question.setStem("请分享一次跨团队推动方案落地的经历。");
-        question.setTargetSkill("跨团队协作");
+        question.setGenerationContextJson(Map.of("focusPoint", "跨团队协作"));
 
         Method method = QuestionStreamService.class.getDeclaredMethod(
                 "buildDoneEvent",
@@ -354,7 +354,11 @@ class QuestionStreamServiceBuildInputTest {
         assertThat(payload.getQuestion().getQuestionNo()).isEqualTo(4);
         assertThat(payload.getQuestion().getQuestionType()).isEqualTo("BEHAVIORAL");
         assertThat(payload.getQuestion().getDomainName()).isEqualTo("协作沟通");
-        assertThat(payload.getQuestion().getTargetSkill()).isEqualTo("跨团队协作");
+        Map<String, Object> questionJson = new ObjectMapper().convertValue(payload.getQuestion(), Map.class);
+        assertThat(questionJson).containsEntry("focusPoint", "跨团队协作");
+        assertThat(questionJson).containsOnlyKeys(
+                "questionId", "questionNo", "questionType", "domainCode", "domainName",
+                "stem", "focusPoint", "aiResultStatus", "hintAvailable");
     }
 
     @Test
@@ -641,7 +645,7 @@ class QuestionStreamServiceBuildInputTest {
     }
 
     @Test
-    void saveQuestion_shouldAssignBehavioralDomainWhenPlanDoesNotProvideOne() throws Exception {
+    void saveQuestion_shouldNotInventBehavioralPseudoDomainWhenPlanDoesNotProvideOne() throws Exception {
         AiClient aiClient = mock(AiClient.class);
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
         InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
@@ -726,10 +730,10 @@ class QuestionStreamServiceBuildInputTest {
                 "请分享一次你在协作中遇到分歧并推动结果的真实经历。"
         );
 
-        assertThat(saved.getDomainCode()).isEqualTo("behavioral");
+        assertThat(saved.getDomainCode()).isBlank();
         assertThat(saved.getGenerationContextJson())
-                .containsEntry("domainCode", "behavioral")
-                .containsEntry("domainName", "行为题");
+                .containsEntry("domainCode", "")
+                .containsEntry("domainName", "");
     }
 
     private QuestionStreamService newService() {

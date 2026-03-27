@@ -79,7 +79,7 @@ public class PlannerOrchestrationService {
             String resumeText = fetchResumeText(session);
 
             // 2. 获取岗位对应的知识域列表
-            List<PositionSkillDomain> domains = positionService.listSkillDomainEntities(session.getTargetRole());
+            List<PositionSkillDomain> domains = positionService.listSkillDomainEntities(session.getPositionCode());
 
             PlannerInput plannerInput = buildPlannerInput(session, resumeText, domains);
             interviewDebugTraceService.recordPlannerStage(
@@ -201,8 +201,8 @@ public class PlannerOrchestrationService {
 
         return PlannerInput.builder()
                 .interviewId(session.getId())
-                .positionCode(session.getTargetRole())
-                .positionName(resolvePositionName(session.getTargetRole()))
+                .positionCode(session.getPositionCode())
+                .positionName(resolvePositionName(session.getPositionCode()))
                 .experienceLevel(session.getExperienceLevel())
                 .roundType("")
                 .mode(session.getMode())
@@ -244,7 +244,10 @@ public class PlannerOrchestrationService {
         snapshot.put("domainCode", domainCode);
         snapshot.put("domainName", domainName);
         snapshot.put("stem", q.getStem());
-        snapshot.put("targetSkill", q.getTargetSkill());
+        snapshot.put("focusPoint", firstNonBlank(
+                q.getGenerationContextJson() != null ? String.valueOf(q.getGenerationContextJson().get("focusPoint")) : null,
+                q.getFocusPoint()
+        ));
         snapshot.put("aiResultStatus", resolveAiResultStatus(q));
         snapshot.put("hintAvailable", true);
         return snapshot;
@@ -318,15 +321,15 @@ public class PlannerOrchestrationService {
     }
 
     /** 根据岗位编码解析岗位中文名称，用于 Planner 输出标题展示。 */
-    private String resolvePositionName(String targetRole) {
-        return switch (targetRole) {
+    private String resolvePositionName(String positionCode) {
+        return switch (positionCode) {
             case "JAVA_BACKEND" -> "Java Backend";
             case "GO_BACKEND" -> "Go Backend";
             case "FRONTEND" -> "Frontend";
             case "DATA_ENGINEER" -> "Data Engineer";
             case "QA" -> "QA Engineer";
             case "DEVOPS" -> "DevOps Engineer";
-            default -> targetRole;
+            default -> positionCode;
         };
     }
 

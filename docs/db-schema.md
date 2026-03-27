@@ -131,7 +131,7 @@
 
 记录用户最近一次面试准备偏好：
 
-- `target_role`
+- `position_code`
 - `experience_level`
 - `mode`
 - `focus_topics`
@@ -143,7 +143,7 @@
 面试会话主表，当前重点字段包括：
 
 - `resume_id`
-- `target_role`
+- `position_code`
 - `experience_level`
 - `mode`
 - `job_description`
@@ -169,11 +169,17 @@
 - `domain_code`
 - `secondary_domain_codes`
 - `stem`
-- `target_skill`
+- `focus_point`
 - `expected_points`
 - `status`
 - `hint_text`
 - `generation_context_json`
+
+说明：
+
+- `domain_code` 主语义是岗位知识域编码
+- 当前唯一受控例外是首题 `INTRO` 可写 `intro`
+- `BEHAVIORAL` / `PROJECT_DEEP_DIVE` 不再伪造 `domain_code`
 
 ### `interview_attempts`
 

@@ -28,12 +28,13 @@ public final class QuestionDetailEvaluationInputFactory {
         String domainCode = extractDomainCode(question.getGenerationContextJson());
         String domainName = firstNonBlank(
                 extractDomainName(question.getGenerationContextJson()),
-                resolveDomainName(session == null ? null : session.getSyllabusJson(), domainCode)
+                resolveDomainName(session == null ? null : session.getSyllabusJson(), domainCode),
+                InterviewDomainDisplaySupport.resolveQuestionTypeLabel(question.getQuestionType())
         );
         return QuestionDetailEvaluationInput.builder()
                 .interviewId(session.getId())
                 .questionId(question.getId())
-                .positionCode(session.getTargetRole())
+                .positionCode(session.getPositionCode())
                 .experienceLevel(session.getExperienceLevel())
                 .mode(session.getMode())
                 .questionStem(question.getStem())

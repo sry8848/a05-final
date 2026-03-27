@@ -99,6 +99,7 @@ java -jar target/aiinterview-backend-0.0.1-SNAPSHOT.jar --spring.profiles.active
 
 - 当前推荐的 `local` 流程里，ASR / TTS 默认直接复用 `AI_BAILIAN_API_KEY`
 - 所以第一次部署通常不用再额外准备 `ASR_API_KEY`、`TTS_API_KEY`
+- 如果你要改接别的 OpenAI-compatible 服务，再覆盖 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`
 
 ## 数据与资源目录
 

@@ -50,11 +50,11 @@ spring:
   # Spring AI official config (consumed by spring-ai-starter-model-openai)
   ai:
     openai:
-      api-key: ${OPENAI_API_KEY:sk-mock}
-      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      api-key: ${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:sk-mock}}
+      base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
       chat:
         options:
-          model: ${OPENAI_MODEL:gpt-4o-mini}
+          model: ${OPENAI_MODEL:qwen-plus}
           temperature: 0.7
 
 
@@ -106,14 +106,15 @@ resume:
 
 # AI 调用配置
 # mock-enabled=true 时使用 MockAiClient 返回硬编码结果，无需 API Key
-# mock-enabled=false 时使用 OpenAiClient 调用真实 AI（通过 Spring AI），需要配置 OPENAI_API_KEY 等变量
+# mock-enabled=false 时使用 OpenAiClient 调用真实 AI（通过 OpenAI-compatible 协议），
+# 默认优先读取 AI_BAILIAN_API_KEY；如需切换其他兼容服务，可覆盖 OPENAI_* 变量
 ai:
   openai:
     mock-enabled: ${AI_MOCK_ENABLED:true}
     # 以下配置仅在 mock-enabled=false 时生效，用于 OpenAiClient 调用真实 AI
-    api-key: ${OPENAI_API_KEY:sk-mock}
-    base-url: ${OPENAI_BASE_URL:https://api.openai.com}
-    model: ${OPENAI_MODEL:gpt-4o-mini}
+    api-key: ${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:sk-mock}}
+    base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+    model: ${OPENAI_MODEL:qwen-plus}
   prompt:
     version:
       planner: ${AI_PROMPT_PLANNER_VERSION:v2}
@@ -158,7 +159,7 @@ speech:
   asr:
     enabled: ${ASR_ENABLED:false}
     provider: alibaba
-    api-key: ${ASR_API_KEY:${OPENAI_API_KEY:sk-mock}}
+    api-key: ${ASR_API_KEY:${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:sk-mock}}}
     endpoint: ${ASR_ENDPOINT:wss://dashscope.aliyuncs.com/api-ws/v1/inference}
     model: ${ASR_MODEL:paraformer-realtime-v2}
     # 不同题型的停顿检测阈值（毫秒），超时未说话则自动提交答案
@@ -172,7 +173,7 @@ speech:
   tts:
     enabled: ${TTS_ENABLED:false}
     provider: alibaba
-    api-key: ${TTS_API_KEY:${OPENAI_API_KEY:sk-mock}}
+    api-key: ${TTS_API_KEY:${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:sk-mock}}}
     endpoint: ${TTS_ENDPOINT:wss://dashscope.aliyuncs.com/api-ws/v1/inference}
     model: ${TTS_MODEL:cosyvoice-v1}
     voice: ${TTS_VOICE:longxiaochun}

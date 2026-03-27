@@ -175,7 +175,7 @@ public class ProfileService {
         List<SkillDomainItemDto> domains = buildSkillDomainItems(aggregateMap, allowedDomains);
 
         SkillOverviewDto dto = new SkillOverviewDto();
-        dto.setPositionCode(normalizeTargetRole(positionCode));
+        dto.setPositionCode(normalizePositionCode(positionCode));
         dto.setDomains(domains);
         dto.setTopStrengths(buildTopStrengths(domains));
         dto.setTopWeaknesses(buildTopWeaknesses(domains));
@@ -187,9 +187,9 @@ public class ProfileService {
                 .eq(InterviewSession::getUserId, userId)
                 .orderByAsc(InterviewSession::getCreatedAt);
 
-        String role = normalizeTargetRole(positionCode);
+        String role = normalizePositionCode(positionCode);
         if (StringUtils.hasText(role)) {
-            wrapper.eq(InterviewSession::getTargetRole, role);
+            wrapper.eq(InterviewSession::getPositionCode, role);
         }
         return interviewSessionMapper.selectList(wrapper);
     }
@@ -352,7 +352,7 @@ public class ProfileService {
     }
 
     private Map<String, PositionSkillDomain> loadAllowedDomains(String positionCode) {
-        String role = normalizeTargetRole(positionCode);
+        String role = normalizePositionCode(positionCode);
         if (!StringUtils.hasText(role)) {
             return Map.of();
         }
@@ -674,7 +674,7 @@ public class ProfileService {
         return val == null ? null : String.valueOf(val);
     }
 
-    private String normalizeTargetRole(String positionCode) {
+    private String normalizePositionCode(String positionCode) {
         if (!StringUtils.hasText(positionCode)) {
             return null;
         }

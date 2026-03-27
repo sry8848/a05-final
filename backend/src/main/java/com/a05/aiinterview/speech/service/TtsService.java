@@ -281,7 +281,7 @@ public class TtsService {
         // 验证必要配置
         if (tts.getApiKey() == null || tts.getApiKey().isBlank()) {
             log.error("[TTS-DEBUG] API Key 未配置！");
-            throw new IllegalStateException("TTS API Key 未配置，请检查环境变量 AI_BAILIAN_API_KEY");
+            throw new IllegalStateException("TTS API Key 未配置，请优先检查 AI_BAILIAN_API_KEY，或确认兼容层 OPENAI_API_KEY 是否已设置");
         }
         if (resolvedEndpoint == null || resolvedEndpoint.isBlank()) {
             log.error("[TTS-DEBUG] Endpoint 未配置！");
