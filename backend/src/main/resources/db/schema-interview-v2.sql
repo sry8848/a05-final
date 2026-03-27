@@ -31,7 +31,6 @@ CREATE TABLE interview_sessions (
     resume_id               BIGINT       NULL             COMMENT '关联简历 ID',
     title                   VARCHAR(255) NOT NULL DEFAULT '' COMMENT '本场标题，如 Java 后端开发模拟面试',
     target_role             VARCHAR(64)  NOT NULL         COMMENT '目标岗位枚举，如 JAVA_BACKEND',
-    position_domain_version INT          NOT NULL DEFAULT 1 COMMENT '本场采用的岗位知识域版本',
     experience_level        VARCHAR(32)  NOT NULL         COMMENT '工作年限枚举，如 SENIOR',
     mode                    VARCHAR(32)  NOT NULL         COMMENT '面试模式：practice / professional',
     job_description         LONGTEXT     NULL             COMMENT 'JD 文本',
@@ -61,7 +60,7 @@ CREATE TABLE interview_sessions (
 CREATE TABLE IF NOT EXISTS session_skill_states (
     id              BIGINT      AUTO_INCREMENT PRIMARY KEY,
     session_id      BIGINT      NOT NULL         COMMENT '所属面试会话 ID',
-    domain_id       BIGINT      NOT NULL         COMMENT '关联 position_skill_domains.id',
+    domain_code     VARCHAR(64) NOT NULL         COMMENT '关联 position_skill_domains.domain_code',
     status          VARCHAR(32) NOT NULL DEFAULT 'uncovered' COMMENT '考察状态：uncovered/in_progress/covered/circuit_broken',
     tested_count    INT         NOT NULL DEFAULT 0 COMMENT '被考察题数',
     saturated       TINYINT     NOT NULL DEFAULT 0 COMMENT '是否已问透（1=是，0=否）',
@@ -69,7 +68,7 @@ CREATE TABLE IF NOT EXISTS session_skill_states (
     ai_notes        TEXT        NULL             COMMENT 'AI 对该知识域的定性备注',
     created_at      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_sss_session_domain (session_id, domain_id),
+    UNIQUE KEY uk_sss_session_domain (session_id, domain_code),
     INDEX idx_sss_session_id (session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试会话知识域考察状态表';
 
@@ -81,8 +80,8 @@ CREATE TABLE IF NOT EXISTS interview_questions (
     session_id              BIGINT       NOT NULL         COMMENT '所属面试会话 ID',
     question_no             INT          NOT NULL         COMMENT '题号（在本场面试中唯一，从 1 开始）',
     question_type           VARCHAR(64)  NOT NULL         COMMENT '题目类型：INTRO/PROJECT_DEEP_DIVE/SCENARIO/PRINCIPLE/BEHAVIORAL',
-    domain_id               BIGINT       NULL             COMMENT '主知识域 ID',
-    secondary_domain_ids    JSON         NULL             COMMENT '副知识域 ID 列表',
+    domain_code             VARCHAR(64)  NULL             COMMENT '主知识域 code',
+    secondary_domain_codes  JSON         NULL             COMMENT '副知识域 code 列表',
     stem                    LONGTEXT     NOT NULL         COMMENT '题目正文',
     target_skill            VARCHAR(128) NULL             COMMENT '核心考察点，如 缓存击穿',
     expected_points         JSON         NULL             COMMENT '理想回答要点列表',

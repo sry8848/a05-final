@@ -97,7 +97,7 @@ class QuestionStreamServiceBuildInputTest {
         session.setExperienceLevel("SENIOR");
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
-                        Map.of("domainId", 6L, "domainCode", "redis", "domainName", "Redis", "focusPoints", List.of("缓存击穿"))
+                        Map.of("domainCode", "redis", "domainName", "Redis", "focusPoints", List.of("缓存击穿"))
                 )
         ));
         session.setStateLedgerJson(Map.of(
@@ -177,8 +177,8 @@ class QuestionStreamServiceBuildInputTest {
         session.setExperienceLevel("JUNIOR");
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
-                        Map.of("domainId", 6L, "domainCode", "redis", "domainName", "Redis", "focusPoints", List.of("缓存击穿")),
-                        Map.of("domainId", 7L, "domainCode", "mq", "domainName", "消息队列", "focusPoints", List.of("削峰填谷"))
+                        Map.of("domainCode", "redis", "domainName", "Redis", "focusPoints", List.of("缓存击穿")),
+                        Map.of("domainCode", "mq", "domainName", "消息队列", "focusPoints", List.of("削峰填谷"))
                 )
         ));
         session.setStateLedgerJson(Map.of());
@@ -214,7 +214,6 @@ class QuestionStreamServiceBuildInputTest {
                 RagContext.empty()
         );
 
-        assertThat(input.getNextQuestionGoal().getRelatedDomainId()).isNull();
         assertThat(input.getNextQuestionGoal().getRelatedDomainCode()).isEmpty();
         assertThat(input.getNextQuestionGoal().getRelatedDomainName()).isEmpty();
     }
@@ -231,7 +230,7 @@ class QuestionStreamServiceBuildInputTest {
         session.setMode("practice");
         session.setExperienceLevel("FRESH_GRAD");
         session.setSyllabusJson(Map.of(
-                "domains", List.of(Map.of("domainId", 6L, "domainCode", "redis", "domainName", "Redis", "focusPoints", List.of("缓存击穿")))
+                "domains", List.of(Map.of("domainCode", "redis", "domainName", "Redis", "focusPoints", List.of("缓存击穿")))
         ));
         session.setStateLedgerJson(Map.of(
                 "active_item_key", "item-cache",
@@ -313,7 +312,7 @@ class QuestionStreamServiceBuildInputTest {
         session.setId(300L);
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
-                        Map.of("domainId", 8L, "domainCode", "behavior", "domainName", "协作沟通")
+                        Map.of("domainCode", "behavior", "domainName", "协作沟通")
                 )
         ));
 
@@ -322,7 +321,7 @@ class QuestionStreamServiceBuildInputTest {
         question.setSessionId(300L);
         question.setQuestionNo(4);
         question.setQuestionType("BEHAVIORAL");
-        question.setDomainId(8L);
+        question.setDomainCode("behavior");
         question.setStem("请分享一次跨团队推动方案落地的经历。");
         question.setTargetSkill("跨团队协作");
 
@@ -639,6 +638,98 @@ class QuestionStreamServiceBuildInputTest {
                 .containsEntry("activeItemName", "Chabst")
                 .containsEntry("projectPoint", "RabbitMQ 延迟消息处理超时订单")
                 .containsEntry("interviewerArchetype", "efficiency");
+    }
+
+    @Test
+    void saveQuestion_shouldAssignBehavioralDomainWhenPlanDoesNotProvideOne() throws Exception {
+        AiClient aiClient = mock(AiClient.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        RagRetrievalService ragService = mock(RagRetrievalService.class);
+        TtsService ttsService = mock(TtsService.class);
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+
+        InterviewQuestion currentQuestion = new InterviewQuestion();
+        currentQuestion.setId(930L);
+        currentQuestion.setSessionId(530L);
+        currentQuestion.setQuestionNo(1);
+        currentQuestion.setQuestionType("PRINCIPLE");
+        currentQuestion.setDomainCode("redis");
+        currentQuestion.setGenerationContextJson(Map.of("domainCode", "redis", "domainName", "Redis"));
+
+        when(questionMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(currentQuestion));
+        when(questionMapper.selectById(930L)).thenReturn(currentQuestion);
+        doAnswer(invocation -> {
+            InterviewQuestion inserted = invocation.getArgument(0, InterviewQuestion.class);
+            inserted.setId(931L);
+            return 1;
+        }).when(questionMapper).insert(org.mockito.ArgumentMatchers.any(InterviewQuestion.class));
+
+        QuestionStreamService service = new QuestionStreamService(
+                aiClient,
+                sessionMapper,
+                questionMapper,
+                attemptMapper,
+                ragService,
+                ttsService,
+                redisTemplate,
+                new InterviewDebugTraceService(new ObjectMapper()),
+                new ObjectMapper()
+        );
+
+        InterviewSession session = new InterviewSession();
+        session.setId(530L);
+        session.setCurrentQuestionNo(1);
+        session.setSyllabusJson(Map.of("domains", List.of()));
+        session.setStateLedgerJson(new LinkedHashMap<>(Map.of(
+                "asked_total", 1,
+                "quota_state", new LinkedHashMap<>(Map.of(
+                        "samePointContinue", 0,
+                        "sameDomainContinue", 0,
+                        "sameProjectPointContinue", 0,
+                        "sameProjectContinue", 0,
+                        "principleTotal", 1,
+                        "projectTotal", 0,
+                        "scenarioTotal", 0,
+                        "behavioralTotal", 0
+                )),
+                "interviewer_archetype", "stress"
+        )));
+
+        QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
+                .interviewAction("CONTINUE")
+                .effectiveDecisionSource("SYSTEM_FALLBACK")
+                .finalDecision("S_ENTER_BEHAVIORAL")
+                .targetQuestionType("BEHAVIORAL")
+                .nextFocus("一次你在协作中遇到分歧并推动结果的真实经历")
+                .targetDomainCode("")
+                .targetDomainName("")
+                .build();
+
+        Method method = QuestionStreamService.class.getDeclaredMethod(
+                "saveQuestion",
+                InterviewSession.class,
+                Long.class,
+                String.class,
+                QuestionStreamService.NextQuestionPlan.class,
+                String.class
+        );
+        method.setAccessible(true);
+
+        InterviewQuestion saved = (InterviewQuestion) method.invoke(
+                service,
+                session,
+                930L,
+                "attempt-930",
+                plan,
+                "请分享一次你在协作中遇到分歧并推动结果的真实经历。"
+        );
+
+        assertThat(saved.getDomainCode()).isEqualTo("behavioral");
+        assertThat(saved.getGenerationContextJson())
+                .containsEntry("domainCode", "behavioral")
+                .containsEntry("domainName", "行为题");
     }
 
     private QuestionStreamService newService() {

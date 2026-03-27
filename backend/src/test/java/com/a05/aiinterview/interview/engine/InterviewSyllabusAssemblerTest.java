@@ -16,8 +16,8 @@ class InterviewSyllabusAssemblerTest {
     private final InterviewSyllabusAssembler assembler = new InterviewSyllabusAssembler();
 
     @Test
-    @DisplayName("assemble should map domainId by domainCode and generate stable itemKey")
-    void assemble_shouldMapDomainIdAndGenerateStableItemKey() {
+    @DisplayName("assemble should keep canonical domainCode and generate stable itemKey")
+    void assemble_shouldKeepCanonicalDomainCodeAndGenerateStableItemKey() {
         PositionSkillDomain domain = new PositionSkillDomain();
         domain.setId(11L);
         domain.setDomainCode("redis");
@@ -43,14 +43,15 @@ class InterviewSyllabusAssemblerTest {
 
         assertThat(syllabus.getPlanningReasoning()).isEqualTo("按 JD 和真实项目规划。");
         assertThat(syllabus.getDomains()).hasSize(1);
-        assertThat(syllabus.getDomains().get(0).getDomainId()).isEqualTo(11L);
+        assertThat(syllabus.getDomains().get(0).getDomainCode()).isEqualTo("redis");
+        assertThat(syllabus.getDomains().get(0).getDomainName()).isEqualTo("Redis");
         assertThat(syllabus.getExperienceItems()).hasSize(1);
         assertThat(syllabus.getExperienceItems().get(0).getItemKey()).isEqualTo("project_cang_qiong_wai_mai");
     }
 
     @Test
-    @DisplayName("assemble should fallback to domain id or name when planner domainCode is invalid")
-    void assemble_shouldFallbackToDomainIdOrName() {
+    @DisplayName("assemble should discard planner domains with invalid canonical codes")
+    void assemble_shouldDiscardInvalidPlannerDomains() {
         PositionSkillDomain javaCore = new PositionSkillDomain();
         javaCore.setId(1L);
         javaCore.setDomainCode("java_core");
@@ -77,10 +78,6 @@ class InterviewSyllabusAssemblerTest {
 
         InterviewSyllabus syllabus = assembler.assemble(output, List.of(javaCore, redis));
 
-        assertThat(syllabus.getDomains()).hasSize(2);
-        assertThat(syllabus.getDomains().get(0).getDomainId()).isEqualTo(1L);
-        assertThat(syllabus.getDomains().get(0).getDomainCode()).isEqualTo("java_core");
-        assertThat(syllabus.getDomains().get(1).getDomainId()).isEqualTo(6L);
-        assertThat(syllabus.getDomains().get(1).getDomainCode()).isEqualTo("redis");
+        assertThat(syllabus.getDomains()).isEmpty();
     }
 }

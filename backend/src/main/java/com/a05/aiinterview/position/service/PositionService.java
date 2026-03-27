@@ -82,7 +82,7 @@ public class PositionService {
 
         List<SkillDomainDto> result = domains.stream()
                 .filter(d -> d.getVersion() == latestVersion)
-                .map(d -> new SkillDomainDto(d.getId(), d.getDomainCode(), d.getDomainName(), d.getDescription()))
+                .map(d -> new SkillDomainDto(d.getDomainCode(), d.getDomainName(), d.getDescription()))
                 .collect(Collectors.toList());
 
         log.info("查询岗位 {} 知识域完成，共 {} 个知识域（版本 v{}）", positionCode, result.size(), latestVersion);

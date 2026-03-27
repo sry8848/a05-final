@@ -35,7 +35,6 @@ class StateLedgerInitServiceTest {
         domain.setDomainName("Java Core");
 
         InterviewSyllabus.SyllabusDomain plan = new InterviewSyllabus.SyllabusDomain();
-        plan.setDomainId(1L);
         plan.setDomainCode("java_core");
         plan.setDomainName("Java Core");
 
@@ -68,7 +67,6 @@ class StateLedgerInitServiceTest {
                 "behavioralTotal", 0
         ));
         assertThat(ledger.get("domain_states")).isEqualTo(List.of(Map.of(
-                "domainId", 1L,
                 "domainCode", "java_core",
                 "domainName", "Java Core",
                 "status", "UNASKED",

@@ -103,8 +103,11 @@ public class QuestionRedoService {
         snapshot.put("questionNo", question.getQuestionNo());
         snapshot.put("questionStem", question.getStem());
         snapshot.put("questionType", question.getQuestionType());
-        snapshot.put("domainId", question.getDomainId());
-        snapshot.put("domainCode", QuestionDetailEvaluationInputFactory.extractDomainCode(question.getGenerationContextJson()));
+        String domainCode = QuestionDetailEvaluationInputFactory.extractDomainCode(question.getGenerationContextJson());
+        if (domainCode == null || domainCode.isBlank()) {
+            domainCode = question.getDomainCode();
+        }
+        snapshot.put("domainCode", domainCode);
         snapshot.put("domainName", questionDto != null ? questionDto.getDomainName() : "");
         snapshot.put("targetSkill", question.getTargetSkill());
         snapshot.put("expectedPoints", question.getExpectedPoints() != null ? question.getExpectedPoints() : List.of());

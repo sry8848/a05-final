@@ -31,7 +31,7 @@ class AnswerSubmitServiceEvaluationInputTest {
 
     @Test
     @DisplayName("buildCurrentQuestionContext should include domainCode for principle question")
-    void buildCurrentQuestionContext_shouldIncludeDomainCodeForPrincipleQuestion() {
+    void buildCurrentQuestionContext_shouldIncludeDomainCodeForPrincipleQuestion() throws Exception {
         AnswerSubmitService service = buildService();
 
         InterviewSession session = new InterviewSession();
@@ -40,7 +40,7 @@ class AnswerSubmitServiceEvaluationInputTest {
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
                         Map.of(
-                                "domainCode", "DOMAIN_SPRING",
+                                "domainCode", "spring",
                                 "domainName", "Spring 框架",
                                 "focusPoints", List.of("Seata AT 模式边界")
                         )
@@ -51,11 +51,10 @@ class AnswerSubmitServiceEvaluationInputTest {
         InterviewQuestion question = new InterviewQuestion();
         question.setId(101L);
         question.setQuestionType("PRINCIPLE");
-        question.setDomainId(4L);
         question.setStem("请解释 Seata AT 的边界。");
         question.setTargetSkill("Seata AT 模式边界");
         question.setGenerationContextJson(Map.of(
-                "domainCode", "DOMAIN_SPRING",
+                "domainCode", "spring",
                 "focusPoint", "Seata AT模式边界"
         ));
 
@@ -63,9 +62,12 @@ class AnswerSubmitServiceEvaluationInputTest {
                 ReflectionTestUtils.invokeMethod(service, "buildCurrentQuestionContext", session, question);
 
         assertThat(currentQuestion.getQuestionType()).isEqualTo("PRINCIPLE");
-        assertThat(currentQuestion.getDomainCode()).isEqualTo("DOMAIN_SPRING");
+        assertThat(currentQuestion.getDomainCode()).isEqualTo("spring");
         assertThat(currentQuestion.getDomainName()).isEqualTo("Spring 框架");
         assertThat(currentQuestion.getCurrentFocus()).isEqualTo("Seata AT模式边界");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> serialized = new ObjectMapper().convertValue(currentQuestion, Map.class);
+        assertThat(serialized).containsKeys("domainCode", "domainName", "currentFocus");
     }
 
     @Test
@@ -76,19 +78,19 @@ class AnswerSubmitServiceEvaluationInputTest {
         InterviewSession session = new InterviewSession();
         session.setStateLedgerJson(Map.of(
                 "domain_states", List.of(
-                        Map.of("domainCode", "DOMAIN_SPRING", "status", "COVERED"),
-                        Map.of("domainCode", "DOMAIN_REDIS", "status", "UNASKED")
+                        Map.of("domainCode", "spring", "status", "COVERED"),
+                        Map.of("domainCode", "redis", "status", "UNASKED")
                 )
         ));
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
                         Map.of(
-                                "domainCode", "DOMAIN_SPRING",
+                                "domainCode", "spring",
                                 "domainName", "Spring 框架",
                                 "focusPoints", List.of("事务传播")
                         ),
                         Map.of(
-                                "domainCode", "DOMAIN_REDIS",
+                                "domainCode", "redis",
                                 "domainName", "Redis 缓存",
                                 "focusPoints", List.of("缓存一致性")
                         )
@@ -98,7 +100,7 @@ class AnswerSubmitServiceEvaluationInputTest {
         List<EvaluationDecisionInput.RemainingTargetDomain> remaining = builder.build(session);
 
         assertThat(remaining).hasSize(1);
-        assertThat(remaining.getFirst().getDomainCode()).isEqualTo("DOMAIN_REDIS");
+        assertThat(remaining.getFirst().getDomainCode()).isEqualTo("redis");
         assertThat(remaining.getFirst().getDomainName()).isEqualTo("Redis 缓存");
     }
 
@@ -115,19 +117,19 @@ class AnswerSubmitServiceEvaluationInputTest {
                 "quota_state", QuotaStateSupport.initialQuotaState(),
                 "max_questions", 14,
                 "domain_states", List.of(
-                        Map.of("domainCode", "DOMAIN_SPRING", "status", "COVERED"),
-                        Map.of("domainCode", "DOMAIN_REDIS", "status", "UNASKED")
+                        Map.of("domainCode", "spring", "status", "COVERED"),
+                        Map.of("domainCode", "redis", "status", "UNASKED")
                 )
         ));
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
                         Map.of(
-                                "domainCode", "DOMAIN_SPRING",
+                                "domainCode", "spring",
                                 "domainName", "Spring 框架",
                                 "focusPoints", List.of("事务传播")
                         ),
                         Map.of(
-                                "domainCode", "DOMAIN_REDIS",
+                                "domainCode", "redis",
                                 "domainName", "Redis 缓存",
                                 "focusPoints", List.of("缓存一致性")
                         )
@@ -148,7 +150,7 @@ class AnswerSubmitServiceEvaluationInputTest {
         currentQuestion.setStem("请解释缓存击穿。");
         currentQuestion.setExpectedPoints(List.of("定义"));
         currentQuestion.setGenerationContextJson(Map.of(
-                "domainCode", "DOMAIN_REDIS",
+                "domainCode", "redis",
                 "focusPoint", "缓存击穿"
         ));
 
@@ -164,7 +166,7 @@ class AnswerSubmitServiceEvaluationInputTest {
 
         assertThat(input.getRemainingTargetDomains())
                 .extracting(EvaluationDecisionInput.RemainingTargetDomain::getDomainCode)
-                .containsExactly("DOMAIN_REDIS");
+                .containsExactly("redis");
         assertThat(input.getAvailableStrategies())
                 .extracting(EvaluationDecisionInput.AvailableStrategy::getStrategyCode)
                 .contains(
@@ -208,13 +210,13 @@ class AnswerSubmitServiceEvaluationInputTest {
                         QuotaStateSupport.PROJECT_TOTAL, 2
                 )),
                 "domain_states", List.of(
-                        Map.of("domainCode", "DOMAIN_REDIS", "status", "UNASKED")
+                        Map.of("domainCode", "redis", "status", "UNASKED")
                 )
         )));
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
                         Map.of(
-                                "domainCode", "DOMAIN_REDIS",
+                                "domainCode", "redis",
                                 "domainName", "Redis 缓存",
                                 "focusPoints", List.of("缓存一致性")
                         )
@@ -236,7 +238,7 @@ class AnswerSubmitServiceEvaluationInputTest {
         currentQuestion.setStem("请解释缓存击穿。");
         currentQuestion.setExpectedPoints(List.of("定义"));
         currentQuestion.setGenerationContextJson(Map.of(
-                "domainCode", "DOMAIN_REDIS",
+                "domainCode", "redis",
                 "focusPoint", "缓存击穿"
         ));
 
@@ -257,9 +259,9 @@ class AnswerSubmitServiceEvaluationInputTest {
                 QuotaStateSupport.PROJECT_TOTAL
         );
         assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.SAME_POINT_CONTINUE).getUsed()).isEqualTo(1);
-        assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.SAME_POINT_CONTINUE).getMax()).isEqualTo(1);
+        assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.SAME_POINT_CONTINUE).getMax()).isEqualTo(2);
         assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.PROJECT_TOTAL).getUsed()).isEqualTo(2);
-        assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.PROJECT_TOTAL).getMax()).isEqualTo(3);
+        assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.PROJECT_TOTAL).getMax()).isEqualTo(10);
         assertThat(session.getStateLedgerJson()).containsEntry("max_questions", 15);
 
         verify(sessionMapper).updateById(argThat(updated ->
@@ -272,7 +274,7 @@ class AnswerSubmitServiceEvaluationInputTest {
 
     @Test
     @DisplayName("buildRecentInterviewMemory should derive answerAssessment from decisionReason")
-    void buildRecentInterviewMemory_shouldDeriveAnswerAssessmentFromDecisionReason() {
+    void buildRecentInterviewMemory_shouldDeriveAnswerAssessmentFromDecisionReason() throws Exception {
         AnswerSubmitService service = buildService();
 
         InterviewSession session = new InterviewSession();
@@ -305,6 +307,9 @@ class AnswerSubmitServiceEvaluationInputTest {
         assertThat(memory).hasSize(1);
         assertThat(memory.getFirst().getAnswerSummary()).isEqualTo("我先解释原理，再补充边界。");
         assertThat(memory.getFirst().getAnswerAssessment()).isEqualTo("回答覆盖了主线原理，但边界条件还需要继续核实。");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> serialized = new ObjectMapper().convertValue(memory.getFirst(), Map.class);
+        assertThat(serialized).containsKeys("domainCode", "domainName", "focusPoint");
     }
 
     @Test
@@ -376,12 +381,12 @@ class AnswerSubmitServiceEvaluationInputTest {
         session.setStateLedgerJson(Map.of(
                 "quota_state", QuotaStateSupport.initialQuotaState(),
                 "max_questions", 14,
-                "domain_states", List.of(Map.of("domainCode", "DOMAIN_SPRING", "status", "UNASKED"))
+                "domain_states", List.of(Map.of("domainCode", "spring", "status", "UNASKED"))
         ));
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
                         Map.of(
-                                "domainCode", "DOMAIN_SPRING",
+                                "domainCode", "spring",
                                 "domainName", "Spring 框架",
                                 "focusPoints", List.of("事务传播")
                         )
@@ -443,7 +448,7 @@ class AnswerSubmitServiceEvaluationInputTest {
         currentQuestion.setStem("请解释缓存击穿。");
         currentQuestion.setExpectedPoints(List.of("定义"));
         currentQuestion.setGenerationContextJson(Map.of(
-                "domainCode", "DOMAIN_SPRING",
+                "domainCode", "spring",
                 "focusPoint", "缓存击穿"
         ));
 
@@ -496,12 +501,12 @@ class AnswerSubmitServiceEvaluationInputTest {
         session.setStateLedgerJson(Map.of(
                 "quota_state", QuotaStateSupport.initialQuotaState(),
                 "max_questions", 14,
-                "domain_states", List.of(Map.of("domainCode", "DOMAIN_SPRING", "status", "UNASKED"))
+                "domain_states", List.of(Map.of("domainCode", "spring", "status", "UNASKED"))
         ));
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
                         Map.of(
-                                "domainCode", "DOMAIN_SPRING",
+                                "domainCode", "spring",
                                 "domainName", "Spring 框架",
                                 "focusPoints", List.of("事务传播")
                         )

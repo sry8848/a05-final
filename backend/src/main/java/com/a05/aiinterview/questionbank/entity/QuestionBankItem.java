@@ -24,7 +24,7 @@ public class QuestionBankItem {
 
     private Long sessionId;
 
-    private Long domainId;
+    private String domainCode;
 
     private BigDecimal score;
 

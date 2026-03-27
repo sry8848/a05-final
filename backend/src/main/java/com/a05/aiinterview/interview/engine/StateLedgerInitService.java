@@ -48,7 +48,7 @@ public class StateLedgerInitService {
         List<SessionSkillState> states = syllabus.getDomains().stream().map(domain -> {
             SessionSkillState state = new SessionSkillState();
             state.setSessionId(sessionId);
-            state.setDomainId(domain.getDomainId());
+            state.setDomainCode(domain.getDomainCode());
             state.setStatus(DomainStatus.UNASKED.getSkillStateValue());
             state.setTestedCount(0);
             state.setSaturated(false);
@@ -63,8 +63,8 @@ public class StateLedgerInitService {
             try {
                 sessionSkillStateMapper.insert(state);
             } catch (DuplicateKeyException ex) {
-                log.warn("session_skill_states 已存在，忽略重复初始化, sessionId={}, domainId={}",
-                        sessionId, state.getDomainId());
+                log.warn("session_skill_states 已存在，忽略重复初始化, sessionId={}, domainCode={}",
+                        sessionId, state.getDomainCode());
             }
         }
 
@@ -98,7 +98,6 @@ public class StateLedgerInitService {
         if (syllabus.getDomains() != null) {
             syllabus.getDomains().forEach(d -> {
                 Map<String, Object> ds = new LinkedHashMap<>();
-                ds.put("domainId", d.getDomainId());
                 ds.put("domainCode", d.getDomainCode());
                 ds.put("domainName", d.getDomainName());
                 ds.put("status", DomainStatus.UNASKED.getValue());

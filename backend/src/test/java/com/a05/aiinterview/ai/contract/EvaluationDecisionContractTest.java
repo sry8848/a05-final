@@ -30,7 +30,7 @@ class EvaluationDecisionContractTest {
                   "targetDomainCode": "",
                   "newCoveredDomains": [
                     {
-                      "domainCode": "DOMAIN_SPRING",
+                      "domainCode": "spring",
                       "domainName": "Spring 框架"
                     }
                   ],
@@ -61,7 +61,7 @@ class EvaluationDecisionContractTest {
         assertThat(output.getNextItemName()).isEmpty();
         assertThat(output.getNextProjectPoint()).isEmpty();
         assertThat(output.getNewCoveredDomains()).hasSize(1);
-        assertThat(output.getNewCoveredDomains().getFirst().getDomainCode()).isEqualTo("DOMAIN_SPRING");
+        assertThat(output.getNewCoveredDomains().getFirst().getDomainCode()).isEqualTo("spring");
         assertThat(output.getNewCoveredDomains().getFirst().getDomainName()).isEqualTo("Spring 框架");
         assertThat(output.getNewCoveredPoints()).containsExactly("Seata AT 模式下全局事务与本地事务的协同边界");
         assertThat(output.getRetrievalPlans()).hasSize(1);
@@ -77,7 +77,7 @@ class EvaluationDecisionContractTest {
                   "interviewAction": "WRAPUP",
                   "finalDecision": "S_WRAPUP",
                   "nextFocus": "不应保留",
-                  "targetDomainCode": "DOMAIN_MYSQL",
+                  "targetDomainCode": "mysql",
                   "newCoveredDomains": [],
                   "newCoveredPoints": [],
                   "retrievalPlans": [
@@ -167,7 +167,7 @@ class EvaluationDecisionContractTest {
     }
 
     @Test
-    @DisplayName("newCoveredDomains 必须使用 domainCode")
+    @DisplayName("newCoveredDomains 缺少合法编码应降级为 WRAPUP")
     void newCoveredDomains_shouldUseDomainCode() {
         EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
                 {
@@ -178,7 +178,6 @@ class EvaluationDecisionContractTest {
                   "targetDomainCode": "",
                   "newCoveredDomains": [
                     {
-                      "domainId": 6,
                       "domainName": "Redis 缓存"
                     }
                   ],

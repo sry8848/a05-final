@@ -5,6 +5,7 @@ import com.a05.aiinterview.interview.entity.InterviewAttempt;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.entity.QuestionRedoAttempt;
+import com.a05.aiinterview.interview.service.support.InterviewDomainDisplaySupport;
 
 import java.util.List;
 import java.util.Map;
@@ -88,7 +89,7 @@ public final class QuestionDetailEvaluationInputFactory {
                 .filter(String.class::isInstance)
                 .map(String.class::cast)
                 .findFirst();
-        return name.orElse("");
+        return name.orElse(InterviewDomainDisplaySupport.resolveSpecialDomainName(domainCode));
     }
 
     @SuppressWarnings("unchecked")

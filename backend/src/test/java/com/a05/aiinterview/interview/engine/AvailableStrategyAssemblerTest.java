@@ -21,7 +21,7 @@ class AvailableStrategyAssemblerTest {
         List<EvaluationDecisionInput.AvailableStrategy> strategies = assembler.assemble(
                 "PRINCIPLE",
                 true,
-                remainingDomains("DOMAIN_REDIS"),
+                remainingDomains("redis"),
                 quotaState(),
                 "FRESH_GRAD"
         );
@@ -50,7 +50,7 @@ class AvailableStrategyAssemblerTest {
         List<EvaluationDecisionInput.AvailableStrategy> strategies = assembler.assemble(
                 "SCENARIO",
                 true,
-                remainingDomains("DOMAIN_MYSQL"),
+                remainingDomains("mysql"),
                 quotaState(),
                 "JUNIOR"
         );
@@ -82,7 +82,7 @@ class AvailableStrategyAssemblerTest {
         List<EvaluationDecisionInput.AvailableStrategy> strategies = assembler.assemble(
                 "BEHAVIORAL",
                 true,
-                remainingDomains("DOMAIN_JVM"),
+                remainingDomains("jvm"),
                 quotaState(),
                 "SENIOR"
         );
@@ -114,7 +114,7 @@ class AvailableStrategyAssemblerTest {
         List<EvaluationDecisionInput.AvailableStrategy> strategies = assembler.assemble(
                 "PRINCIPLE",
                 true,
-                remainingDomains("DOMAIN_REDIS"),
+                remainingDomains("redis"),
                 quotaState(
                         QuotaStateSupport.SAME_POINT_CONTINUE, 1,
                         QuotaStateSupport.SAME_DOMAIN_CONTINUE, 2,
@@ -148,7 +148,7 @@ class AvailableStrategyAssemblerTest {
         List<EvaluationDecisionInput.AvailableStrategy> strategies = assembler.assemble(
                 "PRINCIPLE",
                 false,
-                remainingDomains("DOMAIN_REDIS"),
+                remainingDomains("redis"),
                 quotaState(),
                 "MIDDLE"
         );
@@ -185,14 +185,14 @@ class AvailableStrategyAssemblerTest {
         List<EvaluationDecisionInput.AvailableStrategy> juniorStrategies = assembler.assemble(
                 "PRINCIPLE",
                 true,
-                remainingDomains("DOMAIN_REDIS"),
+                remainingDomains("redis"),
                 quotaState,
                 "JUNIOR"
         );
         List<EvaluationDecisionInput.AvailableStrategy> seniorStrategies = assembler.assemble(
                 "PRINCIPLE",
                 true,
-                remainingDomains("DOMAIN_REDIS"),
+                remainingDomains("redis"),
                 quotaState,
                 "SENIOR"
         );

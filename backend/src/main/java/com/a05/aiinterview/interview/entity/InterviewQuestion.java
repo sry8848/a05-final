@@ -28,12 +28,12 @@ public class InterviewQuestion {
     /** 题目类型：INTRO / PROJECT_DEEP_DIVE / SCENARIO / PRINCIPLE / BEHAVIORAL */
     private String questionType;
 
-    /** 主知识域 ID（position_skill_domains.id） */
-    private Long domainId;
+    /** 主知识域 code */
+    private String domainCode;
 
-    /** 副知识域 ID 列表（JSON 数组），可为空 */
+    /** 副知识域 code 列表（JSON 数组），可为空 */
     @TableField(typeHandler = JacksonTypeHandler.class)
-    private List<Long> secondaryDomainIds;
+    private List<String> secondaryDomainCodes;
 
     /** 题目正文 */
     private String stem;

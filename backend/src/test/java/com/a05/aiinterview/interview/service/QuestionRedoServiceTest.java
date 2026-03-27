@@ -45,7 +45,7 @@ class QuestionRedoServiceTest {
         session.setExperienceLevel("JUNIOR");
         session.setMode("practice");
         session.setSyllabusJson(Map.of(
-                "domains", List.of(Map.of("domainId", 6L, "domainCode", "browser", "domainName", "浏览器原理"))
+                "domains", List.of(Map.of("domainCode", "browser", "domainName", "浏览器原理"))
         ));
         when(sessionMapper.selectById(11L)).thenReturn(session);
 
@@ -54,7 +54,7 @@ class QuestionRedoServiceTest {
         question.setSessionId(11L);
         question.setQuestionNo(3);
         question.setQuestionType("PRINCIPLE");
-        question.setDomainId(6L);
+        question.setDomainCode("browser");
         question.setStem("请解释浏览器渲染流水线。");
         question.setTargetSkill("渲染流水线");
         question.setExpectedPoints(List.of("Parse", "Layout", "Paint"));

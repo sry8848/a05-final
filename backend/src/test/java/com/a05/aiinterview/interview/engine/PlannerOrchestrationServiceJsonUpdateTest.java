@@ -93,6 +93,8 @@ class PlannerOrchestrationServiceJsonUpdateTest {
                         && s.getStateLedgerJson() == ledger
                         && Integer.valueOf(1).equals(s.getStateLedgerJson().get("asked_total"))
                         && s.getFirstQuestionJson() != null
+                        && "intro".equals(s.getFirstQuestionJson().get("domainCode"))
+                        && "自我介绍".equals(s.getFirstQuestionJson().get("domainName"))
                         && s.getCurrentQuestionNo().equals(1)
                         && "in_progress".equals(s.getStatus())
                         && s.getStartedAt() != null
@@ -162,7 +164,7 @@ class PlannerOrchestrationServiceJsonUpdateTest {
                 syllabus != null
                         && syllabus.getDomains() != null
                         && syllabus.getDomains().size() == 5
-                        && syllabus.getDomains().stream().allMatch(domain -> domain.getDomainId() != null)
+                        && syllabus.getDomains().stream().allMatch(domain -> domain.getDomainCode() != null && !domain.getDomainCode().isBlank())
                         && syllabus.getDomains().stream().anyMatch(domain -> "redis".equals(domain.getDomainCode()))
         ), eq(domains));
         verify(firstQuestionGenerationService).generateAndSave(any(), any());
@@ -438,10 +440,12 @@ class PlannerOrchestrationServiceJsonUpdateTest {
         question.setId(101L);
         question.setQuestionNo(1);
         question.setQuestionType("INTRO");
+        question.setDomainCode("intro");
         question.setStem("请你先做一个简短的自我介绍。");
         question.setTargetSkill("沟通表达与项目概述");
 
         Map<String, Object> generationContext = new LinkedHashMap<>();
+        generationContext.put("domainCode", "intro");
         generationContext.put("aiResultStatus", "success");
         question.setGenerationContextJson(generationContext);
         return question;

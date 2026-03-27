@@ -83,6 +83,7 @@ class QuestionBankServiceTest {
         question.setStem("请解释线程池拒绝策略");
         question.setQuestionType("PRINCIPLE");
         question.setTargetSkill("并发");
+        question.setGenerationContextJson(Map.of("domainCode", "concurrency"));
         when(questionMapper.selectById(2L)).thenReturn(question);
 
         when(itemMapper.selectOne(any())).thenReturn(null);
@@ -107,8 +108,54 @@ class QuestionBankServiceTest {
         verify(itemMapper).insert(itemCaptor.capture());
         Map<String, Object> snapshot = itemCaptor.getValue().getSourceSnapshotJson();
         assertEquals("请解释线程池拒绝策略", snapshot.get("questionStem"));
+        assertEquals("concurrency", snapshot.get("domainCode"));
         assertEquals("PRINCIPLE", snapshot.get("questionType"));
         assertEquals("2026-03-01T09:00", snapshot.get("sourceCreatedAt"));
+        assertEquals(true, snapshot.containsKey("domainCode"));
+    }
+
+    @Test
+    void collect_shouldUseIntroDisplayNameForIntroQuestion() {
+        QuestionBankItemMapper itemMapper = mock(QuestionBankItemMapper.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewAttemptMapper attemptMapper = mock(InterviewAttemptMapper.class);
+        QuestionBankService service = new QuestionBankService(itemMapper, sessionMapper, questionMapper, attemptMapper);
+
+        InterviewSession session = new InterviewSession();
+        session.setId(1L);
+        session.setUserId(9L);
+        when(sessionMapper.selectById(1L)).thenReturn(session);
+
+        InterviewQuestion question = new InterviewQuestion();
+        question.setId(2L);
+        question.setSessionId(1L);
+        question.setQuestionType("INTRO");
+        question.setDomainCode("intro");
+        question.setStem("请先做一个简短的自我介绍");
+        question.setTargetSkill("沟通表达与项目概述");
+        question.setGenerationContextJson(Map.of("domainCode", "intro"));
+        when(questionMapper.selectById(2L)).thenReturn(question);
+
+        when(itemMapper.selectOne(any())).thenReturn(null);
+        doAnswer(invocation -> {
+            QuestionBankItem inserted = invocation.getArgument(0);
+            inserted.setId(124L);
+            return 1;
+        }).when(itemMapper).insert(any(QuestionBankItem.class));
+
+        QuestionBankCreateRequest request = new QuestionBankCreateRequest();
+        request.setSessionId(1L);
+        request.setQuestionId(2L);
+
+        QuestionBankItemDto dto = service.collect(9L, request);
+
+        assertEquals(124L, dto.getId());
+
+        ArgumentCaptor<QuestionBankItem> itemCaptor = ArgumentCaptor.forClass(QuestionBankItem.class);
+        verify(itemMapper).insert(itemCaptor.capture());
+        assertEquals("intro", itemCaptor.getValue().getDomainCode());
+        assertEquals("自我介绍", itemCaptor.getValue().getSourceSnapshotJson().get("domainName"));
     }
 
     @Test

@@ -169,7 +169,6 @@ public class InterviewService {
         session.setFocusTopics(request.getFocusTopics());
         session.setThinkTimeLimitSeconds(request.getThinkTimeLimitSeconds());
         session.setAnswerTimeLimitSeconds(request.getAnswerTimeLimitSeconds());
-        session.setPositionDomainVersion(1);
         session.setCurrentQuestionNo(0);
         session.setContextWindowSize(5);
         session.setStatus("planning");

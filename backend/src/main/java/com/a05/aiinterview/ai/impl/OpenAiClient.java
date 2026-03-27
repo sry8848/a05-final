@@ -691,7 +691,6 @@ public class OpenAiClient implements AiClient {
         goal.put("questionType", "");
         goal.put("nextFocus", "");
         goal.put("goalSummary", "");
-        goal.put("relatedDomainId", null);
         goal.put("relatedDomainCode", "");
         goal.put("relatedDomainName", "");
         goal.put("relatedItemKey", "");
@@ -929,8 +928,7 @@ public class OpenAiClient implements AiClient {
             if (!sb.isEmpty()) {
                 sb.append("\n");
             }
-            sb.append("- id=").append(domain.getDomainId())
-                    .append(", code=").append(safeString(domain.getDomainCode()))
+            sb.append("- code=").append(safeString(domain.getDomainCode()))
                     .append(", name=").append(safeString(domain.getDomainName()));
         }
         return sb.isEmpty() ? "- 无" : sb.toString();

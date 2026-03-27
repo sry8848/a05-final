@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
+import com.a05.aiinterview.interview.service.support.InterviewDomainDisplaySupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -170,7 +171,7 @@ public class FirstQuestionGenerationService {
         question.setSessionId(sessionId);
         question.setQuestionNo(questionNo);
         question.setQuestionType(INTRO_QUESTION_TYPE);
-        question.setDomainId(null);
+        question.setDomainCode(INTRO_DOMAIN_CODE);
         question.setStem(safePrompt(stem));
         question.setTargetSkill(INTRO_TARGET_SKILL);
         question.setExpectedPoints(INTRO_EXPECTED_POINTS);
@@ -178,6 +179,7 @@ public class FirstQuestionGenerationService {
 
         Map<String, Object> ctx = new LinkedHashMap<>();
         ctx.put("domainCode", INTRO_DOMAIN_CODE);
+        ctx.put("domainName", InterviewDomainDisplaySupport.resolveSpecialDomainName(INTRO_DOMAIN_CODE));
         ctx.put("questionType", INTRO_QUESTION_TYPE);
         ctx.put("variantId", selection.getVariantId());
         ctx.put("basePromptText", selection.getBasePrompt());

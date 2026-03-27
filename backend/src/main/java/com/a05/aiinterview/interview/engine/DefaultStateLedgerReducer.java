@@ -161,13 +161,7 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
                     continue;
                 }
                 result.put(domainCode, buildCoveredDomainEntry(domainCode, asString(map.get("domainName"))));
-                continue;
             }
-            String domainName = item == null ? "" : String.valueOf(item).trim();
-            if (domainName.isBlank()) {
-                continue;
-            }
-            result.putIfAbsent(domainName, buildCoveredDomainEntry(domainName, domainName));
         }
         return result;
     }

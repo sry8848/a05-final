@@ -31,9 +31,6 @@ public class InterviewSession {
     /** 目标岗位枚举值，如 JAVA_BACKEND */
     private String targetRole;
 
-    /** 本场采用的岗位知识域版本，用于兼容历史报告 */
-    private Integer positionDomainVersion;
-
     /** 工作年限分层枚举值，如 SENIOR */
     private String experienceLevel;
 

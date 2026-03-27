@@ -114,10 +114,10 @@ promptVersion: v2
   "nextItemType": "",
   "nextItemName": "",
   "nextProjectPoint": "",
-  "targetDomainCode": "DOMAIN_REDIS",
+  "targetDomainCode": "redis",
   "newCoveredDomains": [
     {
-      "domainCode": "DOMAIN_REDIS",
+      "domainCode": "redis",
       "domainName": "Redis 缓存"
     }
   ],

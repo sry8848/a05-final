@@ -49,12 +49,22 @@ class InterviewJsonMappersXmlMappingTest {
     void interviewQuestionMapper_shouldUseResultMapWithJsonTypeHandler() throws Exception {
         String xml = readResource("mapper/interview/InterviewQuestionMapper.xml");
         assertThat(xml).contains("resultMap id=\"InterviewQuestionResultMap\"");
-        assertThat(xml).contains("column=\"secondary_domain_ids\"");
+        assertThat(xml).contains("column=\"domain_code\"");
+        assertThat(xml).contains("column=\"secondary_domain_codes\"");
         assertThat(xml).contains("column=\"expected_points\"");
         assertThat(xml).contains("column=\"generation_context_json\"");
         assertThat(xml).contains("typeHandler=\"com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler\"");
         assertThat(xml).contains("select id=\"selectUserFirstIntroQuestions\"");
         assertThat(xml).contains("resultMap=\"InterviewQuestionResultMap\"");
+    }
+
+    @Test
+    @DisplayName("InterviewSessionMapper should not expose deprecated position domain version field")
+    void interviewSessionMapper_shouldNotExposePositionDomainVersion() throws Exception {
+        String xml = readResource("mapper/interview/InterviewSessionMapper.xml");
+        assertThat(xml).contains("resultMap id=\"InterviewSessionResultMap\"");
+        assertThat(xml).contains("state_ledger_json");
+        assertThat(xml).contains("syllabus_json");
     }
 
     private String readResource(String resourcePath) throws Exception {

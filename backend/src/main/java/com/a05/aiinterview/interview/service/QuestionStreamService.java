@@ -20,6 +20,7 @@ import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.interview.service.support.InterviewDomainDisplaySupport;
 import com.a05.aiinterview.rag.dto.RagContext;
 import com.a05.aiinterview.rag.dto.RagRetrievalRequest;
 import com.a05.aiinterview.rag.service.RagRetrievalService;
@@ -655,7 +656,6 @@ public class QuestionStreamService {
                         .questionType(firstNonBlank(plan.getTargetQuestionType(), "PRINCIPLE"))
                         .nextFocus(questionGoalFocus)
                         .goalSummary(buildGoalSummary(plan))
-                        .relatedDomainId(resolvedDomain.domainId)
                         .relatedDomainCode(resolvedDomain.domainCode)
                         .relatedDomainName(resolvedDomain.domainName)
                         .relatedItemKey(resolvedItem.itemKey)
@@ -704,7 +704,7 @@ public class QuestionStreamService {
         question.setSessionId(session.getId());
         question.setQuestionNo(nextQuestionNo);
         question.setQuestionType(questionType);
-        question.setDomainId(resolvedDomain.domainId);
+        question.setDomainCode(resolvedDomain.domainCode);
         question.setStem(stem);
         question.setTargetSkill(firstNonBlank(plan.getNextProjectPoint(), plan.getNextFocus(), resolvedDomain.domainName));
         question.setExpectedPoints(List.of());
@@ -764,12 +764,18 @@ public class QuestionStreamService {
                                                 InterviewQuestion currentQuestion,
                                                 String questionType,
                                                 ResolvedDomain resolvedDomain) {
-        if (!"PRINCIPLE".equalsIgnoreCase(questionType)) {
-            return resolvedDomain;
-        }
         if (resolvedDomain != null
                 && resolvedDomain.domainCode() != null && !resolvedDomain.domainCode().isBlank()
                 && resolvedDomain.domainName() != null && !resolvedDomain.domainName().isBlank()) {
+            return resolvedDomain;
+        }
+        if (!"PRINCIPLE".equalsIgnoreCase(questionType)) {
+            InterviewDomainDisplaySupport.DomainIdentity specialDomain =
+                    InterviewDomainDisplaySupport.resolveSpecialDomainForQuestionType(questionType);
+            if (specialDomain.domainCode() != null && !specialDomain.domainCode().isBlank()
+                    && specialDomain.domainName() != null && !specialDomain.domainName().isBlank()) {
+                return new ResolvedDomain(specialDomain.domainCode(), specialDomain.domainName());
+            }
             return resolvedDomain;
         }
         ResolvedDomain recovered = recoverPrincipleDomain(currentQuestion, session);
@@ -788,33 +794,12 @@ public class QuestionStreamService {
                     ? ""
                     : toStr(currentQuestion.getGenerationContextJson().get("domainName"));
             if (!currentCode.isBlank() && !currentName.isBlank()) {
-                return new ResolvedDomain(currentQuestion.getDomainId(), currentCode, currentName);
+                return new ResolvedDomain(currentCode, currentName);
             }
-            if (currentQuestion.getDomainId() != null) {
-                ResolvedDomain fromCode = resolveRelatedDomainFromCode(
-                        session,
-                        currentCode,
-                        currentName
-                );
+            if (!currentCode.isBlank()) {
+                ResolvedDomain fromCode = resolveRelatedDomainFromCode(session, currentCode, currentName);
                 if (!fromCode.domainCode().isBlank() && !fromCode.domainName().isBlank()) {
                     return fromCode;
-                }
-                if (session != null && session.getSyllabusJson() != null) {
-                    Object rawDomains = session.getSyllabusJson().get("domains");
-                    if (rawDomains instanceof List<?> domains) {
-                        for (Object domainObj : domains) {
-                            if (!(domainObj instanceof Map<?, ?> domain)) {
-                                continue;
-                            }
-                            if (Objects.equals(currentQuestion.getDomainId(), toLong(domain.get("domainId")))) {
-                                return new ResolvedDomain(
-                                        currentQuestion.getDomainId(),
-                                        firstNonBlank(toStr(domain.get("domainCode")), currentCode),
-                                        firstNonBlank(toStr(domain.get("domainName")), currentName)
-                                );
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -1179,7 +1164,6 @@ public class QuestionStreamService {
                     }
                     if (Objects.equals(domainCode, toStr(domain.get("domainCode")))) {
                         return new ResolvedDomain(
-                                toLong(domain.get("domainId")),
                                 firstNonBlank(toStr(domain.get("domainCode")), domainCode),
                                 firstNonBlank(toStr(domain.get("domainName")), domainName)
                         );
@@ -1187,7 +1171,7 @@ public class QuestionStreamService {
                 }
             }
         }
-        return new ResolvedDomain(null, firstNonBlank(domainCode, ""), firstNonBlank(domainName, ""));
+        return new ResolvedDomain(firstNonBlank(domainCode, ""), firstNonBlank(domainName, ""));
     }
 
     private List<String> toStringList(Object value) {
@@ -1223,9 +1207,14 @@ public class QuestionStreamService {
     }
 
     private String resolveDomainCode(InterviewQuestion q) {
-        if (q.getGenerationContextJson() == null) return "";
+        if (q.getGenerationContextJson() == null) {
+            return q.getDomainCode() == null ? "" : q.getDomainCode();
+        }
         Object code = q.getGenerationContextJson().get("domainCode");
-        return code instanceof String s ? s : "";
+        if (code instanceof String s && !s.isBlank()) {
+            return s;
+        }
+        return q.getDomainCode() == null ? "" : q.getDomainCode();
     }
 
     private String toStr(Object val) {
@@ -1247,11 +1236,11 @@ public class QuestionStreamService {
     @SuppressWarnings("unchecked")
     private ResolvedDomain resolveRelatedDomain(InterviewSession session, String nextFocus) {
         if (session == null || session.getSyllabusJson() == null) {
-            return new ResolvedDomain(null, "", "");
+            return new ResolvedDomain("", "");
         }
         Object raw = session.getSyllabusJson().get("domains");
         if (!(raw instanceof List<?> domains)) {
-            return new ResolvedDomain(null, "", "");
+            return new ResolvedDomain("", "");
         }
         String normalizedFocus = nextFocus == null ? "" : nextFocus.trim().toLowerCase(Locale.ROOT);
         for (Object domainObj : domains) {
@@ -1262,7 +1251,7 @@ public class QuestionStreamService {
             String domainName = toStr(copied.get("domainName"));
             if (domainName != null && !normalizedFocus.isBlank()
                     && normalizedFocus.contains(domainName.toLowerCase(Locale.ROOT))) {
-                return new ResolvedDomain(toLong(copied.get("domainId")), toStr(copied.get("domainCode")), domainName);
+                return new ResolvedDomain(toStr(copied.get("domainCode")), domainName);
             }
             Object focusPointsObj = copied.get("focusPoints");
             if (focusPointsObj instanceof List<?> focusPoints) {
@@ -1270,12 +1259,12 @@ public class QuestionStreamService {
                     String focusPoint = focusPointObj == null ? "" : String.valueOf(focusPointObj);
                     if (!normalizedFocus.isBlank()
                             && focusPoint.toLowerCase(Locale.ROOT).contains(normalizedFocus)) {
-                        return new ResolvedDomain(toLong(copied.get("domainId")), toStr(copied.get("domainCode")), domainName);
+                        return new ResolvedDomain(toStr(copied.get("domainCode")), domainName);
                     }
                 }
             }
         }
-        return new ResolvedDomain(null, "", "");
+        return new ResolvedDomain("", "");
     }
 
     private ResolvedItem resolveActiveItem(InterviewSession session, NextQuestionPlan plan) {
@@ -1357,7 +1346,7 @@ public class QuestionStreamService {
         private List<EvaluationDecisionOutput.RetrievalPlan> retrievalPlans;
     }
 
-    private record ResolvedDomain(Long domainId, String domainCode, String domainName) {
+    private record ResolvedDomain(String domainCode, String domainName) {
     }
 
     private record ResolvedItem(String itemKey, String itemType, String itemName) {

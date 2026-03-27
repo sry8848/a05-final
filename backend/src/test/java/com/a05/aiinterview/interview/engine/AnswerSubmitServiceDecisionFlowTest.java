@@ -173,7 +173,7 @@ class AnswerSubmitServiceDecisionFlowTest {
         ledger.put("quota_state", QuotaStateSupport.initialQuotaState());
         ledger.put("covered_points", List.of());
         ledger.put("domain_states", List.of(
-                Map.of("domainCode", "DOMAIN_REDIS", "status", "UNASKED")
+                Map.of("domainCode", "redis", "status", "UNASKED")
         ));
         ledger.put("max_questions", 20);
         ledger.putAll(extraLedger);
@@ -189,7 +189,7 @@ class AnswerSubmitServiceDecisionFlowTest {
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
                         Map.of(
-                                "domainCode", "DOMAIN_REDIS",
+                                "domainCode", "redis",
                                 "domainName", "Redis 缓存",
                                 "focusPoints", List.of("缓存一致性")
                         )
@@ -206,7 +206,7 @@ class AnswerSubmitServiceDecisionFlowTest {
         question.setStem("解释缓存一致性");
         question.setExpectedPoints(List.of("双删"));
         question.setGenerationContextJson(Map.of(
-                "domainCode", "DOMAIN_REDIS",
+                "domainCode", "redis",
                 "domainName", "Redis 缓存",
                 "focusPoint", "缓存一致性"
         ));

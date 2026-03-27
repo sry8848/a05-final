@@ -152,14 +152,13 @@ public class StateLedgerPatchService {
                                       String domainCode,
                                       Map<String, Object> newLedger,
                                       Long evidenceQuestionId) {
-        Long currentDomainId = resolveCurrentDomainId(newLedger, domainCode);
-        if (currentDomainId == null) {
+        if (domainCode == null || domainCode.isBlank()) {
             return;
         }
         SessionSkillState existing = sessionSkillStateMapper.selectOne(
                 new LambdaQueryWrapper<SessionSkillState>()
                         .eq(SessionSkillState::getSessionId, sessionId)
-                        .eq(SessionSkillState::getDomainId, currentDomainId));
+                        .eq(SessionSkillState::getDomainCode, domainCode));
         if (existing == null) {
             return;
         }
@@ -248,38 +247,8 @@ public class StateLedgerPatchService {
         if (!domainCode.isBlank()) {
             return domainCode;
         }
-        if (question != null && question.getDomainId() != null) {
-            String fromSyllabus = resolveDomainCodeFromSyllabus(session, question.getDomainId());
-            if (!fromSyllabus.isBlank()) {
-                return fromSyllabus;
-            }
-        }
-        return "";
-    }
-
-    private Long resolveCurrentDomainId(Map<String, Object> ledger, String domainCode) {
-        Map<String, Object> domainState = findDomainState(ledger, domainCode);
-        if (domainState == null) {
-            return null;
-        }
-        return toLong(domainState.get("domainId"));
-    }
-
-    private String resolveDomainCodeFromSyllabus(InterviewSession session, Long domainId) {
-        if (session == null || session.getSyllabusJson() == null || domainId == null) {
-            return "";
-        }
-        Object rawDomains = session.getSyllabusJson().get("domains");
-        if (!(rawDomains instanceof List<?> domains)) {
-            return "";
-        }
-        for (Object domainObj : domains) {
-            if (!(domainObj instanceof Map<?, ?> domain)) {
-                continue;
-            }
-            if (Objects.equals(domainId, toLong(domain.get("domainId")))) {
-                return asString(domain.get("domainCode"));
-            }
+        if (question != null && question.getDomainCode() != null && !question.getDomainCode().isBlank()) {
+            return question.getDomainCode();
         }
         return "";
     }

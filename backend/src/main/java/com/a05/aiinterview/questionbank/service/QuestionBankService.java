@@ -6,6 +6,7 @@ import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.interview.service.support.InterviewDomainDisplaySupport;
 import com.a05.aiinterview.questionbank.dto.QuestionBankCreateRequest;
 import com.a05.aiinterview.questionbank.dto.QuestionBankItemDto;
 import com.a05.aiinterview.questionbank.dto.QuestionBankPageDto;
@@ -59,6 +60,7 @@ public class QuestionBankService {
 
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("questionStem", question.getStem());
+        snapshot.put("domainCode", resolveDomainCode(question));
         snapshot.put("domainName", resolveDomainName(session, question));
         snapshot.put("questionType", question.getQuestionType());
         snapshot.put("answerSummary", summarizeAnswer(latestAttempt != null ? latestAttempt.getAnswerText() : null));
@@ -68,7 +70,7 @@ public class QuestionBankService {
         item.setUserId(userId);
         item.setSessionId(request.getSessionId());
         item.setQuestionId(request.getQuestionId());
-        item.setDomainId(question.getDomainId());
+        item.setDomainCode(resolveDomainCode(question));
         item.setScore(score);
         item.setTag(StringUtils.hasText(request.getTag()) ? request.getTag().trim() : null);
         item.setSourceSnapshotJson(snapshot);
@@ -200,14 +202,16 @@ public class QuestionBankService {
     }
 
     private String resolveDomainName(InterviewSession session, InterviewQuestion question) {
+        if (question != null && question.getGenerationContextJson() != null) {
+            Object contextDomainName = question.getGenerationContextJson().get("domainName");
+            if (contextDomainName instanceof String s && StringUtils.hasText(s)) {
+                return s;
+            }
+        }
         if (session != null && session.getSyllabusJson() != null) {
             Object domainsObj = session.getSyllabusJson().get("domains");
             if (domainsObj instanceof List<?> domains) {
-                String domainCode = null;
-                if (question.getGenerationContextJson() != null) {
-                    Object code = question.getGenerationContextJson().get("domainCode");
-                    domainCode = code instanceof String ? (String) code : null;
-                }
+                String domainCode = resolveDomainCode(question);
                 if (StringUtils.hasText(domainCode)) {
                     for (Object domain : domains) {
                         if (!(domain instanceof Map<?, ?> dm)) {
@@ -223,10 +227,25 @@ public class QuestionBankService {
                 }
             }
         }
+        String specialDomainName = InterviewDomainDisplaySupport.resolveSpecialDomainName(resolveDomainCode(question));
+        if (StringUtils.hasText(specialDomainName)) {
+            return specialDomainName;
+        }
         if (StringUtils.hasText(question.getTargetSkill())) {
             return question.getTargetSkill();
         }
         return "unknown";
+    }
+
+    private String resolveDomainCode(InterviewQuestion question) {
+        if (question == null || question.getGenerationContextJson() == null) {
+            return question == null ? null : question.getDomainCode();
+        }
+        Object code = question.getGenerationContextJson().get("domainCode");
+        if (code instanceof String s && StringUtils.hasText(s)) {
+            return s;
+        }
+        return question.getDomainCode();
     }
 
     private String toStr(Object obj) {

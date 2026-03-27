@@ -23,7 +23,7 @@ class DecisionExecutionPlanBuilderTest {
         InterviewQuestion currentQuestion = new InterviewQuestion();
         currentQuestion.setQuestionType("PRINCIPLE");
         currentQuestion.setGenerationContextJson(Map.of(
-                "domainCode", "DOMAIN_REDIS",
+                "domainCode", "redis",
                 "domainName", "Redis 缓存"
         ));
 
@@ -47,7 +47,7 @@ class DecisionExecutionPlanBuilderTest {
 
         assertThat(result.isValid()).isTrue();
         assertThat(result.getPlan()).isNotNull();
-        assertThat(result.getPlan().getTargetDomainCode()).isEqualTo("DOMAIN_REDIS");
+        assertThat(result.getPlan().getTargetDomainCode()).isEqualTo("redis");
         assertThat(result.getPlan().getTargetDomainName()).isEqualTo("Redis 缓存");
         assertThat(result.getPlan().getTargetQuestionType()).isEqualTo("PRINCIPLE");
     }
@@ -72,7 +72,7 @@ class DecisionExecutionPlanBuilderTest {
                 currentQuestion,
                 output,
                 List.of(EvaluationDecisionInput.RemainingTargetDomain.builder()
-                        .domainCode("DOMAIN_REDIS")
+                        .domainCode("redis")
                         .domainName("Redis 缓存")
                         .focusPoints(List.of("持久化"))
                         .build()),

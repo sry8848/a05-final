@@ -154,7 +154,7 @@ JD 内容：
 候选人希望重点考察：
 {{focusTopics}}
 
-岗位涵盖的知识域列表（domainId、domainCode、domainName）：
+岗位涵盖的知识域列表（domainCode、domainName）：
 {{domains}}
 
 历史面试记录：

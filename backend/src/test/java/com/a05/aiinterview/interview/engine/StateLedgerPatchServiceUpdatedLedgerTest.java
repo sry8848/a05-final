@@ -93,6 +93,16 @@ class StateLedgerPatchServiceUpdatedLedgerTest {
         assertThat(newLedger.get("current_focus")).isEqualTo("缓存击穿");
     }
 
+    @Test
+    void reduce_shouldDropLegacyStringCoveredDomains() {
+        Map<String, Object> oldLedger = baseLedger();
+        oldLedger.put("covered_domains", List.of("redis", "mysql"));
+
+        Map<String, Object> newLedger = reducer.reduce(oldLedger, LedgerMutation.builder().build(), "attempt-legacy-1", null);
+
+        assertThat(newLedger.get("covered_domains")).isEqualTo(List.of());
+    }
+
     private Map<String, Object> baseLedger() {
         Map<String, Object> ledger = new LinkedHashMap<>();
         ledger.put("overall_status", "IN_PROGRESS");
@@ -117,7 +127,6 @@ class StateLedgerPatchServiceUpdatedLedgerTest {
         )));
         ledger.put("domain_states", List.of(
                 new LinkedHashMap<>(Map.of(
-                        "domainId", 6L,
                         "domainCode", "redis",
                         "domainName", "Redis",
                         "status", "UNASKED",

@@ -22,17 +22,17 @@ class RemainingDomainMenuBuilderTest {
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
                         Map.of(
-                                "domainCode", "DOMAIN_JAVA_CORE",
+                                "domainCode", "java_core",
                                 "domainName", "Java 核心基础",
                                 "focusPoints", List.of("HashMap 扩容")
                         ),
                         Map.of(
-                                "domainCode", "DOMAIN_REDIS",
+                                "domainCode", "redis",
                                 "domainName", "Redis 缓存",
                                 "focusPoints", List.of("缓存一致性")
                         ),
                         Map.of(
-                                "domainCode", "DOMAIN_MYSQL",
+                                "domainCode", "mysql",
                                 "domainName", "MySQL 数据库",
                                 "focusPoints", List.of("间隙锁")
                         )
@@ -40,14 +40,14 @@ class RemainingDomainMenuBuilderTest {
         ));
         session.setStateLedgerJson(Map.of(
                 "domain_states", List.of(
-                        Map.of("domainCode", "DOMAIN_REDIS", "status", "COVERED")
+                        Map.of("domainCode", "redis", "status", "COVERED")
                 )
         ));
 
         List<EvaluationDecisionInput.RemainingTargetDomain> remaining = builder.build(session);
 
         assertThat(remaining).extracting(EvaluationDecisionInput.RemainingTargetDomain::getDomainCode)
-                .containsExactly("DOMAIN_JAVA_CORE", "DOMAIN_MYSQL");
+                .containsExactly("java_core", "mysql");
         assertThat(remaining.getFirst().getFocusPoints()).containsExactly("HashMap 扩容");
         assertThat(remaining.get(1).getFocusPoints()).containsExactly("间隙锁");
     }

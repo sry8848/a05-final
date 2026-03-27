@@ -14,6 +14,7 @@ import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.interview.service.support.InterviewDomainDisplaySupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -240,7 +241,6 @@ public class AnswerSubmitService {
         return EvaluationDecisionInput.CurrentQuestionContext.builder()
                 .stem(currentQuestion.getStem())
                 .questionType(currentQuestion.getQuestionType())
-                .domainId(currentQuestion.getDomainId())
                 .domainCode(resolveDomainCode(currentQuestion))
                 .domainName(resolveDomainName(currentQuestion, session))
                 .currentFocus(resolvePromptFocusPoint(currentQuestion))
@@ -274,7 +274,7 @@ public class AnswerSubmitService {
                     return EvaluationDecisionInput.RecentInterviewMemoryItem.builder()
                             .questionNo(question.getQuestionNo())
                             .questionType(question.getQuestionType())
-                            .domainId(question.getDomainId())
+                            .domainCode(resolveDomainCode(question))
                             .domainName(resolveDomainName(question, session))
                             .focusPoint(resolvePromptFocusPoint(question))
                             .relatedItemKey(asString(ctx.get("activeItemKey")))
@@ -471,17 +471,26 @@ public class AnswerSubmitService {
 
     private String resolveDomainCode(InterviewQuestion question) {
         if (question.getGenerationContextJson() == null) {
-            return "";
+            return question.getDomainCode() == null ? "" : question.getDomainCode();
         }
         Object domainCode = question.getGenerationContextJson().get("domainCode");
-        return domainCode instanceof String code ? code : "";
+        if (domainCode instanceof String code && !code.isBlank()) {
+            return code;
+        }
+        return question.getDomainCode() == null ? "" : question.getDomainCode();
     }
 
     @SuppressWarnings("unchecked")
     private String resolveDomainName(InterviewQuestion question, InterviewSession session) {
         String domainCode = resolveDomainCode(question);
-        if (domainCode.isBlank() && question.getDomainId() == null) {
+        if (domainCode.isBlank()) {
             return "";
+        }
+        if (question.getGenerationContextJson() != null) {
+            Object rawDomainName = question.getGenerationContextJson().get("domainName");
+            if (rawDomainName instanceof String s && !s.isBlank()) {
+                return s;
+            }
         }
         if (session.getSyllabusJson() != null) {
             Object raw = session.getSyllabusJson().get("domains");
@@ -495,6 +504,10 @@ public class AnswerSubmitService {
                     }
                 }
             }
+        }
+        String specialDomainName = InterviewDomainDisplaySupport.resolveSpecialDomainName(domainCode);
+        if (!specialDomainName.isBlank()) {
+            return specialDomainName;
         }
         return domainCode;
     }

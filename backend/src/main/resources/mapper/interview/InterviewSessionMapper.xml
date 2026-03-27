@@ -10,7 +10,6 @@
         <result column="resume_id" property="resumeId"/>
         <result column="title" property="title"/>
         <result column="target_role" property="targetRole"/>
-        <result column="position_domain_version" property="positionDomainVersion"/>
         <result column="experience_level" property="experienceLevel"/>
         <result column="mode" property="mode"/>
         <result column="job_description" property="jobDescription"/>

@@ -15,6 +15,28 @@
 
 `docker compose --profile tools run --rm db-init` 也是按这个顺序执行。
 
+注意：
+
+- `db-init` 只用于初始化全新数据库，不负责彻底重置已有开发库
+- 如果要彻底重置开发环境，必须先 `DROP DATABASE ai_interview`，再重新执行初始化顺序
+
+## 重建开发库
+
+当前 SQL 初始化链路包含：
+
+- `01-create-database.sql` 只执行 `CREATE DATABASE IF NOT EXISTS`
+- 多个 schema 文件使用 `CREATE TABLE IF NOT EXISTS`
+
+因此，直接重复执行 `db-init` 不能保证清掉旧表、旧列和旧 JSON 污染。
+
+推荐重建方式：
+
+1. 停掉会持续连库的本地服务进程
+2. 删除开发库 `ai_interview`
+3. 重新执行 `docker compose --profile tools run --rm db-init`
+
+如果不使用 Docker，也应在删库后按上面的 6 个 SQL 顺序重新执行。
+
 ## 当前实际表
 
 ### `schema-auth.sql`
@@ -34,7 +56,18 @@
 
 - `position_skill_domains`
 
-同时包含岗位知识域种子数据。
+同时包含岗位知识域种子数据。当前 `JAVA_BACKEND` 固定为唯一一套 10 域定义：
+
+- `java_core`
+- `concurrency`
+- `jvm`
+- `mysql`
+- `redis`
+- `spring`
+- `mq`
+- `microservice`
+- `distributed`
+- `cs_basics`
 
 ### `schema-question-bank.sql`
 
@@ -89,6 +122,11 @@
 - `description`
 - `sort_order`
 
+说明：
+
+- 当前 Java 后端只保留唯一一套知识域定义，不做 v1/v2 并存
+- 当前阶段 `version` 字段保留，但 `JAVA_BACKEND` 只使用 `version=1`
+
 ### `interview_preferences`
 
 记录用户最近一次面试准备偏好：
@@ -128,8 +166,8 @@
 
 - `question_no`
 - `question_type`
-- `domain_id`
-- `secondary_domain_ids`
+- `domain_code`
+- `secondary_domain_codes`
 - `stem`
 - `target_skill`
 - `expected_points`
@@ -186,7 +224,7 @@
 - `user_id`
 - `question_id`
 - `session_id`
-- `domain_id`
+- `domain_code`
 - `score`
 - `tag`
 - `source_snapshot_json`

@@ -19,6 +19,12 @@
 5. `schema-question-bank.sql`
 6. `schema-interview-v2.sql`
 
+说明：
+
+- `db-init` 用于初始化全新数据库
+- 如果需要彻底重置开发环境，必须先执行 `DROP DATABASE ai_interview`
+- 删除数据库后，再按以上顺序重跑全部初始化脚本
+
 增量迁移：
 
 1. `alter-interview-attempts-add-detail-evaluation.sql`

@@ -46,7 +46,6 @@ class StateLedgerPatchServiceSkillStateSyncTest {
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
                         Map.of(
-                                "domainId", 6L,
                                 "domainCode", "redis",
                                 "domainName", "Redis"
                         )
@@ -57,7 +56,7 @@ class StateLedgerPatchServiceSkillStateSyncTest {
         SessionSkillState existing = new SessionSkillState();
         existing.setId(99L);
         existing.setSessionId(1L);
-        existing.setDomainId(6L);
+        existing.setDomainCode("redis");
         existing.setStatus(DomainStatus.UNASKED.getSkillStateValue());
         existing.setTestedCount(0);
         existing.setSaturated(false);
@@ -152,7 +151,6 @@ class StateLedgerPatchServiceSkillStateSyncTest {
         )));
         ledger.put("domain_states", List.of(
                 new LinkedHashMap<>(Map.of(
-                        "domainId", 6L,
                         "domainCode", "redis",
                         "domainName", "Redis",
                         "status", "UNASKED",

@@ -31,7 +31,7 @@ class DecisionRepairOrchestratorTest {
         InterviewQuestion currentQuestion = new InterviewQuestion();
         currentQuestion.setQuestionType("PRINCIPLE");
         currentQuestion.setGenerationContextJson(java.util.Map.of(
-                "domainCode", "DOMAIN_REDIS",
+                "domainCode", "redis",
                 "domainName", "Redis 缓存"
         ));
 
@@ -40,7 +40,7 @@ class DecisionRepairOrchestratorTest {
                 .currentQuestionId(11L)
                 .currentQuestion(EvaluationDecisionInput.CurrentQuestionContext.builder()
                         .questionType("PRINCIPLE")
-                        .domainCode("DOMAIN_REDIS")
+                        .domainCode("redis")
                         .domainName("Redis 缓存")
                         .build())
                 .answerText("回答")

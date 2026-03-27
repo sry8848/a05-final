@@ -104,7 +104,6 @@ public class EvaluationDecisionInput {
     public static class CurrentQuestionContext {
         private String stem;
         private String questionType;
-        private Long domainId;
         private String domainCode;
         private String domainName;
         private String currentFocus;
@@ -131,7 +130,7 @@ public class EvaluationDecisionInput {
     public static class RecentInterviewMemoryItem {
         private Integer questionNo;
         private String questionType;
-        private Long domainId;
+        private String domainCode;
         private String domainName;
         private String focusPoint;
         private String relatedItemKey;

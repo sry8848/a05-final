@@ -9,6 +9,7 @@ import com.a05.aiinterview.interview.dto.InterviewSyllabus;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.interview.service.support.InterviewDomainDisplaySupport;
 import com.a05.aiinterview.position.entity.PositionSkillDomain;
 import com.a05.aiinterview.position.service.PositionService;
 import com.a05.aiinterview.resume.mapper.ResumeMapper;
@@ -193,7 +194,6 @@ public class PlannerOrchestrationService {
                                            List<PositionSkillDomain> domains) {
         List<PlannerInput.DomainInfo> domainInfos = domains.stream()
                 .map(d -> PlannerInput.DomainInfo.builder()
-                        .domainId(d.getId())
                         .domainCode(d.getDomainCode())
                         .domainName(d.getDomainName())
                         .build())
@@ -219,27 +219,47 @@ public class PlannerOrchestrationService {
      * 包含题目 ID、题号、题型、知识域名称等前端展示所需字段。
      */
     private Map<String, Object> buildFirstQuestionSnapshot(InterviewQuestion q, List<PositionSkillDomain> domains) {
-        // 根据 domainId 查找知识域名称
-        String domainName = null;
-        if (q.getDomainId() != null) {
-            domainName = domains.stream()
-                    .filter(d -> d.getId().equals(q.getDomainId()))
-                    .findFirst()
-                    .map(PositionSkillDomain::getDomainName)
-                    .orElse(null);
+        String domainCode = q.getDomainCode();
+        String contextDomainName = null;
+        if (q.getGenerationContextJson() != null) {
+            Object rawDomainName = q.getGenerationContextJson().get("domainName");
+            if (rawDomainName instanceof String s && !s.isBlank()) {
+                contextDomainName = s;
+            }
         }
+        String domainName = firstNonBlank(
+                contextDomainName,
+                domains.stream()
+                        .filter(d -> Objects.equals(d.getDomainCode(), domainCode))
+                        .findFirst()
+                        .map(PositionSkillDomain::getDomainName)
+                        .orElse(null),
+                InterviewDomainDisplaySupport.resolveSpecialDomainName(domainCode)
+        );
 
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("questionId", q.getId());
         snapshot.put("questionNo", q.getQuestionNo());
         snapshot.put("questionType", q.getQuestionType());
-        snapshot.put("domainId", q.getDomainId());
+        snapshot.put("domainCode", domainCode);
         snapshot.put("domainName", domainName);
         snapshot.put("stem", q.getStem());
         snapshot.put("targetSkill", q.getTargetSkill());
         snapshot.put("aiResultStatus", resolveAiResultStatus(q));
         snapshot.put("hintAvailable", true);
         return snapshot;
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private String resolveAiResultStatus(InterviewQuestion question) {

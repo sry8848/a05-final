@@ -22,7 +22,6 @@ public class InterviewSyllabus {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class SyllabusDomain {
-        private Long domainId;
         private String domainCode;
         private String domainName;
         private List<String> focusPoints;

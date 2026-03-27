@@ -19,8 +19,8 @@ public class QuestionDto {
     @Schema(description = "题目类型枚举值", example = "INTRO")
     private String questionType;
 
-    @Schema(description = "主知识域 ID", example = "1")
-    private Long domainId;
+    @Schema(description = "主知识域 code", example = "java_core")
+    private String domainCode;
 
     @Schema(description = "主知识域中文名", example = "Java 核心基础")
     private String domainName;

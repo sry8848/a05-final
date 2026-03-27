@@ -22,8 +22,8 @@ public class SessionSkillState {
     /** 所属面试会话 ID */
     private Long sessionId;
 
-    /** 关联的知识域 ID（position_skill_domains.id） */
-    private Long domainId;
+    /** 关联的知识域 code */
+    private String domainCode;
 
     /** 考察状态：uncovered / in_progress / covered / circuit_broken */
     private String status;

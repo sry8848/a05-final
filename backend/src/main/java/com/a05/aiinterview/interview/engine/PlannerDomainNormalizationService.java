@@ -9,7 +9,6 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -109,53 +108,23 @@ public class PlannerDomainNormalizationService {
                 + ", domainName=" + Objects.toString(domainName, "");
     }
 
-    private record DomainLookup(Map<String, PositionSkillDomain> byCode,
-                                Map<String, PositionSkillDomain> byIdText,
-                                Map<String, PositionSkillDomain> byName) {
+    private record DomainLookup(Map<String, PositionSkillDomain> byCode) {
 
         static DomainLookup from(List<PositionSkillDomain> domains) {
             Map<String, PositionSkillDomain> byCode = new LinkedHashMap<>();
-            Map<String, PositionSkillDomain> byIdText = new LinkedHashMap<>();
-            Map<String, PositionSkillDomain> byName = new LinkedHashMap<>();
             for (PositionSkillDomain domain : domains) {
                 if (domain.getDomainCode() != null && !domain.getDomainCode().isBlank()) {
                     byCode.put(domain.getDomainCode(), domain);
                 }
-                if (domain.getId() != null) {
-                    byIdText.put(String.valueOf(domain.getId()), domain);
-                }
-                String normalizedName = normalizeName(domain.getDomainName());
-                if (normalizedName != null) {
-                    byName.put(normalizedName, domain);
-                }
             }
-            return new DomainLookup(byCode, byIdText, byName);
+            return new DomainLookup(byCode);
         }
 
         PositionSkillDomain resolve(PlannerOutput.DomainPlan plannerDomain) {
             String rawCode = plannerDomain.getDomainCode();
-            if (rawCode != null && !rawCode.isBlank()) {
-                PositionSkillDomain byCanonicalCode = byCode.get(rawCode);
-                if (byCanonicalCode != null) {
-                    return byCanonicalCode;
-                }
-                PositionSkillDomain byNumericId = byIdText.get(rawCode.trim());
-                if (byNumericId != null) {
-                    return byNumericId;
-                }
-            }
-            String normalizedName = normalizeName(plannerDomain.getDomainName());
-            return normalizedName == null ? null : byName.get(normalizedName);
-        }
-
-        private static String normalizeName(String value) {
-            if (value == null || value.isBlank()) {
-                return null;
-            }
-            return value.trim()
-                    .replace('\u3000', ' ')
-                    .replaceAll("\\s+", " ")
-                    .toLowerCase(Locale.ROOT);
+            return rawCode == null || rawCode.isBlank()
+                    ? null
+                    : byCode.get(rawCode.trim());
         }
     }
 

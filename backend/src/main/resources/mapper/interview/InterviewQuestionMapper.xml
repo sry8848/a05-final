@@ -9,9 +9,9 @@
         <result column="session_id" property="sessionId"/>
         <result column="question_no" property="questionNo"/>
         <result column="question_type" property="questionType"/>
-        <result column="domain_id" property="domainId"/>
-        <result column="secondary_domain_ids"
-                property="secondaryDomainIds"
+        <result column="domain_code" property="domainCode"/>
+        <result column="secondary_domain_codes"
+                property="secondaryDomainCodes"
                 typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
         <result column="stem" property="stem"/>
         <result column="target_skill" property="targetSkill"/>

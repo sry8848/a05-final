@@ -126,6 +126,29 @@ class PlannerDomainNormalizationServiceTest {
     }
 
     @Test
+    @DisplayName("numeric id or localized name should not be treated as legal domain code")
+    void normalize_shouldRejectNumericIdAndNameFallback() {
+        PlannerOutput output = PlannerOutput.builder()
+                .planningReasoning("test")
+                .domains(List.of(
+                        domain("21", "Java 核心基础", List.of("泛型")),
+                        domain("", "Redis 缓存", List.of("缓存一致性"))
+                ))
+                .experienceItems(List.of())
+                .build();
+
+        PlannerDomainNormalizationService.NormalizationResult result = service.normalize(output, buildAllowedDomains());
+
+        assertThat(result.droppedDomains()).containsExactly(
+                "domainCode=21, domainName=Java 核心基础",
+                "domainCode=, domainName=Redis 缓存"
+        );
+        assertThat(result.normalizedOutput().getDomains())
+                .extracting(PlannerOutput.DomainPlan::getDomainCode)
+                .containsExactly("java_core", "concurrency", "jvm", "spring", "mysql");
+    }
+
+    @Test
     @DisplayName("when allowed domains are empty should continue with empty domains")
     void normalize_shouldReturnEmptyWhenAllowedDomainsMissing() {
         PlannerOutput output = PlannerOutput.builder()

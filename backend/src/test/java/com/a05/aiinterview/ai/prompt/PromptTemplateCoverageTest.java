@@ -25,7 +25,7 @@ class PromptTemplateCoverageTest {
                 Map.entry("jd", "负责高并发订单系统研发。"),
                 Map.entry("resumeText", "候选人负责订单、支付和缓存优化。"),
                 Map.entry("focusTopics", "并发、缓存"),
-                Map.entry("domains", "- id=1, code=concurrency, name=并发编程"),
+                Map.entry("domains", "- code=concurrency, name=并发编程"),
                 Map.entry("historyInterviews", "[]")
         ));
 
@@ -50,7 +50,7 @@ class PromptTemplateCoverageTest {
                 Map.entry("roleContext", "{\"roundType\":\"\",\"style\":\"guiding\"}"),
                 Map.entry("projectContext", "{\"activeItemKey\":\"item_order\",\"itemType\":\"PROJECT\",\"itemName\":\"订单系统\",\"currentFocus\":\"线程池调优\"}"),
                 Map.entry("recentContext", "{\"lastQuestion\":\"线程池参数怎么配？\",\"lastAnswerSummary\":\"候选人讲了核心参数，但拒绝策略和容量评估偏空。\",\"recentTurnsSummary\":\"最近两轮都在项目主线内追问。\",\"lastAnswerHighlights\":[\"corePoolSize\",\"队列容量\"]}"),
-                Map.entry("nextQuestionGoal", "{\"questionType\":\"PRINCIPLE\",\"nextFocus\":\"拒绝策略与容量评估\",\"goalSummary\":\"继续验证线程池在项目里的取舍能力\",\"relatedDomainId\":1,\"relatedDomainCode\":\"concurrency\",\"relatedDomainName\":\"Concurrency\",\"relatedItemKey\":\"item_order\",\"relatedItemType\":\"PROJECT\",\"relatedItemName\":\"订单系统\",\"expectedAnswerPoints\":[\"拒绝策略\",\"容量评估\"]}"),
+                Map.entry("nextQuestionGoal", "{\"questionType\":\"PRINCIPLE\",\"nextFocus\":\"拒绝策略与容量评估\",\"goalSummary\":\"继续验证线程池在项目里的取舍能力\",\"relatedDomainCode\":\"concurrency\",\"relatedDomainName\":\"Concurrency\",\"relatedItemKey\":\"item_order\",\"relatedItemType\":\"PROJECT\",\"relatedItemName\":\"订单系统\",\"expectedAnswerPoints\":[\"拒绝策略\",\"容量评估\"]}"),
                 Map.entry("retrievalContext", "{\"summary\":\"无外部参考资料，请严格依赖你自身的工程师知识库进行出题。\",\"retrievalPlans\":[],\"retrievedMaterials\":[]}"),
                 Map.entry("constraints", "{\"avoidRepetitionFamilies\":[\"concurrency.threadpool.definition\"],\"mustSoundNatural\":true,\"maxSentences\":2}"),
                 Map.entry("positionCode", "JAVA_BACKEND"),
@@ -92,12 +92,12 @@ class PromptTemplateCoverageTest {
   项目仍然是当前信息密度最高的入口。
 """),
                 Map.entry("remainingTargetDomains", """
-1. Redis 缓存（domainCode: DOMAIN_REDIS）
+1. Redis 缓存（domainCode: redis）
 - 关联知识点：缓存击穿、缓存一致性
-2. MySQL 数据库（domainCode: DOMAIN_MYSQL）
+2. MySQL 数据库（domainCode: mysql）
 - 关联知识点：幻读与间隙锁、覆盖索引
 """),
-                Map.entry("currentQuestion", "{\"stem\":\"你刚才提到 Seata AT 模式，那具体讲讲全局事务和本地事务的边界。\",\"questionType\":\"PRINCIPLE\",\"domainCode\":\"DOMAIN_SPRING\",\"domainName\":\"Spring 框架\",\"currentFocus\":\"Seata AT事务边界\",\"relatedItemKey\":\"\",\"relatedItemType\":\"\",\"relatedItemName\":\"\"}"),
+                Map.entry("currentQuestion", "{\"stem\":\"你刚才提到 Seata AT 模式，那具体讲讲全局事务和本地事务的边界。\",\"questionType\":\"PRINCIPLE\",\"domainCode\":\"spring\",\"domainName\":\"Spring 框架\",\"currentFocus\":\"Seata AT事务边界\",\"relatedItemKey\":\"\",\"relatedItemType\":\"\",\"relatedItemName\":\"\"}"),
                 Map.entry("answerText", "回答内容"),
                 Map.entry("expectedPoints", "- 参数含义\n- 调优思路"),
                 Map.entry("projectAndInternshipSummary", "[{\"itemType\":\"PROJECT\",\"itemName\":\"订单系统\",\"resumeDescription\":\"负责订单链路\",\"techHooks\":[\"线程池调优\"],\"blockedEntryPoints\":[\"Redis 缓存一致性\"]}]"),
@@ -118,7 +118,7 @@ class PromptTemplateCoverageTest {
         assertThat(rendered.getUserPrompt())
                 .contains("Seata AT 模式")
                 .contains("主考纲剩余待考察域（菜单）")
-                .contains("DOMAIN_REDIS")
+                .contains("redis")
                 .contains("S_J_PRESSURE")
                 .contains("S_ENTER_PROJECT")
                 .contains("当前题号")
@@ -148,12 +148,12 @@ class PromptTemplateCoverageTest {
                 .contains("`targetDomainCode` 必须从【主考纲剩余待考察域（菜单）】中选择一个合法的 `domainCode`")
                 .contains("绝不能写成完整问句")
                 .contains("绝不允许把下一题准备问的知识点提前预支写进去")
-                .contains("\"domainCode\": \"DOMAIN_REDIS\"")
+                .contains("\"domainCode\": \"redis\"")
                 .doesNotContain("candidateStrategies")
                 .doesNotContain("expectedAnswerPoints")
                 .doesNotContain("nextQuestionType")
                 .doesNotContain("nextEntryAction")
-                .doesNotContain("\"domainId\":");
+                .doesNotContain("DOMAIN_");
     }
 
     @Test

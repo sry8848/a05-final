@@ -2,6 +2,7 @@ package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.contract.StrategyCode;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
+import com.a05.aiinterview.interview.service.support.InterviewDomainDisplaySupport;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -37,6 +38,8 @@ public class SystemFallbackPlanBuilder {
                                                    InterviewQuestion currentQuestion,
                                                    int rotationIndex) {
         FallbackDimension dimension = resolveDimension(sessionId, rotationIndex);
+        InterviewDomainDisplaySupport.DomainIdentity behavioralDomain =
+                InterviewDomainDisplaySupport.resolveSpecialDomainForQuestionType("BEHAVIORAL");
         String currentType = currentQuestion == null || currentQuestion.getQuestionType() == null
                 ? ""
                 : currentQuestion.getQuestionType().trim().toUpperCase();
@@ -48,8 +51,8 @@ public class SystemFallbackPlanBuilder {
                 .strategyCode(strategyCode)
                 .targetQuestionType("BEHAVIORAL")
                 .nextFocus(dimension.focus())
-                .targetDomainCode("")
-                .targetDomainName("")
+                .targetDomainCode(behavioralDomain.domainCode())
+                .targetDomainName(behavioralDomain.domainName())
                 .newCoveredDomains(List.of())
                 .newCoveredPoints(List.of())
                 .retrievalPlans(List.of())

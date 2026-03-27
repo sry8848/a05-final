@@ -74,7 +74,6 @@ public class QuestionGenerationInput {
         private String questionType;
         private String nextFocus;
         private String goalSummary;
-        private Long relatedDomainId;
         private String relatedDomainCode;
         private String relatedDomainName;
         private String relatedItemKey;

@@ -39,7 +39,7 @@ class InterviewServiceCurrentQuestionDetailTest {
         ));
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
-                        Map.of("domainId", 6L, "domainCode", "redis", "domainName", "Redis")
+                        Map.of("domainCode", "redis", "domainName", "Redis")
                 )
         ));
 
@@ -48,7 +48,7 @@ class InterviewServiceCurrentQuestionDetailTest {
         currentQuestion.setSessionId(10L);
         currentQuestion.setQuestionNo(2);
         currentQuestion.setQuestionType("PROJECT_DEEP_DIVE");
-        currentQuestion.setDomainId(6L);
+        currentQuestion.setDomainCode("redis");
         currentQuestion.setStem("结合项目讲讲缓存击穿的治理。");
         currentQuestion.setTargetSkill("缓存击穿");
 
@@ -83,7 +83,7 @@ class InterviewServiceCurrentQuestionDetailTest {
         currentQuestion.setSessionId(20L);
         currentQuestion.setQuestionNo(1);
         currentQuestion.setQuestionType("PRINCIPLE");
-        currentQuestion.setDomainId(null);
+        currentQuestion.setDomainCode(null);
         currentQuestion.setStem("请讲讲事件循环。");
         currentQuestion.setTargetSkill("前端基础");
         currentQuestion.setGenerationContextJson(Map.of("domainName", "前端基础"));
@@ -98,6 +98,39 @@ class InterviewServiceCurrentQuestionDetailTest {
         assertEquals("PRINCIPLE", detail.getCurrentQuestion().getQuestionType());
         assertEquals("前端基础", detail.getCurrentQuestion().getDomainName());
         assertEquals("前端基础", detail.getCurrentQuestion().getTargetSkill());
+    }
+
+    @Test
+    void getSessionDetail_shouldExposeIntroDomainNameWhenFirstQuestionRecordExists() {
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewQuestionMapper questionMapper = mock(InterviewQuestionMapper.class);
+        InterviewService service = newService(sessionMapper, questionMapper);
+
+        InterviewSession session = new InterviewSession();
+        session.setId(25L);
+        session.setUserId(1L);
+        session.setStatus("in_progress");
+        session.setCurrentQuestionNo(1);
+        session.setSyllabusJson(Map.of("domains", List.of()));
+
+        InterviewQuestion currentQuestion = new InterviewQuestion();
+        currentQuestion.setId(351L);
+        currentQuestion.setSessionId(25L);
+        currentQuestion.setQuestionNo(1);
+        currentQuestion.setQuestionType("INTRO");
+        currentQuestion.setDomainCode("intro");
+        currentQuestion.setStem("请先做一个简短的自我介绍");
+        currentQuestion.setTargetSkill("沟通表达与项目概述");
+        currentQuestion.setGenerationContextJson(Map.of("domainCode", "intro"));
+
+        when(sessionMapper.selectById(25L)).thenReturn(session);
+        when(questionMapper.selectOne(any())).thenReturn(currentQuestion);
+
+        InterviewDetailDto detail = service.getSessionDetail(25L, 1L);
+
+        assertNotNull(detail.getCurrentQuestion());
+        assertEquals("intro", detail.getCurrentQuestion().getDomainCode());
+        assertEquals("自我介绍", detail.getCurrentQuestion().getDomainName());
     }
 
     @Test

@@ -2,11 +2,11 @@ package com.a05.aiinterview.interview.dto;
 
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
+import com.a05.aiinterview.interview.service.support.InterviewDomainDisplaySupport;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * 题目 DTO / 快照组装工具。
@@ -24,7 +24,7 @@ public final class QuestionDtoAssembler {
         dto.setQuestionId(question.getId());
         dto.setQuestionNo(question.getQuestionNo());
         dto.setQuestionType(question.getQuestionType());
-        dto.setDomainId(question.getDomainId());
+        dto.setDomainCode(question.getDomainCode());
         dto.setDomainName(resolveDomainName(question, session));
         dto.setStem(question.getStem());
         dto.setTargetSkill(question.getTargetSkill());
@@ -41,7 +41,7 @@ public final class QuestionDtoAssembler {
         dto.setQuestionId(toLong(snapshot.get("questionId")));
         dto.setQuestionNo(toInt(snapshot.get("questionNo")));
         dto.setQuestionType(toStr(snapshot.get("questionType")));
-        dto.setDomainId(toLong(snapshot.get("domainId")));
+        dto.setDomainCode(toStr(snapshot.get("domainCode")));
         dto.setDomainName(toStr(snapshot.get("domainName")));
         dto.setStem(toStr(snapshot.get("stem")));
         dto.setTargetSkill(toStr(snapshot.get("targetSkill")));
@@ -63,7 +63,7 @@ public final class QuestionDtoAssembler {
         snapshot.put("questionId", dto.getQuestionId());
         snapshot.put("questionNo", dto.getQuestionNo());
         snapshot.put("questionType", dto.getQuestionType());
-        snapshot.put("domainId", dto.getDomainId());
+        snapshot.put("domainCode", dto.getDomainCode());
         snapshot.put("domainName", dto.getDomainName());
         snapshot.put("stem", dto.getStem());
         snapshot.put("targetSkill", dto.getTargetSkill());
@@ -78,42 +78,18 @@ public final class QuestionDtoAssembler {
             return contextDomainName;
         }
 
-        if (question.getDomainId() != null) {
-            String syllabusDomainName = resolveDomainNameFromSyllabus(session, question.getDomainId());
+        String canonicalDomainCode = firstNonBlank(
+                readContextString(question, "domainCode"),
+                question.getDomainCode()
+        );
+        if (hasText(canonicalDomainCode)) {
+            String syllabusDomainName = resolveDomainNameFromSyllabusByCode(session, canonicalDomainCode);
             if (hasText(syllabusDomainName)) {
                 return syllabusDomainName;
             }
-        }
-
-        String contextDomainCode = readContextString(question, "domainCode");
-        if (hasText(contextDomainCode)) {
-            String syllabusDomainName = resolveDomainNameFromSyllabusByCode(session, contextDomainCode);
-            if (hasText(syllabusDomainName)) {
-                return syllabusDomainName;
-            }
-        }
-
-        if ("INTRO".equalsIgnoreCase(toStr(question.getQuestionType()))) {
-            return "";
-        }
-        return "";
-    }
-
-    @SuppressWarnings("unchecked")
-    private static String resolveDomainNameFromSyllabus(InterviewSession session, Long domainId) {
-        if (session == null || session.getSyllabusJson() == null) {
-            return "";
-        }
-        Object domainsObj = session.getSyllabusJson().get("domains");
-        if (!(domainsObj instanceof List<?> domains)) {
-            return "";
-        }
-        for (Object domainObj : domains) {
-            if (!(domainObj instanceof Map<?, ?> domainMap)) {
-                continue;
-            }
-            if (Objects.equals(toLong(domainMap.get("domainId")), domainId)) {
-                return toStr(domainMap.get("domainName"));
+            String specialDomainName = InterviewDomainDisplaySupport.resolveSpecialDomainName(canonicalDomainCode);
+            if (hasText(specialDomainName)) {
+                return specialDomainName;
             }
         }
         return "";
@@ -152,6 +128,18 @@ public final class QuestionDtoAssembler {
 
     private static boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (hasText(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private static Long toLong(Object val) {

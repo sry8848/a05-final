@@ -24,7 +24,6 @@ public class PlannerInput {
     @Data
     @Builder
     public static class DomainInfo {
-        private Long domainId;
         private String domainCode;
         private String domainName;
     }

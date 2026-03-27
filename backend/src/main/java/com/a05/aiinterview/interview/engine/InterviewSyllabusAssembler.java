@@ -28,8 +28,6 @@ public class InterviewSyllabusAssembler {
     private List<InterviewSyllabus.SyllabusDomain> buildDomains(List<PlannerOutput.DomainPlan> plannerDomains,
                                                                 List<PositionSkillDomain> allDomains) {
         Map<String, PositionSkillDomain> domainByCode = new LinkedHashMap<>();
-        Map<String, PositionSkillDomain> domainByIdText = new LinkedHashMap<>();
-        Map<String, PositionSkillDomain> domainByName = new LinkedHashMap<>();
         if (allDomains != null) {
             for (PositionSkillDomain domain : allDomains) {
                 if (domain == null) {
@@ -37,13 +35,6 @@ public class InterviewSyllabusAssembler {
                 }
                 if (domain.getDomainCode() != null && !domain.getDomainCode().isBlank()) {
                     domainByCode.put(domain.getDomainCode(), domain);
-                }
-                if (domain.getId() != null) {
-                    domainByIdText.put(String.valueOf(domain.getId()), domain);
-                }
-                String normalizedName = normalizeDomainName(domain.getDomainName());
-                if (normalizedName != null) {
-                    domainByName.put(normalizedName, domain);
                 }
             }
         }
@@ -56,11 +47,13 @@ public class InterviewSyllabusAssembler {
             if (plannerDomain == null) {
                 continue;
             }
-            PositionSkillDomain matchedDomain = resolveDomain(plannerDomain, domainByCode, domainByIdText, domainByName);
+            PositionSkillDomain matchedDomain = resolveDomain(plannerDomain, domainByCode);
+            if (matchedDomain == null) {
+                continue;
+            }
             InterviewSyllabus.SyllabusDomain domain = new InterviewSyllabus.SyllabusDomain();
-            domain.setDomainCode(matchedDomain != null ? matchedDomain.getDomainCode() : plannerDomain.getDomainCode());
-            domain.setDomainName(matchedDomain != null ? matchedDomain.getDomainName() : plannerDomain.getDomainName());
-            domain.setDomainId(matchedDomain != null ? matchedDomain.getId() : null);
+            domain.setDomainCode(matchedDomain.getDomainCode());
+            domain.setDomainName(matchedDomain.getDomainName());
             domain.setFocusPoints(plannerDomain.getFocusPoints() != null
                     ? plannerDomain.getFocusPoints()
                     : List.of());
@@ -70,36 +63,12 @@ public class InterviewSyllabusAssembler {
     }
 
     private PositionSkillDomain resolveDomain(PlannerOutput.DomainPlan plannerDomain,
-                                              Map<String, PositionSkillDomain> domainByCode,
-                                              Map<String, PositionSkillDomain> domainByIdText,
-                                              Map<String, PositionSkillDomain> domainByName) {
+                                              Map<String, PositionSkillDomain> domainByCode) {
         String domainCode = plannerDomain.getDomainCode();
         if (domainCode != null && !domainCode.isBlank()) {
-            PositionSkillDomain byCode = domainByCode.get(domainCode);
-            if (byCode != null) {
-                return byCode;
-            }
-            PositionSkillDomain byId = domainByIdText.get(domainCode.trim());
-            if (byId != null) {
-                return byId;
-            }
-        }
-
-        String normalizedName = normalizeDomainName(plannerDomain.getDomainName());
-        if (normalizedName != null) {
-            return domainByName.get(normalizedName);
+            return domainByCode.get(domainCode.trim());
         }
         return null;
-    }
-
-    private String normalizeDomainName(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        return value.trim()
-                .replace('\u3000', ' ')
-                .replaceAll("\\s+", " ")
-                .toLowerCase(Locale.ROOT);
     }
 
     private List<InterviewSyllabus.SyllabusExperienceItem> buildExperienceItems(
