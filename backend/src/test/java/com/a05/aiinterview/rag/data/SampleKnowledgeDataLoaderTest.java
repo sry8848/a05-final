@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -15,36 +14,37 @@ import static org.mockito.Mockito.mock;
 @DisplayName("SampleKnowledgeDataLoader tests")
 class SampleKnowledgeDataLoaderTest {
 
-    private static final Set<String> JAVA_BACKEND_DOMAIN_CODES = Set.of(
-            "java_core",
-            "concurrency",
-            "jvm",
-            "mysql",
-            "redis",
-            "spring",
-            "mq",
-            "microservice",
-            "distributed",
-            "cs_basics"
-    );
-
     @Test
-    @DisplayName("sample documents should use canonical Java backend position and domain codes")
+    @DisplayName("sample documents should cover the planned question types and new card fields")
     @SuppressWarnings("unchecked")
-    void sampleDocuments_shouldUseCanonicalJavaBackendPositionAndDomainCodes() {
+    void sampleDocuments_shouldCoverPlannedQuestionTypesAndNewCardFields() {
         SampleKnowledgeDataLoader loader = new SampleKnowledgeDataLoader(mock(KnowledgeIngestionService.class));
 
         List<KnowledgeDocument> samples = (List<KnowledgeDocument>) ReflectionTestUtils
                 .invokeMethod(loader, "buildSampleDocuments");
 
         assertThat(samples)
-                .isNotEmpty()
+                .hasSize(7)
                 .allSatisfy(sample -> {
-                    assertThat(sample.getPositionCode()).isEqualTo("JAVA_BACKEND");
-                    assertThat(sample.getDomainCode()).isIn(JAVA_BACKEND_DOMAIN_CODES);
+                    assertThat(sample.getId()).isNotBlank();
+                    assertThat(sample.getQuestionText()).isNotBlank();
+                    assertThat(sample.getIntentConcept()).isNotBlank();
+                    assertThat(sample.getReferenceContext()).isNotBlank();
+                    assertThat(sample.getScoringKeyPoints()).isNotEmpty();
+                    assertThat(sample.getDomain()).isNotBlank();
+                    assertThat(sample.getQuestionType()).isNotBlank();
+                    assertThat(sample.getDifficulty()).startsWith("L");
+                    assertThat(sample.getKeywords()).isNotEmpty();
+                    assertThat(sample.getSource()).isEqualTo("manual_curated");
+                    assertThat(sample.isActive()).isTrue();
+                    assertThat(sample.getVersion()).isEqualTo("v1");
                 });
+
         assertThat(samples)
-                .extracting(KnowledgeDocument::getDomainCode)
-                .contains("concurrency", "jvm");
+                .extracting(KnowledgeDocument::getQuestionType)
+                .contains("PRINCIPLE", "SCENARIO", "BEHAVIORAL", "PROJECT");
+        assertThat(samples)
+                .extracting(KnowledgeDocument::getDomain)
+                .contains("java_core", "redis", "distributed", "behavioral");
     }
 }
