@@ -24,7 +24,7 @@
   - `scoring_key_points`
   - `scoring_pitfalls`
   - `follow_up_ids`
-  - `domain`
+  - `domainCode`
   - `question_type`
   - `difficulty`
   - `keywords`
@@ -42,6 +42,7 @@
   - `avoidClues`
 - `difficultyHint` 是 AI 对目标难度的提示，不是硬过滤条件。
 - 运行时仍保留候选人 `experienceLevel`，但只作为检索编译和重排参考，不直接替代题卡 `difficulty`。
+- `BEHAVIORAL` 题卡默认不绑定 Java 后端知识域时，`domainCode` 应输出 `""`，不能使用 `behavior`、`behavioral` 等伪编码。
 - 难度口径统一为三层，不允许继续混用：
   - `experienceLevel`：候选人资历层级，只用于节奏、题型配额、初始预期范围
   - `difficulty`：题目卡片本身的认知深度，唯一合法取值为 `L1-L5`
@@ -278,7 +279,7 @@ git commit -m "refactor: align interview retrieval brief schema with single-corp
 
 验证入库后的 metadata 至少包含：
 - `question_id`
-- `domain`
+- `domainCode`
 - `question_type`
 - `difficulty`
 - `keywords`
@@ -302,7 +303,7 @@ git commit -m "refactor: align interview retrieval brief schema with single-corp
 - `scoringKeyPoints`
 - `scoringPitfalls`
 - `followUpIds`
-- `domain`
+- `domainCode`
 - `questionType`
 - `difficulty`
 - `keywords`
@@ -372,7 +373,7 @@ git commit -m "feat: remodel interview rag knowledge cards"
 - `positionCode`
 - `questionType`
 - `experienceLevel`
-- `domain`
+- `domainCode`
 - `projectName`
 - `mustHaveClues`
 - `avoidClues`
@@ -424,7 +425,7 @@ git commit -m "feat: compile interview retrieval briefs into single-corpus reque
 - [ ] **Step 1: 先写失败的检索服务测试**
 
 至少覆盖：
-- metadata filter 能按 `question_type`、`domain` 缩小范围
+- metadata filter 能按 `question_type`、`domain_code` 缩小范围
 - `keywordQueries` 能参与检索，不会被丢弃
 - `avoidClues` 对明显无关结果有降权或剔除效果
 - 命中题卡时可以带出 `follow_up_ids`

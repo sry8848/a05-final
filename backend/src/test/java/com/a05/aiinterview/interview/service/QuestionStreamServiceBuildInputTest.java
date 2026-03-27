@@ -314,7 +314,7 @@ class QuestionStreamServiceBuildInputTest {
         session.setId(300L);
         session.setSyllabusJson(Map.of(
                 "domains", List.of(
-                        Map.of("domainCode", "behavior", "domainName", "协作沟通")
+                        Map.of("domainCode", "redis", "domainName", "Redis")
                 )
         ));
 
@@ -323,7 +323,7 @@ class QuestionStreamServiceBuildInputTest {
         question.setSessionId(300L);
         question.setQuestionNo(4);
         question.setQuestionType("BEHAVIORAL");
-        question.setDomainCode("behavior");
+        question.setDomainCode("");
         question.setStem("请分享一次跨团队推动方案落地的经历。");
         question.setGenerationContextJson(Map.of("focusPoint", "跨团队协作"));
 
@@ -355,7 +355,8 @@ class QuestionStreamServiceBuildInputTest {
         assertThat(payload.getQuestion().getQuestionId()).isEqualTo(501L);
         assertThat(payload.getQuestion().getQuestionNo()).isEqualTo(4);
         assertThat(payload.getQuestion().getQuestionType()).isEqualTo("BEHAVIORAL");
-        assertThat(payload.getQuestion().getDomainName()).isEqualTo("协作沟通");
+        assertThat(payload.getQuestion().getDomainCode()).isBlank();
+        assertThat(payload.getQuestion().getDomainName()).isEqualTo("行为题");
         Map<String, Object> questionJson = new ObjectMapper().convertValue(payload.getQuestion(), Map.class);
         assertThat(questionJson).containsEntry("focusPoint", "跨团队协作");
         assertThat(questionJson).containsOnlyKeys(

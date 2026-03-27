@@ -37,7 +37,7 @@ class PromptTemplateCoverageTest {
                 .contains("5~8 个")
                 .contains("只能从输入提供的岗位知识域列表中选择")
                 .contains("coveredKnowledgePoints")
-                .contains("不要把整个 domain 删掉")
+                .contains("不要把整个知识域对象删掉")
                 .contains("如果历史 discussedItems 为空，不要臆造项目去重信息")
                 .contains("experienceItems 必须覆盖简历中所有真实存在")
                 .contains("不允许把整个项目从 experienceItems 中删掉");

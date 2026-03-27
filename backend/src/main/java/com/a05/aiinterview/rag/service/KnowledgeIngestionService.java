@@ -66,7 +66,7 @@ public class KnowledgeIngestionService {
     private Map<String, Object> buildMetadata(KnowledgeDocument doc) {
         Map<String, Object> meta = new LinkedHashMap<>();
         meta.put("question_id", nullSafe(doc.getId()));
-        meta.put("domain", nullSafe(doc.getDomain()));
+        meta.put("domain_code", nullSafe(doc.getDomainCode()));
         meta.put("question_type", nullSafe(doc.getQuestionType()));
         meta.put("difficulty", nullSafe(doc.getDifficulty()));
         meta.put("keywords", List.copyOf(safeList(doc.getKeywords())));

@@ -31,7 +31,6 @@ class SampleKnowledgeDataLoaderTest {
                     assertThat(sample.getIntentConcept()).isNotBlank();
                     assertThat(sample.getReferenceContext()).isNotBlank();
                     assertThat(sample.getScoringKeyPoints()).isNotEmpty();
-                    assertThat(sample.getDomain()).isNotBlank();
                     assertThat(sample.getQuestionType()).isNotBlank();
                     assertThat(sample.getDifficulty()).startsWith("L");
                     assertThat(sample.getKeywords()).isNotEmpty();
@@ -44,7 +43,12 @@ class SampleKnowledgeDataLoaderTest {
                 .extracting(KnowledgeDocument::getQuestionType)
                 .contains("PRINCIPLE", "SCENARIO", "BEHAVIORAL", "PROJECT");
         assertThat(samples)
-                .extracting(KnowledgeDocument::getDomain)
-                .contains("java_core", "redis", "distributed", "behavioral");
+                .filteredOn(sample -> !"BEHAVIORAL".equals(sample.getQuestionType()))
+                .extracting(KnowledgeDocument::getDomainCode)
+                .contains("java_core", "redis", "distributed");
+        assertThat(samples)
+                .filteredOn(sample -> "BEHAVIORAL".equals(sample.getQuestionType()))
+                .singleElement()
+                .satisfies(sample -> assertThat(sample.getDomainCode()).isBlank());
     }
 }

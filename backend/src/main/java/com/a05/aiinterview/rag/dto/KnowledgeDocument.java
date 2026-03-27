@@ -54,9 +54,8 @@ public class KnowledgeDocument {
     @Schema(description = "推荐追问题目 ID 列表")
     private List<String> followUpIds = new ArrayList<>();
 
-    @NotBlank
-    @Schema(description = "所属领域", example = "redis")
-    private String domain;
+    @Schema(description = "所属知识域编码；行为题允许为空", example = "redis")
+    private String domainCode;
 
     @NotBlank
     @Schema(description = "题型", example = "principle")

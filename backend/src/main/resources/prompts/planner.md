@@ -45,7 +45,7 @@ Planning Directives（核心规划法则）
 
 - 绿色：熟练点（硬去重）
   如果某个知识点已经出现在历史 `coveredKnowledgePoints` 中，则本次不要再把这个知识点纳入重点考纲
-  但不要把整个 domain 删掉；如果这个 domain 仍有价值，应优先切换到该域内其他 focusPoints
+  但不要把整个知识域对象删掉；如果该 `domainCode` 仍有价值，应优先切换到该域内其他 focusPoints
 
 - 红色：薄弱点（不过滤）
   历史薄弱点不强制复现，但要保留在候选池中

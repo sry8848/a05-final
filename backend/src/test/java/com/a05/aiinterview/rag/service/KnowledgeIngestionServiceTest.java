@@ -32,7 +32,7 @@ class KnowledgeIngestionServiceTest {
                 .scoringKeyPoints(List.of("缓存空对象", "布隆过滤器", "方案局限性"))
                 .scoringPitfalls(List.of("混淆穿透和击穿"))
                 .followUpIds(List.of("redis-bloom-filter-false-positive-001"))
-                .domain("redis")
+                .domainCode("redis")
                 .questionType("PRINCIPLE")
                 .difficulty("L2")
                 .keywords(List.of("Redis", "缓存穿透", "布隆过滤器"))
@@ -64,7 +64,7 @@ class KnowledgeIngestionServiceTest {
         Map<String, Object> metadata = stored.getMetadata();
         assertThat(metadata)
                 .containsEntry("question_id", "redis-cache-penetration-001")
-                .containsEntry("domain", "redis")
+                .containsEntry("domain_code", "redis")
                 .containsEntry("question_type", "PRINCIPLE")
                 .containsEntry("difficulty", "L2")
                 .containsEntry("source", "manual_curated")
