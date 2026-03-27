@@ -200,7 +200,7 @@
 - `js_core`
 - `browser`
 - `jvm`
-- `system_design`
+- `distributed`
 
 ### 6.6 `questionType`
 

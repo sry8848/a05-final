@@ -124,7 +124,7 @@ git commit -m "refactor: align evaluation decision input with prompt v2"
   - `expectedAnswerPoints`
 
 更新 `CoveredDomain`：
-- 用 `domainCode` 替换 `domainId`
+- 用 `domainCode` 替换旧知识域主键字段
 - 保留 `domainName`
 
 - [ ] **步骤 2：将校验器重写为新 Schema**
@@ -136,7 +136,7 @@ git commit -m "refactor: align evaluation decision input with prompt v2"
   - 对 `S_SWITCH_DOMAIN`、`S_ENTER_PRINCIPLE`：必须显式填写
   - 对同域理论推进策略（如 `S_P_VERIFY`、`S_P_DEEP_LINK`、`S_P_VARIANT`、`S_P_SAME_DOMAIN_SHIFT`）：允许 AI 输出空字符串，后端随后继承 `currentQuestion.domainCode/domainName`
   - 其他策略必须是 `""`
-- 校验 `newCoveredDomains` 必须使用 `domainCode`，不能再使用 `domainId`
+- 校验 `newCoveredDomains` 必须使用 `domainCode`，不能再使用旧知识域主键字段
 - 校验 `retrievalPlans` 结构
 - 删除所有与以下旧字段有关的校验分支：
   - `candidateStrategies`
@@ -459,7 +459,7 @@ git commit -m "refactor: consume execution plan in question streaming"
 
 `StateLedgerPatchService` 需要：
 - 通过 `domainCode` 关闭知识域
-- 不再依赖 AI 提供的 `domainId`
+- 不再依赖 AI 提供旧知识域主键字段
 - 保持 `newCoveredPoints` 语义不变
 
 同时增加理论题域不变量：
@@ -478,7 +478,7 @@ git commit -m "refactor: consume execution plan in question streaming"
 
 覆盖：
 - 通过 `domainCode` 关闭 domain
-- 完全不再使用 `domainId`
+- 完全不再使用旧知识域主键字段
 - 答题提交时 `asked_total` 不变
 
 - [ ] **步骤 5：运行测试**
