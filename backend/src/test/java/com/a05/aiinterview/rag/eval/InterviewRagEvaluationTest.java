@@ -1,5 +1,9 @@
 package com.a05.aiinterview.rag.eval;
 
+import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
+import com.a05.aiinterview.interview.engine.DecisionExecutionPlan;
+import com.a05.aiinterview.rag.dto.RagRetrievalRequest;
+import com.a05.aiinterview.rag.service.RagPlanCompiler;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,6 +30,7 @@ class InterviewRagEvaluationTest {
     private static final long SINGLE_RETRIEVAL_P95_BUDGET_MS = 300L;
     private static final long END_TO_END_EXTRA_LATENCY_BUDGET_MS = 500L;
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private final RagPlanCompiler compiler = new RagPlanCompiler();
 
     @Test
     @DisplayName("fixture should contain the required sample skeleton")
@@ -84,8 +89,31 @@ class InterviewRagEvaluationTest {
                 .isGreaterThanOrEqualTo(DENSE_RECALL_HIT_RATE_GATE);
     }
 
+    @Test
+    @DisplayName("compiled routing should match fixture policy and preserve expected keywords")
+    void compiledRouting_shouldMatchFixturePolicyAndPreserveExpectedKeywords() throws Exception {
+        InterviewRetrievalFixture fixture = loadFixture();
+
+        for (InterviewRetrievalCase sample : fixture.cases()) {
+            RagRetrievalRequest request = compile(sample);
+            assertThat(request.isShouldRetrieve())
+                    .as("traceId=%s route mismatch", sample.traceId())
+                    .isEqualTo(sample.shouldRetrieve());
+
+            if (sample.shouldRetrieve()) {
+                assertThat(request.getKeywordQueries())
+                        .as("traceId=%s keyword coverage", sample.traceId())
+                        .containsAll(sample.expectedKeywords());
+            } else {
+                assertThat(request.getKeywordQueries()).isEmpty();
+                assertThat(request.getQueryText()).isBlank();
+            }
+        }
+    }
+
     private SampleEvaluationResult evaluateSample(InterviewRetrievalCase sample) {
-        boolean actualShouldRetrieve = shouldRetrieveByPolicy(sample);
+        RagRetrievalRequest compiled = compile(sample);
+        boolean actualShouldRetrieve = compiled.isShouldRetrieve();
         boolean routingMatched = actualShouldRetrieve == sample.shouldRetrieve();
         // Pre-integration placeholder: no real retrieval is executed in Task 1.
         StageResult stageResult = new StageResult(
@@ -119,55 +147,31 @@ class InterviewRagEvaluationTest {
         return sample.retrievalPlans().get(0);
     }
 
-    /**
-     * Task 1 planned-policy placeholder.
-     * This will be replaced by real retrieval-plan compilation and routing in later tasks.
-     */
-    private boolean shouldRetrieveByPolicy(InterviewRetrievalCase sample) {
-        String questionType = normalize(sample.questionType());
-        if ("PRINCIPLE".equals(questionType) || "SCENARIO".equals(questionType) || "BEHAVIORAL".equals(questionType)) {
-            return true;
-        }
-        if (!"PROJECT".equals(questionType)) {
-            return false;
-        }
-
-        if (hasExplicitProjectTechHook(sample.focusPoint())) {
-            return true;
-        }
-
-        if (sample.retrievalPlans() == null) {
-            return false;
-        }
-
-        for (RetrievalPlan retrievalPlan : sample.retrievalPlans()) {
-            if (hasExplicitProjectTechHook(retrievalPlan.displayQuery())
-                    || hasExplicitProjectTechHook(retrievalPlan.queryText())
-                    || containsTechnicalHint(retrievalPlan.keywordHints())) {
-                return true;
-            }
-        }
-        return false;
+    private RagRetrievalRequest compile(InterviewRetrievalCase sample) {
+        DecisionExecutionPlan plan = DecisionExecutionPlan.builder()
+                .targetQuestionType(normalizeQuestionType(sample.questionType()))
+                .nextFocus(sample.focusPoint())
+                .nextItemName("PROJECT".equals(normalize(sample.questionType())) ? "样例项目" : "")
+                .retrievalPlans(toOutputPlans(sample.retrievalPlans()))
+                .build();
+        return compiler.compile(plan, "JAVA_BACKEND", "FRESH_GRAD");
     }
 
-    private boolean hasExplicitProjectTechHook(String text) {
-        if (text == null || text.isBlank()) {
-            return false;
+    private List<EvaluationDecisionOutput.RetrievalPlan> toOutputPlans(List<RetrievalPlan> retrievalPlans) {
+        if (retrievalPlans == null) {
+            return List.of();
         }
-        String normalized = text.toLowerCase();
-        return TECH_HOOK_TOKENS.stream().anyMatch(token -> normalized.contains(token.toLowerCase()));
-    }
-
-    private boolean containsTechnicalHint(List<String> hints) {
-        if (hints == null || hints.isEmpty()) {
-            return false;
-        }
-        for (String hint : hints) {
-            if (hasExplicitProjectTechHook(hint)) {
-                return true;
-            }
-        }
-        return false;
+        return retrievalPlans.stream()
+                .map(plan -> EvaluationDecisionOutput.RetrievalPlan.builder()
+                        .goal(plan.goal())
+                        .displayQuery(plan.displayQuery())
+                        .queryText(plan.queryText())
+                        .keywordHints(plan.keywordHints())
+                        .difficultyHint(plan.difficultyHint())
+                        .mustHaveClues(plan.mustHaveClues())
+                        .avoidClues(plan.avoidClues())
+                        .build())
+                .toList();
     }
 
     private boolean matchesMustHaveClues(InterviewRetrievalCase sample) {
@@ -346,26 +350,10 @@ class InterviewRagEvaluationTest {
         }
     }
 
-    private static final Set<String> TECH_HOOK_TOKENS = Set.of(
-            "seata",
-            "xid",
-            "redisson",
-            "redis",
-            "mysql",
-            "mq",
-            "rabbitmq",
-            "feign",
-            "header",
-            "ttl",
-            "间隙锁",
-            "覆盖索引",
-            "缓存穿透",
-            "看门狗",
-            "订单超时关闭",
-            "幂等",
-            "db+mq",
-            "next-key lock"
-    );
+    private String normalizeQuestionType(String questionType) {
+        String normalized = normalize(questionType);
+        return "PROJECT".equals(normalized) ? "PROJECT_DEEP_DIVE" : normalized;
+    }
 
     private String normalize(String text) {
         return text == null ? "" : text.trim().toUpperCase();
