@@ -117,9 +117,9 @@ class AvailableStrategyAssemblerTest {
                 remainingDomains("redis"),
                 quotaState(
                         QuotaStateSupport.SAME_POINT_CONTINUE, 1,
-                        QuotaStateSupport.SAME_DOMAIN_CONTINUE, 2,
-                        QuotaStateSupport.PRINCIPLE_TOTAL, 3,
-                        QuotaStateSupport.PROJECT_TOTAL, 2
+                        QuotaStateSupport.SAME_DOMAIN_CONTINUE, 4,
+                        QuotaStateSupport.PRINCIPLE_TOTAL, 8,
+                        QuotaStateSupport.PROJECT_TOTAL, 10
                 ),
                 "FRESH_GRAD"
         );
@@ -180,7 +180,7 @@ class AvailableStrategyAssemblerTest {
     @Test
     @DisplayName("senior profile should keep enter-project available when junior quota is already exhausted")
     void seniorProfileShouldKeepEnterProjectAvailableWhenJuniorQuotaIsAlreadyExhausted() {
-        Map<String, Object> quotaState = quotaState(QuotaStateSupport.PROJECT_TOTAL, 3);
+        Map<String, Object> quotaState = quotaState(QuotaStateSupport.PROJECT_TOTAL, 10);
 
         List<EvaluationDecisionInput.AvailableStrategy> juniorStrategies = assembler.assemble(
                 "PRINCIPLE",

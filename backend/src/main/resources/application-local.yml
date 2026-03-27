@@ -1,0 +1,33 @@
+# 本地真实联调配置。
+# 目标：默认走百炼兼容 OpenAI 接口，而不是 mock AI。
+
+spring:
+  ai:
+    openai:
+      api-key: ${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:}}
+      base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+      chat:
+        options:
+          model: ${OPENAI_MODEL:qwen-plus}
+
+ai:
+  openai:
+    mock-enabled: false
+    api-key: ${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:}}
+    base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+    model: ${OPENAI_MODEL:qwen-plus}
+
+rag:
+  enabled: ${RAG_ENABLED:true}
+
+speech:
+  asr:
+    enabled: ${ASR_ENABLED:true}
+    api-key: ${ASR_API_KEY:${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:}}}
+  tts:
+    enabled: ${TTS_ENABLED:true}
+    api-key: ${TTS_API_KEY:${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:}}}
+
+auth:
+  mail:
+    startup-check-enabled: ${SMTP_STARTUP_CHECK_ENABLED:true}

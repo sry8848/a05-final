@@ -7,6 +7,7 @@ application-local.properties
 .env
 .env.local
 .env.development.local
+!backend/src/main/resources/application-local.yml
 
 # ==========================================
 # 2. 现代 AI 编程辅助工具 (Cursor, Trae, Codex 等)
