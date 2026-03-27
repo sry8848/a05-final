@@ -58,13 +58,13 @@ class QuestionStreamServiceBuildInputTest {
                         "nextFocus", "订单超时关闭链路的幂等与并发控制",
                         "decisionReason", "上一题已经建立基础认知，下一题应切回项目主线核实真实工程落地。",
                         "retrievalPlans", List.of(Map.of(
-                                "retrievalNeed", true,
-                                "retrievalGoal", "补充项目案例",
-                                "primaryQuery", "订单超时关闭 幂等 并发控制",
-                                "alternateQueries", List.of("延迟消息 订单关闭 并发"),
-                                "retrievalType", "questions",
-                                "expectedEvidence", List.of("项目案例"),
-                                "avoidEvidence", List.of("重复问法")
+                                "goal", "补充项目案例",
+                                "displayQuery", "订单超时关闭",
+                                "queryText", "订单超时关闭 幂等 并发控制 延迟消息",
+                                "keywordHints", List.of("订单超时关闭", "幂等", "延迟消息"),
+                                "difficultyHint", "L3",
+                                "mustHaveClues", List.of("项目案例"),
+                                "avoidClues", List.of("重复问法")
                         ))
                 )
         )));
@@ -119,13 +119,13 @@ class QuestionStreamServiceBuildInputTest {
                 .nextFocus("缓存击穿")
                 .decisionReason("回答覆盖了基础方案，但还需要继续核实工程取舍。")
                 .retrievalPlans(List.of(EvaluationDecisionOutput.RetrievalPlan.builder()
-                        .retrievalNeed(true)
-                        .retrievalGoal("补充缓存击穿案例")
-                        .primaryQuery("缓存击穿 互斥锁 逻辑过期")
-                        .alternateQueries(List.of("热点 key 失效"))
-                        .retrievalType("domain")
-                        .expectedEvidence(List.of("方案边界"))
-                        .avoidEvidence(List.of())
+                        .goal("补充缓存击穿案例")
+                        .displayQuery("缓存击穿")
+                        .queryText("缓存击穿 互斥锁 逻辑过期 热点 key 失效")
+                        .keywordHints(List.of("缓存击穿", "互斥锁", "逻辑过期"))
+                        .difficultyHint("L3")
+                        .mustHaveClues(List.of("方案边界"))
+                        .avoidClues(List.of())
                         .build()))
                 .build();
 
@@ -163,6 +163,8 @@ class QuestionStreamServiceBuildInputTest {
         assertThat(input.getRecentContext().getRecentTurnsSummary()).isEqualTo("回答覆盖了基础方案，但还需要继续核实工程取舍。");
         assertThat(input.getRetrievalContext().getSummary()).contains("无外部参考资料");
         assertThat(input.getRetrievalContext().getRetrievalPlans()).hasSize(1);
+        assertThat(input.getRetrievalContext().getRetrievalPlans().getFirst().getDisplayQuery()).isEqualTo("缓存击穿");
+        assertThat(input.getRetrievalContext().getRetrievalPlans().getFirst().getKeywordHints()).containsExactly("缓存击穿", "互斥锁", "逻辑过期");
         assertThat(input.getConstraints().getAvoidRepetitionFamilies()).isEmpty();
     }
 

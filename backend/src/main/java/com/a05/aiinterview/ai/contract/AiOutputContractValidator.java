@@ -264,13 +264,13 @@ public class AiOutputContractValidator {
         return values.stream()
                 .filter(item -> item != null)
                 .map(item -> EvaluationDecisionOutput.RetrievalPlan.builder()
-                        .retrievalNeed(Boolean.TRUE.equals(item.getRetrievalNeed()))
-                        .retrievalGoal(defaultString(item.getRetrievalGoal(), ""))
-                        .primaryQuery(defaultString(item.getPrimaryQuery(), ""))
-                        .alternateQueries(sanitizeStringList(item.getAlternateQueries()))
-                        .retrievalType(normalizeRetrievalType(item.getRetrievalType()))
-                        .expectedEvidence(sanitizeStringList(item.getExpectedEvidence()))
-                        .avoidEvidence(sanitizeStringList(item.getAvoidEvidence()))
+                        .goal(defaultString(item.getGoal(), ""))
+                        .displayQuery(defaultString(item.getDisplayQuery(), ""))
+                        .queryText(defaultString(item.getQueryText(), ""))
+                        .keywordHints(sanitizeStringList(item.getKeywordHints()))
+                        .difficultyHint(defaultString(item.getDifficultyHint(), ""))
+                        .mustHaveClues(sanitizeStringList(item.getMustHaveClues()))
+                        .avoidClues(sanitizeStringList(item.getAvoidClues()))
                         .build())
                 .toList();
     }
@@ -281,14 +281,6 @@ public class AiOutputContractValidator {
         }
         String normalized = action.trim().toUpperCase(Locale.ROOT);
         return ALLOWED_INTERVIEW_ACTIONS.contains(normalized) ? normalized : null;
-    }
-
-    private String normalizeRetrievalType(String retrievalType) {
-        if (retrievalType == null || retrievalType.isBlank()) {
-            return "";
-        }
-        String normalized = retrievalType.trim().toLowerCase(Locale.ROOT);
-        return "questions".equals(normalized) || "domain".equals(normalized) ? normalized : "";
     }
 
     private boolean isBlank(String value) {

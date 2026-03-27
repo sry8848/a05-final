@@ -78,8 +78,11 @@ nextQuestionGoal 是本次出题的唯一主目标。不要自行改题型、改
 
 6. 使用检索但不要被检索带偏
 
-若 retrievalContext 提供了候选人项目名、术语或真实场景，只吸收与 focusPoint 强相关的最小信息。
-不要把检索材料、recentContext、goalSummary 原样搬进题干，也不要引入无关信息。
+- `retrievedMaterials` 非空时，优先使用真实题目卡片材料，只吸收与 focusPoint 强相关的最小信息。
+- `retrievalPlans` 仅在无真实材料时作为弱提示，不代表已经查到结果。
+- `follow_up_ids` 是可选追问候选，不是强制跳题规则。
+- 项目题若无检索结果，仍优先依据项目上下文自然追问。
+- 不要把检索材料、recentContext、goalSummary 原样搬进题干，也不要引入无关信息。
 
 7. 题型要求
 

@@ -71,7 +71,11 @@ class PromptTemplateCoverageTest {
                 .contains("guiding")
                 .contains("stress")
                 .contains("2-6")
-                .contains("不做精确概率控制");
+                .contains("不做精确概率控制")
+                .contains("`retrievedMaterials` 非空时")
+                .contains("`retrievalPlans` 仅在无真实材料时作为弱提示")
+                .contains("`follow_up_ids`")
+                .contains("项目题若无检索结果");
     }
 
     @Test
@@ -145,6 +149,16 @@ class PromptTemplateCoverageTest {
                 .contains("nextProjectPoint")
                 .contains("nextItemType")
                 .contains("nextItemName")
+                .contains("goal")
+                .contains("displayQuery")
+                .contains("queryText")
+                .contains("keywordHints")
+                .contains("difficultyHint")
+                .contains("mustHaveClues")
+                .contains("avoidClues")
+                .contains("检索 brief")
+                .contains("技术钩子")
+                .contains("软约束")
                 .contains("`targetDomainCode` 必须从【主考纲剩余待考察域（菜单）】中选择一个合法的 `domainCode`")
                 .contains("绝不能写成完整问句")
                 .contains("绝不允许把下一题准备问的知识点提前预支写进去")
@@ -153,7 +167,12 @@ class PromptTemplateCoverageTest {
                 .doesNotContain("expectedAnswerPoints")
                 .doesNotContain("nextQuestionType")
                 .doesNotContain("nextEntryAction")
-                .doesNotContain("DOMAIN_");
+                .doesNotContain("DOMAIN_")
+                .doesNotContain("primaryQuery")
+                .doesNotContain("alternateQueries")
+                .doesNotContain("retrievalType")
+                .doesNotContain("expectedEvidence")
+                .doesNotContain("avoidEvidence");
     }
 
     @Test

@@ -39,13 +39,13 @@ class EvaluationDecisionContractTest {
                   ],
                   "retrievalPlans": [
                     {
-                      "retrievalNeed": true,
-                      "retrievalGoal": "补充 Seata AT 边界细节",
-                      "primaryQuery": "Seata AT 边界",
-                      "alternateQueries": ["AT 模式 本地事务", "Seata 分支事务注册"],
-                      "retrievalType": "domain",
-                      "expectedEvidence": ["事务边界", "分支事务注册"],
-                      "avoidEvidence": ["通用微服务定义"]
+                      "goal": "补充 Seata AT 边界细节",
+                      "displayQuery": "Seata AT 边界",
+                      "queryText": "Seata AT 模式 本地事务边界 分支事务注册",
+                      "keywordHints": ["Seata", "AT", "分支事务注册"],
+                      "difficultyHint": "L4",
+                      "mustHaveClues": ["事务边界", "分支事务注册"],
+                      "avoidClues": ["通用微服务定义"]
                     }
                   ]
                 }
@@ -65,7 +65,13 @@ class EvaluationDecisionContractTest {
         assertThat(output.getNewCoveredDomains().getFirst().getDomainName()).isEqualTo("Spring 框架");
         assertThat(output.getNewCoveredPoints()).containsExactly("Seata AT 模式下全局事务与本地事务的协同边界");
         assertThat(output.getRetrievalPlans()).hasSize(1);
-        assertThat(output.getRetrievalPlans().getFirst().getPrimaryQuery()).isEqualTo("Seata AT 边界");
+        assertThat(output.getRetrievalPlans().getFirst().getGoal()).isEqualTo("补充 Seata AT 边界细节");
+        assertThat(output.getRetrievalPlans().getFirst().getDisplayQuery()).isEqualTo("Seata AT 边界");
+        assertThat(output.getRetrievalPlans().getFirst().getQueryText()).contains("分支事务注册");
+        assertThat(output.getRetrievalPlans().getFirst().getKeywordHints()).containsExactly("Seata", "AT", "分支事务注册");
+        assertThat(output.getRetrievalPlans().getFirst().getDifficultyHint()).isEqualTo("L4");
+        assertThat(output.getRetrievalPlans().getFirst().getMustHaveClues()).containsExactly("事务边界", "分支事务注册");
+        assertThat(output.getRetrievalPlans().getFirst().getAvoidClues()).containsExactly("通用微服务定义");
     }
 
     @Test
@@ -82,13 +88,13 @@ class EvaluationDecisionContractTest {
                   "newCoveredPoints": [],
                   "retrievalPlans": [
                     {
-                      "retrievalNeed": true,
-                      "retrievalGoal": "无效",
-                      "primaryQuery": "无效",
-                      "alternateQueries": [],
-                      "retrievalType": "domain",
-                      "expectedEvidence": [],
-                      "avoidEvidence": []
+                      "goal": "无效",
+                      "displayQuery": "无效",
+                      "queryText": "无效",
+                      "keywordHints": [],
+                      "difficultyHint": "",
+                      "mustHaveClues": [],
+                      "avoidClues": []
                     }
                   ]
                 }

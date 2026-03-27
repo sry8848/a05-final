@@ -100,7 +100,7 @@ promptVersion: v2
    5.1. **探底即关闭（负向饱和）**：如果候选人连该领域最基础的核心概念都完全答错或表示没接触过，说明其在该领域的下限极低。此时继续追问毫无意义，必须在 `newCoveredDomains` 输出该域 Code 将其彻底关闭，并执行切域策略。
    5.2. **探顶即关闭（正向饱和）**：如果候选人完美解答了该领域内的高深度、高难度压测题或复杂场景题，证明其上限极高，信息增益已榨干。必须在 `newCoveredDomains` 输出该域 Code，予以关闭。
    5.3. **单个知识点的沉淀**：无论是否关闭整个领域，只要针对某个具体的、单一的考点（如“Redis 缓存击穿”）形成了明确的对错判断，且不打算在下一题继续追问该点，就必须将其写入 `newCoveredPoints`。
-6. RAG 强类型：`retrievalPlans` 若无需求必须输出 `[]`。若触发检索，`retrievalType` 只能是 `questions` 或 `domain`，且 `primaryQuery` 不超过 16 个字。
+6. RAG 强类型：`retrievalPlans` 若无需求必须输出 `[]`。若触发检索，`retrievalPlans` 表示后续检索 brief，而不是已经命中的检索结果；固定输出字段为 `goal / displayQuery / queryText / keywordHints / difficultyHint / mustHaveClues / avoidClues`。其中 `difficultyHint` 只是目标难度提示，属于软约束；项目题只有在 `focus`、`displayQuery`、`queryText` 或 `keywordHints` 出现明确技术钩子时才应请求检索。
 7. 无 Null 原则：所有数组字段即使为空也要输出 `[]`，所有字符串为空输出 `""`，绝不允许输出 `null` 或缺少 Key。
 
 [Output Schema]
@@ -126,18 +126,18 @@ promptVersion: v2
   ],
   "retrievalPlans": [
     {
-      "retrievalNeed": true,
-      "retrievalGoal": "一句话说明检索目的",
-      "primaryQuery": "核心查询词，不超过16字",
-      "alternateQueries": [
-        "备用词1"
+      "goal": "一句话说明检索目的",
+      "displayQuery": "给日志和下游调试看的短标题",
+      "queryText": "真正用于检索的完整查询文本",
+      "keywordHints": [
+        "精确技术词1"
       ],
-      "retrievalType": "questions | domain",
-      "expectedEvidence": [
-        "期望获取的事实或题型范例"
+      "difficultyHint": "L3",
+      "mustHaveClues": [
+        "期望命中的关键线索"
       ],
-      "avoidEvidence": [
-        "不需要的冗余基础概念"
+      "avoidClues": [
+        "希望避开的低价值材料"
       ]
     }
   ]
