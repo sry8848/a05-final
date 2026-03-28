@@ -5,7 +5,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -24,6 +26,17 @@ public class RagContext {
     /** 聚合后可注入 Prompt 的知识片段文本；无命中时为空字符串 */
     private String contextText;
 
+    /** 检索结果摘要，供出题阶段和审计日志使用。 */
+    private String summary;
+
+    /** 结构化命中题卡，供下游直接消费。 */
+    @Builder.Default
+    private List<RetrievedMaterial> retrievedMaterials = new ArrayList<>();
+
+    /** 从 top 命中题卡聚合出的推荐追问候选。 */
+    @Builder.Default
+    private List<String> followUpCandidates = new ArrayList<>();
+
     /** 实际命中的文档片段数量 */
     private int hitCount;
 
@@ -38,7 +51,10 @@ public class RagContext {
     public static RagContext empty() {
         return RagContext.builder()
                 .contextText("")
+                .summary("")
                 .hitCount(0)
+                .retrievedMaterials(List.of())
+                .followUpCandidates(List.of())
                 .empty(true)
                 .build();
     }
@@ -52,6 +68,15 @@ public class RagContext {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("hitCount", hitCount);
         map.put("empty", empty);
+        if (summary != null && !summary.isBlank()) {
+            map.put("summary", summary);
+        }
+        if (retrievedMaterials != null && !retrievedMaterials.isEmpty()) {
+            map.put("retrievedMaterials", retrievedMaterials);
+        }
+        if (followUpCandidates != null && !followUpCandidates.isEmpty()) {
+            map.put("followUpCandidates", followUpCandidates);
+        }
         if (!empty && contextText != null && !contextText.isBlank()) {
             // 审计日志只截取前 500 字符，避免日志过大
             map.put("contextPreview", contextText.length() > 500
@@ -59,5 +84,27 @@ public class RagContext {
                     : contextText);
         }
         return map;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class RetrievedMaterial {
+        private String questionId;
+        private String questionText;
+        private String intentConcept;
+        private String referenceContext;
+        @Builder.Default
+        private List<String> scoringKeyPoints = new ArrayList<>();
+        @Builder.Default
+        private List<String> scoringPitfalls = new ArrayList<>();
+        @Builder.Default
+        private List<String> followUpIds = new ArrayList<>();
+        private String domainCode;
+        private String questionType;
+        private String difficulty;
+        @Builder.Default
+        private List<String> keywords = new ArrayList<>();
     }
 }

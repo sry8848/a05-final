@@ -61,7 +61,7 @@
 
     <!-- 上传弹窗 -->
     <div v-if="showUploadModal" class="modal-overlay" @click.self="closeUploadModal">
-      <div class="modal-content glass-card upload-modal">
+      <div class="modal-content modal-panel upload-modal">
         <div class="modal-header">
           <h3><i class="fas fa-cloud-upload-alt"></i> 上传简历</h3>
           <button type="button" class="close-btn" @click="closeUploadModal" :disabled="uploading">
@@ -99,7 +99,7 @@
 
     <!-- 详情/编辑弹窗 -->
     <div v-if="showDetailModal" class="modal-overlay" @click.self="closeDetailModal">
-      <div class="modal-content glass-card detail-modal">
+      <div class="modal-content modal-panel detail-modal">
         <div class="modal-header">
           <h3><i class="fas fa-edit"></i> 简历详情 · 识别文本</h3>
           <button type="button" class="close-btn" @click="closeDetailModal" :disabled="saving">
@@ -637,7 +637,7 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 20px 24px;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--modal-surface-border);
 }
 
 .modal-header h3 {
@@ -646,7 +646,7 @@ export default {
   gap: 10px;
   font-size: 18px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--modal-text-primary);
   margin: 0;
 }
 
@@ -660,7 +660,7 @@ export default {
   border: none;
   background: transparent;
   border-radius: var(--radius-sm);
-  color: var(--text-secondary);
+  color: var(--modal-text-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -669,7 +669,7 @@ export default {
 }
 
 .close-btn:hover:not(:disabled) {
-  background: rgba(59, 89, 152, 0.1);
+  background: rgba(59, 89, 152, 0.08);
   color: var(--primary-color);
 }
 
@@ -691,13 +691,13 @@ export default {
   text-align: center;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: rgba(59, 89, 152, 0.05);
+  background: var(--modal-section-bg);
 }
 
 .upload-zone:hover:not(.uploading),
 .upload-zone.dragover {
   border-color: var(--primary-color);
-  background: rgba(59, 89, 152, 0.1);
+  background: rgba(59, 89, 152, 0.12);
 }
 
 .upload-zone i {
@@ -710,7 +710,7 @@ export default {
 .upload-zone p {
   margin: 0;
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--modal-text-secondary);
 }
 
 .upload-zone.uploading {
@@ -732,7 +732,7 @@ export default {
   gap: 12px;
   padding: 24px;
   justify-content: center;
-  color: var(--text-secondary);
+  color: var(--modal-text-secondary);
 }
 
 .form-group {
@@ -743,34 +743,35 @@ export default {
   display: block;
   font-size: 14px;
   font-weight: 500;
-  color: var(--text-primary);
+  color: var(--modal-text-primary);
   margin-bottom: 8px;
 }
 
 .glass-input {
   width: 100%;
   padding: 12px 16px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--modal-input-bg);
+  border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: var(--radius-md);
   font-size: 14px;
-  color: var(--text-primary);
+  color: var(--modal-text-primary);
   font-family: inherit;
 }
 
 .glass-input:focus {
   outline: none;
   border-color: var(--primary-color);
+  background: #ffffff;
 }
 
 .glass-textarea {
   width: 100%;
   padding: 12px 16px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--modal-input-bg);
+  border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: var(--radius-md);
   font-size: 14px;
-  color: var(--text-primary);
+  color: var(--modal-text-primary);
   font-family: inherit;
   resize: vertical;
   min-height: 200px;
@@ -779,6 +780,7 @@ export default {
 .glass-textarea:focus {
   outline: none;
   border-color: var(--primary-color);
+  background: #ffffff;
 }
 
 .status-badge {
@@ -797,6 +799,6 @@ export default {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 24px;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid var(--modal-surface-border);
 }
 </style>

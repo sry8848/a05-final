@@ -1,5 +1,6 @@
 package com.a05.aiinterview.ai.dto;
 
+import com.a05.aiinterview.rag.dto.RagContext;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -89,7 +90,8 @@ public class QuestionGenerationInput {
     public static class RetrievalContext {
         private String summary;
         private List<EvaluationDecisionOutput.RetrievalPlan> retrievalPlans;
-        private List<EvaluationDecisionInput.RetrievedMaterial> retrievedMaterials;
+        private List<RagContext.RetrievedMaterial> retrievedMaterials;
+        private List<String> followUpCandidates;
     }
 
     @Data

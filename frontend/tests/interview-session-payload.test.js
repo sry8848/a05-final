@@ -25,10 +25,11 @@ test('buildInterviewCreatePayload should omit single-question fields for normal 
     experienceMap
   })
 
-  assert.equal(payload.targetRole, 'FRONTEND')
+  assert.equal(payload.positionCode, 'FRONTEND')
   assert.equal(payload.experienceLevel, 'INTERN')
   assert.equal(payload.mode, 'practice')
   assert.equal(payload.focusTopics, 'Vue,工程化')
+  assert.equal('targetRole' in payload, false)
   assert.equal('singleQuestionStem' in payload, false)
   assert.equal('singleQuestionType' in payload, false)
   assert.equal('singleQuestionDomainName' in payload, false)

@@ -5,6 +5,7 @@ import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
 import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.rag.service.RagPlanCompiler;
 import com.a05.aiinterview.rag.service.RagRetrievalService;
 import com.a05.aiinterview.speech.service.TtsService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -69,6 +70,7 @@ class QuestionStreamServiceReconnectTest {
                 questionMapper,
                 attemptMapper,
                 ragService,
+                mock(RagPlanCompiler.class),
                 ttsService,
                 redisTemplate,
                 new InterviewDebugTraceService(new ObjectMapper()),

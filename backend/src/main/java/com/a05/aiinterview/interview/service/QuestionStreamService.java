@@ -14,6 +14,7 @@ import com.a05.aiinterview.interview.dto.SseStartEvent;
 import com.a05.aiinterview.interview.dto.SseTtsReadyEvent;
 import com.a05.aiinterview.interview.engine.InterviewerArchetypeSupport;
 import com.a05.aiinterview.interview.engine.QuotaStateSupport;
+import com.a05.aiinterview.interview.engine.DecisionExecutionPlan;
 import com.a05.aiinterview.interview.entity.InterviewAttempt;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
@@ -23,6 +24,7 @@ import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.a05.aiinterview.interview.service.support.InterviewDomainDisplaySupport;
 import com.a05.aiinterview.rag.dto.RagContext;
 import com.a05.aiinterview.rag.dto.RagRetrievalRequest;
+import com.a05.aiinterview.rag.service.RagPlanCompiler;
 import com.a05.aiinterview.rag.service.RagRetrievalService;
 import com.a05.aiinterview.speech.service.TtsService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -75,6 +77,7 @@ public class QuestionStreamService {
     private final InterviewQuestionMapper interviewQuestionMapper;
     private final InterviewAttemptMapper interviewAttemptMapper;
     private final RagRetrievalService ragRetrievalService;
+    private final RagPlanCompiler ragPlanCompiler;
     private final TtsService ttsService;
     private final StringRedisTemplate redisTemplate;
     private final InterviewDebugTraceService interviewDebugTraceService;
@@ -604,7 +607,28 @@ public class QuestionStreamService {
      * RAG 检索相关知识点，失败时返回空上下文不影响主流程。
      */
     private RagContext safeRetrieveRag(InterviewSession session, NextQuestionPlan plan) {
-        return RagContext.empty();
+        if (session == null || plan == null) {
+            return RagContext.empty();
+        }
+        try {
+            RagRetrievalRequest request = ragPlanCompiler.compile(
+                    toDecisionExecutionPlan(plan),
+                    firstNonBlank(session.getPositionCode(), ""),
+                    firstNonBlank(session.getExperienceLevel(), "")
+            );
+            if (request == null || !request.isShouldRetrieve()) {
+                return RagContext.empty();
+            }
+            RagContext ragContext = ragRetrievalService.retrieve(request);
+            return ragContext == null ? RagContext.empty() : ragContext;
+        } catch (Exception ex) {
+            log.warn("RAG 检索失败，已回退为空上下文, sessionId={}, nextFocus={}, error={}",
+                    session.getId(),
+                    plan.getNextFocus(),
+                    ex.getMessage(),
+                    ex);
+            return RagContext.empty();
+        }
     }
 
     /**
@@ -624,11 +648,7 @@ public class QuestionStreamService {
         ResolvedItem resolvedItem = resolveActiveItem(session, plan);
         String questionGoalFocus = resolveQuestionGoalFocus(plan);
 
-        QuestionGenerationInput.RetrievalContext retrievalContext = QuestionGenerationInput.RetrievalContext.builder()
-                .summary(RAG_CONTEXT_FALLBACK)
-                .retrievalPlans(plan.getRetrievalPlans())
-                .retrievedMaterials(List.of())
-                .build();
+        QuestionGenerationInput.RetrievalContext retrievalContext = buildRetrievalContext(plan, ragContext);
 
         QuestionGenerationInput input = QuestionGenerationInput.builder()
                 .interviewId(session.getId())
@@ -673,6 +693,49 @@ public class QuestionStreamService {
                 .syllabus(session.getSyllabusJson() != null ? session.getSyllabusJson() : new HashMap<>())
                 .build();
         return input;
+    }
+
+    private QuestionGenerationInput.RetrievalContext buildRetrievalContext(NextQuestionPlan plan, RagContext ragContext) {
+        List<EvaluationDecisionOutput.RetrievalPlan> retrievalPlans =
+                plan == null || plan.getRetrievalPlans() == null ? List.of() : plan.getRetrievalPlans();
+        List<RagContext.RetrievedMaterial> retrievedMaterials =
+                ragContext == null || ragContext.getRetrievedMaterials() == null
+                        ? List.of()
+                        : ragContext.getRetrievedMaterials();
+        List<String> followUpCandidates =
+                ragContext == null || ragContext.getFollowUpCandidates() == null
+                        ? List.of()
+                        : ragContext.getFollowUpCandidates();
+        String summary = ragContext != null && !ragContext.isEmpty() && ragContext.getSummary() != null
+                && !ragContext.getSummary().isBlank()
+                ? ragContext.getSummary()
+                : RAG_CONTEXT_FALLBACK;
+
+        return QuestionGenerationInput.RetrievalContext.builder()
+                .summary(summary)
+                .retrievalPlans(retrievalPlans)
+                .retrievedMaterials(retrievedMaterials)
+                .followUpCandidates(followUpCandidates)
+                .build();
+    }
+
+    private DecisionExecutionPlan toDecisionExecutionPlan(NextQuestionPlan plan) {
+        if (plan == null) {
+            return DecisionExecutionPlan.builder().build();
+        }
+        return DecisionExecutionPlan.builder()
+                .interviewAction(plan.getInterviewAction())
+                .strategyCode(plan.getFinalDecision())
+                .targetQuestionType(plan.getTargetQuestionType())
+                .nextFocus(plan.getNextFocus())
+                .nextItemType(plan.getNextItemType())
+                .nextItemName(plan.getNextItemName())
+                .nextProjectPoint(plan.getNextProjectPoint())
+                .targetDomainCode(plan.getTargetDomainCode())
+                .targetDomainName(plan.getTargetDomainName())
+                .retrievalPlans(plan.getRetrievalPlans() == null ? List.of() : plan.getRetrievalPlans())
+                .decisionReason(plan.getDecisionReason())
+                .build();
     }
 
     /**

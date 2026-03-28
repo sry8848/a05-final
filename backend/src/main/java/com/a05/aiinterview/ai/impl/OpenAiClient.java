@@ -708,6 +708,7 @@ public class OpenAiClient implements AiClient {
         retrieval.put("summary", "暂无 RAG 检索资料");
         retrieval.put("retrievalPlans", List.of());
         retrieval.put("retrievedMaterials", List.of());
+        retrieval.put("followUpCandidates", List.of());
         return retrieval;
     }
 

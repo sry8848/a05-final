@@ -254,6 +254,40 @@
       "avoidClues": [],
       "expectedFollowUpIds": [],
       "retrievalPlans": []
+    },
+    {
+      "traceId": "session-83_q-215_attempt-threadlocal-cross-thread",
+      "questionType": "PRINCIPLE",
+      "focusPoint": "ThreadLocal跨线程传递",
+      "shouldRetrieve": true,
+      "difficultyHint": "L3",
+      "expectedKeywords": ["Java", "ThreadLocal", "TransmittableThreadLocal", "上下文传递"],
+      "mustHaveClues": ["线程池复用", "上下文丢失", "修复方案"],
+      "avoidClues": ["线程基础入门", "JDK 安装"],
+      "expectedFollowUpIds": ["threadlocal-transmittable-thread-local-001", "threadlocal-inheritable-limit-001"],
+      "retrievalPlans": [
+        {
+          "goal": "补充 ThreadLocal 跨线程传递的经典误区和修复问法",
+          "displayQuery": "ThreadLocal跨线程传递",
+          "queryText": "Java ThreadLocal 跨线程传递 线程池复用 上下文丢失 TransmittableThreadLocal 修复方案",
+          "keywordHints": ["Java", "ThreadLocal", "TransmittableThreadLocal", "上下文传递"],
+          "difficultyHint": "L3",
+          "mustHaveClues": ["线程池复用", "上下文丢失", "修复方案"],
+          "avoidClues": ["线程基础入门", "JDK 安装"]
+        }
+      ]
+    },
+    {
+      "traceId": "session-84_q-218_attempt-generic-project-architecture",
+      "questionType": "PROJECT",
+      "focusPoint": "泛项目架构介绍",
+      "shouldRetrieve": false,
+      "difficultyHint": "",
+      "expectedKeywords": [],
+      "mustHaveClues": [],
+      "avoidClues": [],
+      "expectedFollowUpIds": [],
+      "retrievalPlans": []
     }
   ]
 }

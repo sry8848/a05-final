@@ -6,6 +6,7 @@ import ch.qos.logback.core.read.ListAppender;
 import com.a05.aiinterview.ai.AiClient;
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
+import com.a05.aiinterview.interview.engine.DecisionExecutionPlan;
 import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
 import com.a05.aiinterview.interview.dto.SseDoneEvent;
 import com.a05.aiinterview.interview.entity.InterviewAttempt;
@@ -15,6 +16,8 @@ import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.a05.aiinterview.rag.dto.RagContext;
+import com.a05.aiinterview.rag.dto.RagRetrievalRequest;
+import com.a05.aiinterview.rag.service.RagPlanCompiler;
 import com.a05.aiinterview.rag.service.RagRetrievalService;
 import com.a05.aiinterview.speech.service.TtsService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -37,6 +40,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import org.mockito.ArgumentCaptor;
 
 class QuestionStreamServiceBuildInputTest {
 
@@ -166,6 +173,165 @@ class QuestionStreamServiceBuildInputTest {
         assertThat(input.getRetrievalContext().getRetrievalPlans().getFirst().getDisplayQuery()).isEqualTo("缓存击穿");
         assertThat(input.getRetrievalContext().getRetrievalPlans().getFirst().getKeywordHints()).containsExactly("缓存击穿", "互斥锁", "逻辑过期");
         assertThat(input.getConstraints().getAvoidRepetitionFamilies()).isEmpty();
+    }
+
+    @Test
+    void buildGenInput_shouldUseRetrievedMaterialsAndFollowUpCandidatesWhenRagHitsExist() throws Exception {
+        QuestionStreamService service = newService();
+
+        InterviewSession session = new InterviewSession();
+        session.setId(102L);
+        session.setPositionCode("JAVA_BACKEND");
+        session.setMode("practice");
+        session.setExperienceLevel("FRESH_GRAD");
+        session.setSyllabusJson(Map.of(
+                "domains", List.of(
+                        Map.of("domainCode", "redis", "domainName", "Redis", "focusPoints", List.of("缓存穿透"))
+                )
+        ));
+        session.setStateLedgerJson(Map.of());
+
+        InterviewAttempt attempt = new InterviewAttempt();
+        attempt.setAttemptId("attempt-rag-hit");
+        attempt.setAnswerText("候选人提到了布隆过滤器，但没有展开误判问题。");
+
+        QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
+                .interviewAction("CONTINUE")
+                .targetQuestionType("PRINCIPLE")
+                .nextFocus("缓存穿透")
+                .decisionReason("需要继续确认布隆过滤器和空对象缓存的取舍。")
+                .retrievalPlans(List.of(EvaluationDecisionOutput.RetrievalPlan.builder()
+                        .goal("补充缓存穿透高频问法")
+                        .displayQuery("缓存穿透")
+                        .queryText("Redis 缓存穿透 布隆过滤器 空对象缓存")
+                        .keywordHints(List.of("缓存穿透", "布隆过滤器", "空对象缓存"))
+                        .difficultyHint("L2")
+                        .mustHaveClues(List.of("布隆过滤器", "误判"))
+                        .avoidClues(List.of("Redis 安装部署"))
+                        .build()))
+                .build();
+
+        RagContext ragContext = RagContext.builder()
+                .summary("命中 1 张题卡：缓存穿透高频题")
+                .retrievedMaterials(List.of(RagContext.RetrievedMaterial.builder()
+                        .questionId("redis-cache-penetration-001")
+                        .questionText("讲一下 Redis 缓存穿透")
+                        .intentConcept("考察缓存空值兜底和布隆过滤器理解")
+                        .referenceContext("高并发不存在数据查询时，如果没有兜底，会持续打穿数据库。")
+                        .scoringKeyPoints(List.of("缓存空对象", "布隆过滤器"))
+                        .scoringPitfalls(List.of("混淆缓存击穿和穿透"))
+                        .followUpIds(List.of("redis-bloom-filter-false-positive-001"))
+                        .domainCode("redis")
+                        .questionType("PRINCIPLE")
+                        .difficulty("L2")
+                        .keywords(List.of("缓存穿透", "布隆过滤器"))
+                        .build()))
+                .followUpCandidates(List.of("redis-bloom-filter-false-positive-001"))
+                .hitCount(1)
+                .empty(false)
+                .build();
+
+        Method method = QuestionStreamService.class.getDeclaredMethod(
+                "buildGenInput",
+                InterviewSession.class,
+                QuestionStreamService.NextQuestionPlan.class,
+                List.class,
+                InterviewAttempt.class,
+                RagContext.class
+        );
+        method.setAccessible(true);
+
+        QuestionGenerationInput input = (QuestionGenerationInput) method.invoke(
+                service,
+                session,
+                plan,
+                List.of(),
+                attempt,
+                ragContext
+        );
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> retrievalContextMap = new ObjectMapper().convertValue(input.getRetrievalContext(), Map.class);
+        assertThat(retrievalContextMap)
+                .containsEntry("summary", "命中 1 张题卡：缓存穿透高频题")
+                .containsEntry("followUpCandidates", List.of("redis-bloom-filter-false-positive-001"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> retrievedMaterials =
+                (List<Map<String, Object>>) retrievalContextMap.get("retrievedMaterials");
+        assertThat(retrievedMaterials).singleElement().satisfies(material -> assertThat(material)
+                .containsEntry("questionId", "redis-cache-penetration-001")
+                .containsEntry("questionText", "讲一下 Redis 缓存穿透")
+                .containsEntry("domainCode", "redis"));
+        assertThat(input.getRetrievalContext().getRetrievalPlans()).hasSize(1);
+    }
+
+    @Test
+    void safeRetrieveRag_shouldCompilePlanAndCallRetrievalServiceWhenApplicable() throws Exception {
+        RagRetrievalService ragService = mock(RagRetrievalService.class);
+        QuestionStreamService service = newService(ragService);
+        RagPlanCompiler compiler = mock(RagPlanCompiler.class);
+        setField(service, QuestionStreamService.class, "ragPlanCompiler", compiler);
+
+        InterviewSession session = new InterviewSession();
+        session.setId(103L);
+        session.setPositionCode("JAVA_BACKEND");
+        session.setExperienceLevel("FRESH_GRAD");
+
+        QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
+                .interviewAction("CONTINUE")
+                .targetQuestionType("PRINCIPLE")
+                .nextFocus("缓存穿透")
+                .targetDomainCode("redis")
+                .targetDomainName("Redis")
+                .retrievalPlans(List.of(EvaluationDecisionOutput.RetrievalPlan.builder()
+                        .goal("补充高频题")
+                        .displayQuery("缓存穿透")
+                        .queryText("Redis 缓存穿透 布隆过滤器")
+                        .keywordHints(List.of("缓存穿透", "布隆过滤器"))
+                        .difficultyHint("L2")
+                        .mustHaveClues(List.of("布隆过滤器"))
+                        .avoidClues(List.of("安装部署"))
+                        .build()))
+                .build();
+
+        RagRetrievalRequest request = RagRetrievalRequest.builder()
+                .shouldRetrieve(true)
+                .displayQuery("缓存穿透")
+                .queryText("Redis 缓存穿透 布隆过滤器")
+                .questionType("PRINCIPLE")
+                .domainCode("redis")
+                .difficultyHint("L2")
+                .keywordQueries(List.of("缓存穿透", "布隆过滤器"))
+                .mustHaveClues(List.of("布隆过滤器"))
+                .avoidClues(List.of("安装部署"))
+                .build();
+        RagContext expected = RagContext.builder()
+                .summary("命中 1 张题卡")
+                .retrievedMaterials(List.of())
+                .hitCount(1)
+                .empty(false)
+                .build();
+
+        when(compiler.compile(any(DecisionExecutionPlan.class), eq("JAVA_BACKEND"), eq("FRESH_GRAD")))
+                .thenReturn(request);
+        when(ragService.retrieve(request)).thenReturn(expected);
+
+        Method method = QuestionStreamService.class.getDeclaredMethod(
+                "safeRetrieveRag",
+                InterviewSession.class,
+                QuestionStreamService.NextQuestionPlan.class
+        );
+        method.setAccessible(true);
+
+        RagContext actual = (RagContext) method.invoke(service, session, plan);
+
+        assertThat(actual).isSameAs(expected);
+        ArgumentCaptor<DecisionExecutionPlan> planCaptor = ArgumentCaptor.forClass(DecisionExecutionPlan.class);
+        verify(compiler).compile(planCaptor.capture(), eq("JAVA_BACKEND"), eq("FRESH_GRAD"));
+        assertThat(planCaptor.getValue().getTargetQuestionType()).isEqualTo("PRINCIPLE");
+        assertThat(planCaptor.getValue().getNextFocus()).isEqualTo("缓存穿透");
+        assertThat(planCaptor.getValue().getTargetDomainCode()).isEqualTo("redis");
+        verify(ragService).retrieve(request);
     }
 
     @Test
@@ -394,6 +560,7 @@ class QuestionStreamServiceBuildInputTest {
                 questionMapper,
                 attemptMapper,
                 ragService,
+                mock(RagPlanCompiler.class),
                 ttsService,
                 redisTemplate,
                 new InterviewDebugTraceService(new ObjectMapper()),
@@ -481,6 +648,7 @@ class QuestionStreamServiceBuildInputTest {
                 questionMapper,
                 attemptMapper,
                 ragService,
+                mock(RagPlanCompiler.class),
                 ttsService,
                 redisTemplate,
                 new InterviewDebugTraceService(new ObjectMapper()),
@@ -574,6 +742,7 @@ class QuestionStreamServiceBuildInputTest {
                 questionMapper,
                 attemptMapper,
                 ragService,
+                mock(RagPlanCompiler.class),
                 ttsService,
                 redisTemplate,
                 new InterviewDebugTraceService(new ObjectMapper()),
@@ -679,6 +848,7 @@ class QuestionStreamServiceBuildInputTest {
                 questionMapper,
                 attemptMapper,
                 ragService,
+                mock(RagPlanCompiler.class),
                 ttsService,
                 redisTemplate,
                 new InterviewDebugTraceService(new ObjectMapper()),
@@ -740,16 +910,25 @@ class QuestionStreamServiceBuildInputTest {
     }
 
     private QuestionStreamService newService() {
-        return newService(newDebugTraceService(false));
+        return newService(mock(RagRetrievalService.class), newDebugTraceService(false));
     }
 
     private QuestionStreamService newService(InterviewDebugTraceService debugTraceService) {
+        return newService(mock(RagRetrievalService.class), debugTraceService);
+    }
+
+    private QuestionStreamService newService(RagRetrievalService ragService) {
+        return newService(ragService, newDebugTraceService(false));
+    }
+
+    private QuestionStreamService newService(RagRetrievalService ragService, InterviewDebugTraceService debugTraceService) {
         return new QuestionStreamService(
                 mock(AiClient.class),
                 mock(InterviewSessionMapper.class),
                 mock(InterviewQuestionMapper.class),
                 mock(InterviewAttemptMapper.class),
-                mock(RagRetrievalService.class),
+                ragService,
+                mock(RagPlanCompiler.class),
                 mock(TtsService.class),
                 mock(StringRedisTemplate.class),
                 debugTraceService,

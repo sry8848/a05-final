@@ -35,7 +35,7 @@ speech:
     enabled: ${ASR_ENABLED:true}
     api-key: ${ASR_API_KEY:${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:}}}
   tts:
-    enabled: ${TTS_ENABLED:true}
+    enabled: ${TTS_ENABLED:false} #TODO: 已接入，关掉是省token
     api-key: ${TTS_API_KEY:${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:}}}
 
 

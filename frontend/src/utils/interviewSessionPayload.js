@@ -10,7 +10,7 @@ export function buildInterviewCreatePayload({
   experienceMap
 }) {
   const payload = {
-    targetRole: roleMap[config.jobType] || 'FRONTEND',
+    positionCode: roleMap[config.jobType] || 'FRONTEND',
     experienceLevel: experienceMap[config.experience] || 'JUNIOR',
     mode: config.interviewMode,
     jobDescription: config.jobDescription || null,

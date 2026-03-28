@@ -13,6 +13,8 @@ import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -138,7 +140,7 @@ public class ResumeService {
             }
         }
 
-        resumeParseTaskExecutor.execute(() -> runAsyncParse(resumeId));
+        scheduleAsyncParse(resumeId);
         return new ResumeUploadResponseDto(resumeId, PARSE_STATUS_PARSING);
     }
 
@@ -163,6 +165,20 @@ public class ResumeService {
             resume.setParseStatus(PARSE_STATUS_FAILED);
             resumeMapper.updateById(resume);
         }
+    }
+
+    private void scheduleAsyncParse(Long resumeId) {
+        Runnable task = () -> runAsyncParse(resumeId);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    resumeParseTaskExecutor.execute(task);
+                }
+            });
+            return;
+        }
+        resumeParseTaskExecutor.execute(task);
     }
 
     /**

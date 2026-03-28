@@ -29,6 +29,8 @@ import java.util.Map;
 @ConditionalOnProperty(name = "rag.enabled", havingValue = "true")
 public class KnowledgeIngestionService {
 
+    private static final int MAX_EMBEDDING_BATCH_SIZE = 10;
+
     private final VectorStore vectorStore;
     private final RagProperties ragProperties;
 
@@ -51,7 +53,10 @@ public class KnowledgeIngestionService {
             springAiDocs.add(new Document(doc.toRetrievalText(), buildMetadata(doc)));
         }
 
-        vectorStore.add(springAiDocs);
+        for (int start = 0; start < springAiDocs.size(); start += MAX_EMBEDDING_BATCH_SIZE) {
+            int end = Math.min(start + MAX_EMBEDDING_BATCH_SIZE, springAiDocs.size());
+            vectorStore.add(springAiDocs.subList(start, end));
+        }
         log.info("知识入库完成, 原始文档数={}, 写入条数={}", documents.size(), springAiDocs.size());
         return springAiDocs.size();
     }
@@ -66,6 +71,11 @@ public class KnowledgeIngestionService {
     private Map<String, Object> buildMetadata(KnowledgeDocument doc) {
         Map<String, Object> meta = new LinkedHashMap<>();
         meta.put("question_id", nullSafe(doc.getId()));
+        meta.put("question_text", nullSafe(doc.getQuestionText()));
+        meta.put("intent_concept", nullSafe(doc.getIntentConcept()));
+        meta.put("reference_context", nullSafe(doc.getReferenceContext()));
+        meta.put("scoring_key_points", List.copyOf(safeList(doc.getScoringKeyPoints())));
+        meta.put("scoring_pitfalls", List.copyOf(safeList(doc.getScoringPitfalls())));
         meta.put("domain_code", nullSafe(doc.getDomainCode()));
         meta.put("question_type", nullSafe(doc.getQuestionType()));
         meta.put("difficulty", nullSafe(doc.getDifficulty()));

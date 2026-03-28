@@ -96,7 +96,7 @@ logging:
 
 interview:
   debug:
-    enabled: ${INTERVIEW_DEBUG_ENABLED:false}
+    enabled: ${INTERVIEW_DEBUG_ENABLED:true}
     include-prompts: ${INTERVIEW_DEBUG_INCLUDE_PROMPTS:false}
     max-text-chars: ${INTERVIEW_DEBUG_MAX_TEXT_CHARS:1200}
 
