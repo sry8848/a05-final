@@ -359,6 +359,43 @@ SSE 题目流接口。
 
 查询最近一次单题重答结果。
 
+### `GET /interviews/{sessionId}/questions/{questionId}/ai-consult/messages`
+
+查询当前题目的 AI 追问历史消息。
+
+返回字段：
+
+- `id`
+- `role`
+- `status`
+- `content`
+- `replyToMessageId`
+- `createdAt`
+
+### `POST /interviews/{sessionId}/questions/{questionId}/ai-consult/messages`
+
+创建一轮新的 AI 追问。
+
+请求字段：
+
+- `content`
+
+返回字段：
+
+- `userMessageId`
+- `assistantMessageId`
+
+### `GET /interviews/{sessionId}/questions/{questionId}/ai-consult/messages/{assistantMessageId}/stream`
+
+单题追问 SSE 流接口。
+
+当前事件类型：
+
+- `start`
+- `delta`
+- `done`
+- `error`
+
 ### `GET /interviews/{sessionId}/debug/ledger`
 
 查询当前会话的状态账本，仅用于调试。

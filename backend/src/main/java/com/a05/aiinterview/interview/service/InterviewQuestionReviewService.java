@@ -117,6 +117,18 @@ public class InterviewQuestionReviewService {
                     return mapped;
                 }).toList());
             }
+            if (output.getHighlightedAnnotations() != null) {
+                dto.setHighlightedAnnotations(output.getHighlightedAnnotations().stream().map(item -> {
+                    InterviewQuestionReviewDto.HighlightedAnnotationDto mapped =
+                            new InterviewQuestionReviewDto.HighlightedAnnotationDto();
+                    mapped.setStart(item.getStart());
+                    mapped.setEnd(item.getEnd());
+                    mapped.setQuote(item.getQuote());
+                    mapped.setLabel(item.getLabel());
+                    mapped.setComment(item.getComment());
+                    return mapped;
+                }).toList());
+            }
         } catch (Exception ex) {
             log.warn("单题复盘 detailEvaluationJson 解析失败，按 pending 字段返回", ex);
             clearDetailFields(dto);
@@ -130,6 +142,7 @@ public class InterviewQuestionReviewService {
         dto.setWeakPoints(null);
         dto.setEvaluatedDomains(null);
         dto.setHighlightedSegments(null);
+        dto.setHighlightedAnnotations(null);
         dto.setIdealAnswerOutline(null);
         dto.setRewrittenAnswer(null);
     }

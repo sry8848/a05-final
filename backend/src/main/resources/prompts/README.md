@@ -6,6 +6,7 @@
 - `evaluation-decision.md`
 - `question-generation-stream.md`
 - `question-detail-evaluation.md`
+- `question-consult.md`
 - `report-generation.md`
 - `intro-rewrite.md`
 

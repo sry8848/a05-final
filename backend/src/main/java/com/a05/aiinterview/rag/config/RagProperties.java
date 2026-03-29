@@ -38,4 +38,25 @@ public class RagProperties {
 
     /** 启动时是否自动注入内置样本知识数据（仅用于开发/演示，生产应关闭） */
     private boolean initSampleData = false;
+
+    /** 商业化 rerank 配置。 */
+    private RerankProperties rerank = new RerankProperties();
+
+    @Data
+    public static class RerankProperties {
+        /** 百炼文本排序 API Key，默认复用 AI_BAILIAN_API_KEY / OPENAI_API_KEY。 */
+        private String apiKey = "";
+
+        /** 百炼文本排序 API endpoint。 */
+        private String endpoint = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank";
+
+        /** 默认使用的 rerank 模型。 */
+        private String model = "gte-rerank-v2";
+
+        /** rerank 网络超时。 */
+        private int timeoutMs = 5000;
+
+        /** rerank 最大候选规模。 */
+        private int topN = 10;
+    }
 }

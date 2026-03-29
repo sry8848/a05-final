@@ -60,6 +60,13 @@ class QuestionRedoEvaluationServiceTest {
                 .commentary("回答更扎实")
                 .strengthPoints(List.of("主流程完整"))
                 .weakPoints(List.of("少了性能指标"))
+                .highlightedAnnotations(List.of(
+                        QuestionDetailEvaluationOutput.HighlightedAnnotation.builder()
+                                .quote("parse、layout、paint")
+                                .label("strength")
+                                .comment("主流程明确")
+                                .build()
+                ))
                 .idealAnswerOutline(List.of("定义", "流程", "优化"))
                 .rewrittenAnswer("参考重答")
                 .build();
@@ -89,6 +96,8 @@ class QuestionRedoEvaluationServiceTest {
         assertEquals("generating", updateCaptor.getAllValues().get(0).getEvaluationStatus());
         assertEquals("ready", updateCaptor.getAllValues().get(1).getEvaluationStatus());
         assertEquals(BigDecimal.valueOf(91), updateCaptor.getAllValues().get(1).getEvaluationJson().get("score"));
+        Object rawAnnotations = updateCaptor.getAllValues().get(1).getEvaluationJson().get("highlightedAnnotations");
+        assertTrue(rawAnnotations instanceof List<?> annotations && !annotations.isEmpty());
     }
 
     @Test

@@ -45,6 +45,15 @@ class QuestionDetailEvaluationOutputTest {
                       "comment": "缺少容量评估依据"
                     }
                   ],
+                  "highlightedAnnotations": [
+                    {
+                      "start": 1,
+                      "end": 9,
+                      "quote": "主要提升了系统性能",
+                      "label": "strength",
+                      "comment": "建议补充具体指标"
+                    }
+                  ],
                   "idealAnswerOutline": ["定义目标", "说明方案", "给出结果"],
                   "rewrittenAnswer": "我会先定义目标，再说明方案与结果。"
                 }
@@ -59,6 +68,9 @@ class QuestionDetailEvaluationOutputTest {
         assertThat(output.getHighlightedSegments().get(0).getSegment()).isEqualTo("主要提升了系统性能");
         assertThat(output.getHighlightedSegments().get(0).getLabel()).isEqualTo("strength");
         assertThat(output.getHighlightedSegments().get(0).getComment()).isEqualTo("建议补充具体指标");
+        assertThat(output.getHighlightedAnnotations()).hasSize(1);
+        assertThat(output.getHighlightedAnnotations().get(0).getQuote()).isEqualTo("主要提升了系统性能");
+        assertThat(output.getHighlightedAnnotations().get(0).getStart()).isEqualTo(1);
     }
 
     @Test
@@ -84,8 +96,8 @@ class QuestionDetailEvaluationOutputTest {
 
         assertThat(first).usingRecursiveComparison().isEqualTo(second);
         assertThat(first.getScore()).isNotNull();
-        assertThat(first.getHighlightedSegments()).isNotEmpty();
-        assertThat(first.getHighlightedSegments().get(0).getSegment()).isNotBlank();
-        assertThat(first.getHighlightedSegments().get(0).getLabel()).isIn("strength", "weakness");
+        assertThat(first.getHighlightedAnnotations()).isNotEmpty();
+        assertThat(first.getHighlightedAnnotations().get(0).getQuote()).isNotBlank();
+        assertThat(first.getHighlightedAnnotations().get(0).getLabel()).isIn("strength", "weakness");
     }
 }

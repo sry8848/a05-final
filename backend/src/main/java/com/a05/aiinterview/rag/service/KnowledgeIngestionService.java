@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 知识文档入库服务。
@@ -50,7 +51,7 @@ public class KnowledgeIngestionService {
         List<Document> springAiDocs = new ArrayList<>();
 
         for (KnowledgeDocument doc : documents) {
-            springAiDocs.add(new Document(doc.toRetrievalText(), buildMetadata(doc)));
+            springAiDocs.add(new Document(stablePointId(doc), doc.toRetrievalText(), buildMetadata(doc)));
         }
 
         for (int start = 0; start < springAiDocs.size(); start += MAX_EMBEDDING_BATCH_SIZE) {
@@ -98,5 +99,9 @@ public class KnowledgeIngestionService {
 
     private String nullSafe(String val) {
         return val != null ? val : "";
+    }
+
+    private String stablePointId(KnowledgeDocument doc) {
+        return UUID.nameUUIDFromBytes(nullSafe(doc.getId()).getBytes()).toString();
     }
 }

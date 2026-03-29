@@ -71,11 +71,20 @@ class PromptTemplateCoverageTest {
                 .contains("guiding")
                 .contains("stress")
                 .contains("2-6")
+                .contains("默认直接发问，不加前缀")
+                .contains("recentContext")
+                .contains("askedQuestions")
+                .contains("候选人上一轮若回答极短、空泛、敷衍")
+                .contains("异步线程处理评分结果时，线程间怎么安全传递？")
                 .contains("不做精确概率控制")
                 .contains("`retrievedMaterials` 非空时")
                 .contains("`retrievalPlans` 仅在无真实材料时作为弱提示")
                 .contains("`follow_up_ids`")
-                .contains("项目题若无检索结果");
+                .contains("PROJECT_DEEP_DIVE")
+                .contains("PRINCIPLE")
+                .contains("StringBuilder 和 StringBuffer 的线程安全差别是什么？")
+                .contains("在你的 AI 面试系统里，StringBuilder 和 StringBuffer 怎么选？")
+                .doesNotContain("若当前题型是 PROJECT_DEEP_DIVE，或 projectContext 明确存在");
     }
 
     @Test
@@ -146,6 +155,13 @@ class PromptTemplateCoverageTest {
                 .contains("StrategyCode")
                 .contains("只能从当前注入的策略池中选择一个 `finalDecision`")
                 .contains("nextFocus")
+                .contains("当下一题不是项目题时")
+                .contains("共享变量线程安全")
+                .contains("StringBuilder与StringBuffer线程安全差异")
+                .contains("联合索引设计原则")
+                .contains("@Async事务失效机制")
+                .contains("AI评分线程安全")
+                .contains("面评报告索引设计")
                 .contains("nextProjectPoint")
                 .contains("nextItemType")
                 .contains("nextItemName")
@@ -206,6 +222,49 @@ class PromptTemplateCoverageTest {
 
         assertThat(rendered.getPromptCode()).isEqualTo("intro_rewrite");
         assertThat(rendered.getUserPrompt()).contains("base-prompt").contains("stress");
-        assertThat(rendered.getSystemPrompt()).contains("efficiency").contains("guiding").contains("stress");
+        assertThat(rendered.getSystemPrompt())
+                .contains("efficiency")
+                .contains("guiding")
+                .contains("stress")
+                .contains("首题默认零前缀")
+                .contains("不应默认写成“好，先……”")
+                .contains("先简短介绍一下你的技术背景和最近项目。")
+                .doesNotContain("好，先简短介绍一下你的技术背景和最近项目。");
+    }
+
+    @Test
+    @DisplayName("question_consult template should load and render")
+    void renderQuestionConsult_shouldLoad() {
+        RenderedPrompt rendered = service.render("question_consult", "v1", Map.ofEntries(
+                Map.entry("positionCode", "FRONTEND"),
+                Map.entry("experienceLevel", "JUNIOR"),
+                Map.entry("mode", "practice"),
+                Map.entry("questionStem", "请解释浏览器渲染流水线。"),
+                Map.entry("questionType", "PRINCIPLE"),
+                Map.entry("domainCode", "browser"),
+                Map.entry("domainName", "浏览器原理"),
+                Map.entry("originalAnswerText", "我会从 parse、layout、paint 三段来讲。"),
+                Map.entry("evaluationScore", "86"),
+                Map.entry("evaluationCommentary", "主线是对的，但边界条件还不够。"),
+                Map.entry("strengthPoints", "- 主流程完整"),
+                Map.entry("weakPoints", "- 缺少性能边界"),
+                Map.entry("idealAnswerOutline", "- 定义\n- 流程\n- 优化"),
+                Map.entry("rewrittenAnswer", "参考答案"),
+                Map.entry("consultHistory", """
+- user: 为什么这题失分？
+- assistant: 主要失分在边界条件和验证步骤没有展开。
+"""),
+                Map.entry("latestUserQuestion", "那我该怎么重答？")
+        ));
+
+        assertThat(rendered.getPromptCode()).isEqualTo("question_consult");
+        assertThat(rendered.getUserPrompt())
+                .contains("请解释浏览器渲染流水线")
+                .contains("为什么这题失分")
+                .contains("那我该怎么重答");
+        assertThat(rendered.getSystemPrompt())
+                .contains("单题复盘教练")
+                .contains("不要编造候选人没说过的经历")
+                .contains("不要脱离当前题目");
     }
 }

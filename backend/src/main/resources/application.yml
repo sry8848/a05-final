@@ -56,6 +56,9 @@ spring:
         options:
           model: ${OPENAI_MODEL:qwen-plus}
           temperature: 0.7
+      embedding:
+        options:
+          model: ${OPENAI_EMBEDDING_MODEL:text-embedding-v4}
 
 
   # Qdrant 向量数据库配置（被 spring-ai-qdrant-store 自动读取）
@@ -137,6 +140,12 @@ rag:
   initialize-schema: true
   # init-sample-data=true 时会在启动时向 Qdrant 插入示例知识条目（仅用于开发测试）
   init-sample-data: ${RAG_INIT_SAMPLE:false}
+  rerank:
+    api-key: ${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:}}
+    endpoint: ${RAG_RERANK_ENDPOINT:https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}
+    model: ${RAG_RERANK_MODEL:gte-rerank-v2}
+    timeout-ms: ${RAG_RERANK_TIMEOUT_MS:5000}
+    top-n: ${RAG_RERANK_TOP_N:10}
 
 # SSE 流式生成配置
 # generation-cache-ttl-seconds: Redis 缓存 delta 块和 done 状态的过期时间

@@ -184,6 +184,37 @@ class ReportGenerationContractTest {
     }
 
     @Test
+    @DisplayName("skillDomainScores.score 超出范围 → 逐项截断到 [0,100]")
+    void outOfRangeSkillDomainScores_shouldBeClampedItemByItem() {
+        String json = """
+                {
+                  "overallScore": 75.0,
+                  "summary": "知识域分超范围",
+                  "skillDomainScores": [
+                    {
+                      "domainCode": "jvm",
+                      "domainName": "JVM 原理",
+                      "score": -5,
+                      "commentary": "分数过低"
+                    },
+                    {
+                      "domainCode": "concurrency",
+                      "domainName": "并发编程",
+                      "score": 108.6,
+                      "commentary": "分数过高"
+                    }
+                  ]
+                }
+                """;
+
+        ReportGenerationOutput output = validator.parseAndValidateReport(json);
+
+        assertThat(output.getSkillDomainScores()).hasSize(2);
+        assertThat(output.getSkillDomainScores().get(0).getScore()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(output.getSkillDomainScores().get(1).getScore()).isEqualByComparingTo(new BigDecimal("100"));
+    }
+
+    @Test
     @DisplayName("缺少 comprehensiveRadarScores 时保持 null，供上层走回退逻辑")
     void missingComprehensiveRadarScores_shouldRemainNullForFallback() {
         String json = """
@@ -197,6 +228,36 @@ class ReportGenerationContractTest {
         ReportGenerationOutput output = validator.parseAndValidateReport(json);
 
         assertThat(output.getComprehensiveRadarScores()).isNull();
+    }
+
+    @Test
+    @DisplayName("comprehensiveRadarScores.score 超出范围 → 逐项截断到 [0,100]")
+    void outOfRangeComprehensiveRadarScores_shouldBeClampedItemByItem() {
+        String json = """
+                {
+                  "overallScore": 75.0,
+                  "summary": "能力分超范围",
+                  "comprehensiveRadarScores": [
+                    {
+                      "dimensionKey": "fundamentals",
+                      "dimensionName": "基础原理掌握",
+                      "score": -2
+                    },
+                    {
+                      "dimensionKey": "communication",
+                      "dimensionName": "沟通表达与结构化呈现",
+                      "score": 120.3
+                    }
+                  ],
+                  "skillDomainScores": []
+                }
+                """;
+
+        ReportGenerationOutput output = validator.parseAndValidateReport(json);
+
+        assertThat(output.getComprehensiveRadarScores()).hasSize(2);
+        assertThat(output.getComprehensiveRadarScores().get(0).getScore()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(output.getComprehensiveRadarScores().get(1).getScore()).isEqualByComparingTo(new BigDecimal("100"));
     }
 
     @Test

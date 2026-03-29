@@ -126,6 +126,13 @@ class QuestionDetailEvaluationServiceTest {
                 .commentary("ok")
                 .strengthPoints(List.of("s1"))
                 .weakPoints(List.of("w1"))
+                .highlightedAnnotations(List.of(
+                        QuestionDetailEvaluationOutput.HighlightedAnnotation.builder()
+                                .quote("主要提升了系统性能")
+                                .label("strength")
+                                .comment("建议补充具体指标")
+                                .build()
+                ))
                 .highlightedSegments(List.of(
                         QuestionDetailEvaluationOutput.HighlightedSegment.builder()
                                 .segment("主要提升了系统性能")
@@ -154,6 +161,7 @@ class QuestionDetailEvaluationServiceTest {
                 "weakPoints",
                 "evaluatedDomains",
                 "highlightedSegments",
+                "highlightedAnnotations",
                 "idealAnswerOutline",
                 "rewrittenAnswer"
         );

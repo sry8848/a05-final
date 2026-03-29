@@ -81,6 +81,7 @@
 - `interview_questions`
 - `interview_attempts`
 - `question_redo_attempts`
+- `question_consult_messages`
 - `interview_reports`
 - `ai_invocation_logs`
 
@@ -208,6 +209,18 @@
 - `answer_text`
 - `evaluation_status`
 - `evaluation_json`
+
+### `question_consult_messages`
+
+单题追问消息表，围绕 `session_id + question_id` 组织多轮复盘对话。
+
+重点字段：
+
+- `role`
+- `status`
+- `content`
+- `reply_to_message_id`
+- `error_message`
 
 ### `interview_reports`
 

@@ -141,6 +141,13 @@ class QuestionRedoServiceTest {
                         "score", BigDecimal.valueOf(88),
                         "commentary", "主域表现良好"
                 )),
+                "highlightedAnnotations", List.of(Map.of(
+                        "start", 0,
+                        "end", 7,
+                        "quote", "先说解析再说布局",
+                        "label", "strength",
+                        "comment", "结构顺序合理"
+                )),
                 "highlightedSegments", List.of(Map.of(
                         "segment", "先说解析再说布局",
                         "label", "strength",
@@ -163,5 +170,7 @@ class QuestionRedoServiceTest {
         assertEquals("浏览器原理", response.getEvaluatedDomains().get(0).getDomainName());
         assertEquals(1, response.getHighlightedSegments().size());
         assertEquals("先说解析再说布局", response.getHighlightedSegments().get(0).getSegment());
+        assertEquals(1, response.getHighlightedAnnotations().size());
+        assertEquals("先说解析再说布局", response.getHighlightedAnnotations().get(0).getQuote());
     }
 }

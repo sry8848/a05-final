@@ -66,19 +66,18 @@
               <i class="fas fa-user"></i>
               我的回答
             </h3>
-            <span class="section-tip">绿色为亮点，红色为待补强片段</span>
+            <span class="section-tip">仅对关键亮点与待补强片段做文字标注</span>
           </div>
 
           <div v-if="detail.answerStatus === 'skipped'" class="empty-answer">
             本题当时被跳过，建议先按黄金骨架补全一版答案，再继续向 AI 追问。
           </div>
           <p v-else class="annotated-answer">
-            <template v-if="renderSegments.length">
+            <template v-if="renderSlices.length">
               <span
-                v-for="(segment, index) in renderSegments"
-                :key="`${segment.text}-${index}`"
-                class="answer-segment"
-                :class="segment.type"
+                v-for="(segment, index) in renderSlices"
+                :key="`${segment.start ?? 'legacy'}-${segment.end ?? index}-${segment.text}`"
+                :class="segment.type === 'plain' ? 'answer-segment-plain' : ['answer-segment', segment.type]"
               >
                 {{ segment.text }}
               </span>
@@ -321,7 +320,7 @@
               <i class="fas fa-robot"></i>
               AI 追问
             </h3>
-            <span class="section-tip">本区为本地模拟追问，不代表后端真实评估</span>
+            <span class="section-tip">围绕当前题继续追问，回复由后端实时生成</span>
           </div>
 
           <div class="quick-question-list">
@@ -329,6 +328,7 @@
               v-for="item in quickQuestions"
               :key="item"
               class="quick-question-btn"
+              :disabled="isConsultSending || !consultContext.canConsult"
               @click="useQuickQuestion(item)"
             >
               {{ item }}
@@ -346,8 +346,8 @@
                 <i :class="message.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
               </div>
               <div class="consult-bubble">
-                <p>{{ message.content }}</p>
-                <span>{{ message.createdAt }}</span>
+                <p>{{ resolveConsultMessageContent(message) }}</p>
+                <span>{{ formatConsultCreatedAt(message.createdAt) }}</span>
               </div>
             </div>
           </div>
@@ -366,7 +366,7 @@
             ></textarea>
             <button
               class="send-btn"
-              :disabled="!consultInput.trim() || isConsultSending"
+              :disabled="!consultInput.trim() || isConsultSending || !consultContext.canConsult"
               @click="sendConsult()"
             >
               <i :class="isConsultSending ? 'fas fa-spinner fa-spin' : 'fas fa-paper-plane'"></i>
@@ -419,15 +419,27 @@
 
 <script>
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { createQuestionRedoAttempt, getLatestQuestionRedoAttempt } from '../api/resume'
+import {
+  createQuestionConsultMessage,
+  createQuestionRedoAttempt,
+  getLatestQuestionRedoAttempt,
+  getQuestionConsultMessages,
+  streamQuestionConsultMessage
+} from '../api/resume'
 import {
   normalizeQuestionRedoAttempt,
   shouldPollQuestionRedoAttempt,
   withQuestionRedoState
 } from '../utils/questionRedoState'
+import { buildQuestionDetailRenderSlices } from '../utils/questionDetailAnnotationRender'
 import { buildEvaluatedDomainFeedback } from '../utils/questionDomainFeedback'
+import {
+  appendQuestionConsultDelta as appendConsultDelta,
+  buildOptimisticQuestionConsultMessages as buildConsultOptimisticMessages,
+  normalizeQuestionConsultMessages as normalizeConsultMessages,
+  replaceQuestionConsultMessage as replaceConsultMessage
+} from '../utils/questionConsultState'
 
-const CONSULT_STORAGE_KEY = 'questionConsultHistory'
 const REDO_POLL_INTERVAL_MS = 2000
 
 export default {
@@ -456,6 +468,7 @@ export default {
     const redoLatest = ref(null)
     const showRedoComposer = ref(false)
     let redoPollTimer = null
+    let consultStreamAbortController = null
 
     const hasDetail = computed(() => Boolean(props.detail))
     const redoContext = computed(() => withQuestionRedoState(
@@ -520,35 +533,13 @@ export default {
       return date.toLocaleString('zh-CN', { hour12: false })
     })
 
-    const renderSegments = computed(() => {
-      if (!props.detail?.highlightedSegments || !props.detail.highlightedSegments.length) return []
-      return props.detail.highlightedSegments
-        .map((item) => {
-          if (!item || typeof item !== 'object') return null
-          if ('segment' in item || 'label' in item || 'comment' in item) {
-            const text = String(item.segment || '').trim()
-            if (!text) return null
-            const label = String(item.label || '').toLowerCase()
-            const type = label === 'weakness' ? 'weakness' : 'strength'
-            return {
-              text,
-              type,
-              note: item.comment || ''
-            }
-          }
+    const renderSlices = computed(() => buildQuestionDetailRenderSlices({
+      answerText: props.detail?.userAnswer || '',
+      highlightedAnnotations: props.detail?.highlightedAnnotations || [],
+      highlightedSegments: props.detail?.highlightedSegments || []
+    }))
 
-          const text = String(item.text || '').trim()
-          if (!text) return null
-          return {
-            text,
-            type: item.type === 'weakness' ? 'weakness' : 'strength',
-            note: item.note || ''
-          }
-        })
-        .filter(Boolean)
-    })
-
-    const annotationNotes = computed(() => renderSegments.value.filter((item) => item.note))
+    const annotationNotes = computed(() => renderSlices.value.filter((item) => item.type !== 'plain' && item.note))
 
     const quickQuestions = computed(() => [
       '为什么这里会失分？',
@@ -558,9 +549,14 @@ export default {
 
     const backLabel = computed(() => props.detail?.backLabel || '返回报告')
 
-    const questionStorageId = computed(() => {
-      if (!props.detail) return ''
-      return `${props.detail.recordId}-${props.detail.questionId}`
+    const consultContext = computed(() => {
+      const sessionId = props.detail?.sessionId == null ? '' : String(props.detail.sessionId).trim()
+      const questionId = props.detail?.questionId == null ? '' : String(props.detail.questionId).trim()
+      return {
+        sessionId,
+        questionId,
+        canConsult: Boolean(sessionId && questionId)
+      }
     })
 
     const stopRedoPolling = () => {
@@ -569,21 +565,22 @@ export default {
       redoPollTimer = null
     }
 
-    const readConsultHistory = () => {
-      if (!questionStorageId.value) {
+    const stopConsultStreaming = () => {
+      if (!consultStreamAbortController) return
+      consultStreamAbortController.abort()
+      consultStreamAbortController = null
+    }
+
+    const loadQuestionConsultMessages = async () => {
+      if (!consultContext.value.canConsult) {
         consultMessages.value = []
         return
       }
-
-      const raw = JSON.parse(localStorage.getItem(CONSULT_STORAGE_KEY) || '{}')
-      consultMessages.value = raw[questionStorageId.value] || []
-    }
-
-    const saveConsultHistory = () => {
-      if (!questionStorageId.value) return
-      const raw = JSON.parse(localStorage.getItem(CONSULT_STORAGE_KEY) || '{}')
-      raw[questionStorageId.value] = consultMessages.value
-      localStorage.setItem(CONSULT_STORAGE_KEY, JSON.stringify(raw))
+      const messages = await getQuestionConsultMessages(
+        consultContext.value.sessionId,
+        consultContext.value.questionId
+      )
+      consultMessages.value = normalizeConsultMessages(messages)
     }
 
     const loadLatestRedoAttempt = async ({ silent = false } = {}) => {
@@ -641,49 +638,84 @@ export default {
       startRedoPolling()
     }
 
-    const buildAssistantReply = (question) => {
-      const weakPoint = props.detail?.weakPoints?.[0] || '结构化表达还不够完整'
-      const outline = props.detail?.idealAnswerOutline?.slice(0, 2).join(' ')
-      if (question.includes('失分')) {
-        return `你这题主要失分在「${weakPoint}」。建议重答时先补齐定义和关键原理，再结合一个具体场景把回答展开。`
-      }
-      if (question.includes('怎么组织') || question.includes('重答')) {
-        return `可以按这个顺序来组织：${outline}。这样能先把核心概念讲清，再逐步展开细节。`
-      }
-      return `如果围绕这题继续提升，我建议你重点补强「${weakPoint}」，并把回答拆成“概念定义 -> 关键原理 -> 场景案例 -> 边界与取舍”四段来输出。`
-    }
-
-    const pushMessage = (role, content) => {
-      consultMessages.value.push({
-        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-        role,
-        content,
-        createdAt: new Date().toLocaleTimeString('zh-CN', {
-          hour: '2-digit',
-          minute: '2-digit'
-        })
-      })
-      saveConsultHistory()
-    }
-
-    const sendConsult = (presetQuestion = '') => {
+    const sendConsult = async (presetQuestion = '') => {
       const content = (presetQuestion || consultInput.value).trim()
-      if (!content || isConsultSending.value) return
+      if (!content || isConsultSending.value || !consultContext.value.canConsult) return
 
       consultError.value = ''
-      pushMessage('user', content)
-      consultInput.value = ''
       isConsultSending.value = true
+      stopConsultStreaming()
 
-      window.setTimeout(() => {
-        try {
-          pushMessage('assistant', buildAssistantReply(content))
-        } catch (error) {
-          consultError.value = 'AI 追问暂时失败，请稍后重试。'
-        } finally {
-          isConsultSending.value = false
+      let created = null
+      try {
+        created = await createQuestionConsultMessage(
+          consultContext.value.sessionId,
+          consultContext.value.questionId,
+          { content }
+        )
+        consultMessages.value = [
+          ...consultMessages.value,
+          ...buildConsultOptimisticMessages(content, created)
+        ]
+        consultInput.value = ''
+
+        const controller = new AbortController()
+        consultStreamAbortController = controller
+        await streamQuestionConsultMessage(
+          consultContext.value.sessionId,
+          consultContext.value.questionId,
+          created.assistantMessageId,
+          {
+            onDelta(payload) {
+              consultMessages.value = appendConsultDelta(
+                consultMessages.value,
+                created.assistantMessageId,
+                payload?.text || ''
+              )
+            },
+            onDone(payload) {
+              consultMessages.value = replaceConsultMessage(
+                consultMessages.value,
+                payload?.assistantMessageId || created.assistantMessageId,
+                {
+                  content: payload?.content || '',
+                  status: payload?.status || 'ready'
+                }
+              )
+            },
+            onError(payload) {
+              consultMessages.value = replaceConsultMessage(
+                consultMessages.value,
+                payload?.assistantMessageId || created.assistantMessageId,
+                {
+                  status: payload?.status || 'failed'
+                }
+              )
+              consultError.value = payload?.message || 'AI 追问暂时失败，请稍后重试。'
+            }
+          },
+          controller.signal
+        )
+      } catch (error) {
+        if (error?.name !== 'AbortError') {
+          consultError.value = error?.message || 'AI 追问暂时失败，请稍后重试。'
+          if (created?.assistantMessageId) {
+            consultMessages.value = replaceConsultMessage(
+              consultMessages.value,
+              created.assistantMessageId,
+              { status: 'failed' }
+            )
+          }
         }
-      }, 500)
+      } finally {
+        if (!consultStreamAbortController || consultStreamAbortController.signal.aborted) {
+          consultStreamAbortController = null
+        }
+        if (consultStreamAbortController && !consultStreamAbortController.signal.aborted) {
+          consultStreamAbortController = null
+        }
+        isConsultSending.value = false
+      }
     }
 
     const useQuickQuestion = (question) => {
@@ -732,13 +764,48 @@ export default {
       emit('navigateQuestion', delta)
     }
 
+    const formatConsultCreatedAt = (value) => {
+      if (!value) return ''
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return String(value)
+      return date.toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    }
+
+    const resolveConsultMessageContent = (message) => {
+      const content = String(message?.content || '').trim()
+      if (content) return content
+      if (message?.role === 'assistant' && message?.status === 'generating') {
+        return '正在生成回复...'
+      }
+      if (message?.role === 'assistant' && message?.status === 'cancelled') {
+        return '该条追问已取消，请重新发起。'
+      }
+      if (message?.role === 'assistant' && message?.status === 'failed') {
+        return '该条追问生成失败，请重新发起。'
+      }
+      return '暂无内容'
+    }
+
     watch(
-      questionStorageId,
-      () => {
+      consultContext,
+      async () => {
         consultInput.value = ''
         consultError.value = ''
         isConsultSending.value = false
-        readConsultHistory()
+        stopConsultStreaming()
+        if (consultContext.value.canConsult) {
+          try {
+            await loadQuestionConsultMessages()
+          } catch (error) {
+            consultMessages.value = []
+            consultError.value = error?.message || '加载 AI 追问历史失败，请稍后重试。'
+          }
+        } else {
+          consultMessages.value = []
+        }
 
         stopRedoPolling()
         redoAnswer.value = ''
@@ -756,6 +823,7 @@ export default {
 
     onUnmounted(() => {
       stopRedoPolling()
+      stopConsultStreaming()
     })
 
     return {
@@ -781,9 +849,12 @@ export default {
       redoScoreClass,
       redoDomainFeedback,
       latestRedoAtText,
-      renderSegments,
+      renderSlices,
       annotationNotes,
       quickQuestions,
+      consultContext,
+      formatConsultCreatedAt,
+      resolveConsultMessageContent,
       backLabel,
       handleBack,
       handleCollect,
@@ -974,23 +1045,36 @@ export default {
 }
 
 .annotated-answer {
+  display: block;
   margin: 0;
   padding: 16px 18px;
   border-radius: var(--radius-md);
-  background: rgba(15, 23, 42, 0.28);
-  color: var(--text-primary);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 24px rgba(148, 163, 184, 0.12);
+  color: #1f2937;
   line-height: 1.9;
   white-space: pre-wrap;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.answer-segment {
+  color: inherit;
+}
+
+.answer-segment-plain {
+  color: inherit;
 }
 
 .answer-segment.strength {
-  background: rgba(16, 185, 129, 0.16);
-  color: #34d399;
+  color: #0f9f6e;
+  font-weight: 600;
 }
 
 .answer-segment.weakness {
-  background: rgba(239, 68, 68, 0.16);
-  color: #f87171;
+  color: #d14343;
+  font-weight: 600;
 }
 
 .empty-answer {
@@ -1010,17 +1094,37 @@ export default {
 
 .annotation-note {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: 12px;
   font-size: 13px;
+  line-height: 1.7;
+}
+
+.annotation-note i {
+  margin-top: 2px;
 }
 
 .annotation-note.strength {
-  color: #34d399;
+  background: #f5fbf8;
+  border-color: #d7eee3;
+  color: #24443a;
+}
+
+.annotation-note.strength i {
+  color: #0f9f6e;
 }
 
 .annotation-note.weakness {
-  color: #f87171;
+  background: #fff7f7;
+  border-color: #f2d6d6;
+  color: #5b2d2d;
+}
+
+.annotation-note.weakness i {
+  color: #d14343;
 }
 
 .score-overview {
@@ -1333,6 +1437,11 @@ export default {
 
 .quick-question-btn:hover {
   background: rgba(102, 126, 234, 0.14);
+}
+
+.quick-question-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .consult-messages {

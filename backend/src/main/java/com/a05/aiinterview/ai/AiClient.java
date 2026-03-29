@@ -6,6 +6,7 @@ import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.ai.dto.IntroRewriteInput;
 import com.a05.aiinterview.ai.dto.PlannerInput;
 import com.a05.aiinterview.ai.dto.PlannerOutput;
+import com.a05.aiinterview.ai.dto.QuestionConsultInput;
 import com.a05.aiinterview.ai.dto.QuestionDetailEvaluationInput;
 import com.a05.aiinterview.ai.dto.QuestionDetailEvaluationOutput;
 import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
@@ -73,4 +74,12 @@ public interface AiClient {
      * @return 结构化详细评估结果
      */
     AiCallResult<QuestionDetailEvaluationOutput> callQuestionDetailEvaluation(QuestionDetailEvaluationInput input);
+
+    /**
+     * 调用单题追问服务，围绕当前题目生成流式复盘回复。
+     *
+     * @param input 单题追问上下文
+     * @return 文本增量流
+     */
+    Flux<String> callQuestionConsultStream(QuestionConsultInput input);
 }

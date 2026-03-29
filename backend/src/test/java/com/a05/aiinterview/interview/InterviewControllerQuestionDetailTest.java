@@ -9,6 +9,7 @@ import com.a05.aiinterview.interview.service.InterviewManagementService;
 import com.a05.aiinterview.interview.service.InterviewReportService;
 import com.a05.aiinterview.interview.service.InterviewService;
 import com.a05.aiinterview.interview.service.LearningRecommendationService;
+import com.a05.aiinterview.interview.service.QuestionConsultService;
 import com.a05.aiinterview.interview.service.QuestionRedoService;
 import com.a05.aiinterview.interview.service.QuestionStreamService;
 import org.junit.jupiter.api.Test;
@@ -30,7 +31,8 @@ class InterviewControllerQuestionDetailTest {
                 mock(InterviewManagementService.class),
                 mock(LearningRecommendationService.class),
                 mock(QuestionStreamService.class),
-                mock(QuestionRedoService.class)
+                mock(QuestionRedoService.class),
+                mock(QuestionConsultService.class)
         );
     }
 

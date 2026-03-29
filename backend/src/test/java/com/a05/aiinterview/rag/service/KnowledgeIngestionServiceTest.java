@@ -10,6 +10,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -55,6 +56,8 @@ class KnowledgeIngestionServiceTest {
         assertThat(storedDocuments).hasSize(1);
 
         Document stored = storedDocuments.getFirst();
+        assertThat(stored.getId())
+                .isEqualTo(UUID.nameUUIDFromBytes("redis-cache-penetration-001".getBytes()).toString());
         assertThat(stored.getText())
                 .contains("讲一下 Redis 缓存穿透")
                 .contains("考察空值缓存、布隆过滤器和数据库保护方案")
@@ -79,6 +82,49 @@ class KnowledgeIngestionServiceTest {
         assertThat(metadata.get("scoring_pitfalls")).isEqualTo(List.of("混淆穿透和击穿"));
         assertThat(metadata.get("keywords")).isEqualTo(List.of("Redis", "缓存穿透", "布隆过滤器"));
         assertThat(metadata.get("follow_up_ids")).isEqualTo(List.of("redis-bloom-filter-false-positive-001"));
+    }
+
+    @Test
+    @DisplayName("ingest should use stable uuid point ids derived from question id")
+    void ingest_shouldUseStableUuidPointIdsDerivedFromQuestionId() {
+        VectorStore vectorStore = mock(VectorStore.class);
+        KnowledgeIngestionService service = new KnowledgeIngestionService(vectorStore, new RagProperties());
+
+        KnowledgeDocument first = KnowledgeDocument.builder()
+                .id("redis-cache-penetration-001")
+                .questionText("讲一下 Redis 缓存穿透")
+                .intentConcept("考察空值缓存、布隆过滤器和数据库保护方案")
+                .referenceContext("第一次入库内容")
+                .questionType("PRINCIPLE")
+                .difficulty("L2")
+                .source("manual_curated")
+                .active(true)
+                .version("v1")
+                .build();
+
+        KnowledgeDocument second = KnowledgeDocument.builder()
+                .id("redis-cache-penetration-001")
+                .questionText("讲一下 Redis 缓存穿透")
+                .intentConcept("考察空值缓存、布隆过滤器和数据库保护方案")
+                .referenceContext("第二次入库内容")
+                .questionType("PRINCIPLE")
+                .difficulty("L2")
+                .source("manual_curated")
+                .active(true)
+                .version("v2")
+                .build();
+
+        service.ingest(List.of(first));
+        service.ingest(List.of(second));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Document>> captor = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore, times(2)).add(captor.capture());
+
+        List<List<Document>> allBatches = captor.getAllValues();
+        String expectedId = UUID.nameUUIDFromBytes("redis-cache-penetration-001".getBytes()).toString();
+        assertThat(allBatches.get(0).getFirst().getId()).isEqualTo(expectedId);
+        assertThat(allBatches.get(1).getFirst().getId()).isEqualTo(expectedId);
     }
 
     @Test

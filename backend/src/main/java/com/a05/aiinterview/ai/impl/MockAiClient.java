@@ -10,6 +10,7 @@ import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.ai.dto.IntroRewriteInput;
 import com.a05.aiinterview.ai.dto.PlannerInput;
 import com.a05.aiinterview.ai.dto.PlannerOutput;
+import com.a05.aiinterview.ai.dto.QuestionConsultInput;
 import com.a05.aiinterview.ai.dto.QuestionDetailEvaluationInput;
 import com.a05.aiinterview.ai.dto.QuestionDetailEvaluationOutput;
 import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
@@ -141,10 +142,35 @@ public class MockAiClient implements AiClient {
                         .label("strength")
                         .comment("主线表达完整，但还可补更多细节。")
                         .build()))
+                .highlightedAnnotations(List.of(QuestionDetailEvaluationOutput.HighlightedAnnotation.builder()
+                        .quote(input.getAnswerText())
+                        .label("strength")
+                        .comment("主线表达完整，但还可补更多细节。")
+                        .build()))
                 .idealAnswerOutline(List.of("先说明核心原理", "再结合场景说明方案取舍"))
                 .rewrittenAnswer(input.getAnswerText())
                 .build();
         return mockResult(output, startMs, "question_detail_evaluation");
+    }
+
+    @Override
+    public Flux<String> callQuestionConsultStream(QuestionConsultInput input) {
+        String weakestPoint = input.getWeakPoints() == null || input.getWeakPoints().isEmpty()
+                ? "关键点没有展开"
+                : input.getWeakPoints().getFirst();
+        String latestQuestion = input.getLatestUserQuestion() == null ? "" : input.getLatestUserQuestion();
+        String reply;
+        if (latestQuestion.contains("失分")) {
+            reply = "这题主要失分在「" + weakestPoint + "」。如果重答，先把核心定义讲准，再补一段场景里的边界和取舍。";
+        } else if (latestQuestion.contains("重答") || latestQuestion.contains("怎么答")) {
+            String outline = input.getIdealAnswerOutline() == null || input.getIdealAnswerOutline().isEmpty()
+                    ? "定义、主流程、边界、取舍"
+                    : String.join("、", input.getIdealAnswerOutline());
+            reply = "建议按「" + outline + "」来重答，重点把你原回答里没展开的「" + weakestPoint + "」补进去。";
+        } else {
+            reply = "如果继续围绕这题提升，优先补强「" + weakestPoint + "」，并把回答收敛到当前题目的证据和边界条件上。";
+        }
+        return Flux.fromArray(reply.split("")).delayElements(Duration.ofMillis(20));
     }
 
     private List<ReportGenerationOutput.SkillDomainScore> buildMockDomainScores(ReportGenerationInput input) {

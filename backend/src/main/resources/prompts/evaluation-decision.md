@@ -56,6 +56,7 @@ promptVersion: v2
 - Step 2：意图推演。基于 Step 1 评估，确定我们下一题最需要候选人补充的核心信息。
 - Step 3：策略匹配。去当前注入的【当前可用策略池】中寻找最匹配的唯一 `StrategyCode`。
 - Step 4：焦点生成。基于选定策略生成 `nextFocus`，必须是 4-20 字的单一焦点短语，绝不能写成完整问句。
+- Step 4 补充：当下一题不是项目题时，`nextFocus` 必须写成更纯的知识域焦点，不要套真实项目外壳。应优先写成“共享变量线程安全”“联合索引设计原则”“@Async事务失效机制”这类纯焦点短语，而不是“AI评分线程安全”“面评报告索引设计”这类项目壳表达。
 - Step 4.1：若下一题继续走项目主线，必须同时输出 `nextItemType`、`nextItemName`、`nextProjectPoint`。其中 `nextProjectPoint` 必须是 4-20 字的项目切口短语，不能直接复制整句题干。
 - Step 5：RAG 需求研判。若 `nextFocus` 需要事实补充，输出 `retrievalPlans`；否则输出空数组。
 
@@ -89,7 +90,13 @@ promptVersion: v2
 - 若为 `WRAPUP`，则 `finalDecision` 必须是结束面试的策略编码，且 `nextFocus`、`targetDomainCode`、`retrievalPlans` 必须为空。
 - 若为 `CONTINUE`，则 `finalDecision` 绝不允许是结束面试的策略编码。
 3. 焦点规范：`nextFocus` 必须是 4-20 个字的单一核心短语，绝不能写成完整问句，也不能大而化之。
-3.1 项目结构化字段：
+3.1 非项目题焦点提纯：
+- 当下一题不是项目题时，`nextFocus` 应写成脱离具体项目也成立的知识域焦点。
+- 优先写法示例：`共享变量线程安全`、`StringBuilder与StringBuffer线程安全差异`、`联合索引设计原则`、`@Async事务失效机制`
+- 禁止写法示例：`AI评分线程安全`、`面评报告索引设计`、`AI面试系统缓存过期兜底`
+3.2 项目题焦点保留项目切口：
+- 当下一题是项目题时，`nextFocus` 可以保留项目语境，但仍应是短语，不得写成整句题目。
+3.3 项目结构化字段：
 - 当你选择的 `finalDecision` 对应动作是【进入项目题】或【继续项目主线】时，必须同时输出 `nextItemType`、`nextItemName`、`nextProjectPoint`
 - `nextProjectPoint` 必须是结构化项目切口短语，不能写成整句问题
 - 当动作不是项目题时，`nextItemType`、`nextItemName`、`nextProjectPoint` 必须输出 `""`

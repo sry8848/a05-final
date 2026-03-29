@@ -132,7 +132,26 @@ CREATE TABLE IF NOT EXISTS question_redo_attempts (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='单题重答记录表';
 
 -- ============================================================
--- 7. 面试报告表：面试结束后异步生成，每场会话一条记录
+-- 7. 单题追问消息表：围绕单题复盘的多轮问答消息
+-- ============================================================
+CREATE TABLE IF NOT EXISTS question_consult_messages (
+    id                  BIGINT       AUTO_INCREMENT PRIMARY KEY,
+    user_id             BIGINT       NOT NULL         COMMENT '用户 ID',
+    session_id          BIGINT       NOT NULL         COMMENT '会话 ID',
+    question_id         BIGINT       NOT NULL         COMMENT '题目 ID',
+    role                VARCHAR(16)  NOT NULL         COMMENT '角色：user/assistant',
+    status              VARCHAR(32)  NOT NULL         COMMENT '状态：ready/generating/failed/cancelled',
+    content             LONGTEXT     NULL             COMMENT '消息内容',
+    reply_to_message_id BIGINT       NULL             COMMENT 'assistant 对应的 user 消息 ID',
+    error_message       VARCHAR(512) NULL             COMMENT '失败或取消原因',
+    created_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_qcm_user_question (user_id, session_id, question_id),
+    INDEX idx_qcm_generating (user_id, session_id, question_id, role, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='单题追问消息表';
+
+-- ============================================================
+-- 8. 面试报告表：面试结束后异步生成，每场会话一条记录
 -- ============================================================
 CREATE TABLE IF NOT EXISTS interview_reports (
     id                          BIGINT         AUTO_INCREMENT PRIMARY KEY,
@@ -152,7 +171,7 @@ CREATE TABLE IF NOT EXISTS interview_reports (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试报告表（每场会话一条）';
 
 -- ============================================================
--- 8. AI 调用审计日志表：记录每次大模型调用的元数据
+-- 9. AI 调用审计日志表：记录每次大模型调用的元数据
 -- ============================================================
 CREATE TABLE IF NOT EXISTS ai_invocation_logs (
     id                      BIGINT       AUTO_INCREMENT PRIMARY KEY,

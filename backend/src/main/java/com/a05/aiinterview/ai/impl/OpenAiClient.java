@@ -369,6 +369,52 @@ public class OpenAiClient implements AiClient {
         }
     }
 
+    @Override
+    public Flux<String> callQuestionConsultStream(QuestionConsultInput input) {
+        log.info("调用 OpenAI 单题追问, questionId={}, assistantMessageId={}",
+                input.getQuestionId(), input.getAssistantMessageId());
+        RenderedPrompt rendered = renderPrompt(PROMPT_CODE_QUESTION_CONSULT,
+                buildQuestionConsultVariables(input));
+        long startMs = System.currentTimeMillis();
+        AtomicInteger responseLength = new AtomicInteger(0);
+        return chatClient.prompt()
+                .system(rendered.getSystemPrompt())
+                .user(rendered.getUserPrompt())
+                .stream()
+                .content()
+                .doOnNext(token -> {
+                    if (token != null) {
+                        responseLength.addAndGet(token.length());
+                    }
+                })
+                .doOnComplete(() -> auditLite(
+                        rendered.getPromptCode(),
+                        rendered.getPromptVersion(),
+                        input.getInterviewId(),
+                        input.getQuestionId(),
+                        input.getAssistantMessageId() == null ? null : String.valueOf(input.getAssistantMessageId()),
+                        System.currentTimeMillis() - startMs,
+                        "success",
+                        null,
+                        null,
+                        responseLength.get(),
+                        null
+                ))
+                .doOnError(error -> auditLite(
+                        rendered.getPromptCode(),
+                        rendered.getPromptVersion(),
+                        input.getInterviewId(),
+                        input.getQuestionId(),
+                        input.getAssistantMessageId() == null ? null : String.valueOf(input.getAssistantMessageId()),
+                        System.currentTimeMillis() - startMs,
+                        "error",
+                        null,
+                        null,
+                        responseLength.get(),
+                        asException(error)
+                ));
+    }
+
     // ──────────────────────────── 公共工具 ──────────────────────────────────
 
     /**
@@ -561,6 +607,7 @@ public class OpenAiClient implements AiClient {
     private static final String PROMPT_CODE_QUESTION_GENERATION_STREAM = "question_generation_stream";
     private static final String PROMPT_CODE_INTRO_REWRITE = "intro_rewrite";
     private static final String PROMPT_CODE_QUESTION_DETAIL_EVALUATION = "question_detail_evaluation";
+    private static final String PROMPT_CODE_QUESTION_CONSULT = "question_consult";
 
     private Map<String, Object> buildPlannerVariables(PlannerInput input) {
         Map<String, Object> variables = new LinkedHashMap<>();
@@ -644,6 +691,27 @@ public class OpenAiClient implements AiClient {
         return variables;
     }
 
+    private Map<String, Object> buildQuestionConsultVariables(QuestionConsultInput input) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("positionCode", safeString(input.getPositionCode()));
+        variables.put("experienceLevel", safeString(input.getExperienceLevel()));
+        variables.put("mode", safeString(input.getMode()));
+        variables.put("questionStem", safeString(input.getQuestionStem()));
+        variables.put("questionType", safeString(input.getQuestionType()));
+        variables.put("domainCode", safeString(input.getDomainCode()));
+        variables.put("domainName", safeString(input.getDomainName()));
+        variables.put("originalAnswerText", safeString(input.getOriginalAnswerText()));
+        variables.put("evaluationScore", input.getEvaluationScore() == null ? "" : String.valueOf(input.getEvaluationScore()));
+        variables.put("evaluationCommentary", safeString(input.getEvaluationCommentary()));
+        variables.put("strengthPoints", formatBulletLines(input.getStrengthPoints()));
+        variables.put("weakPoints", formatBulletLines(input.getWeakPoints()));
+        variables.put("idealAnswerOutline", formatBulletLines(input.getIdealAnswerOutline()));
+        variables.put("rewrittenAnswer", safeString(input.getRewrittenAnswer()));
+        variables.put("consultHistory", formatConsultHistory(input.getConsultHistory()));
+        variables.put("latestUserQuestion", safeString(input.getLatestUserQuestion()));
+        return variables;
+    }
+
     private Map<String, Object> buildQuestionRoleContext(QuestionGenerationInput input) {
         if (input.getRoleContext() != null) {
             return toMap(input.getRoleContext());
@@ -709,6 +777,14 @@ public class OpenAiClient implements AiClient {
         retrieval.put("retrievalPlans", List.of());
         retrieval.put("retrievedMaterials", List.of());
         retrieval.put("followUpCandidates", List.of());
+        retrieval.put("retrievalAudit", Map.of(
+                "retrievalTriggered", false,
+                "lexicalCandidateCount", 0,
+                "denseCandidateCount", 0,
+                "rerankPreTopQuestionIds", List.of(),
+                "rerankPostTopQuestionIds", List.of(),
+                "injectedQuestionIds", List.of()
+        ));
         return retrieval;
     }
 
@@ -786,6 +862,26 @@ public class OpenAiClient implements AiClient {
                     .append(safeString(ctx.getStem()))
                     .append(" | A: ")
                     .append(safeString(ctx.getAnswer()));
+        }
+        return sb.isEmpty() ? "- 无" : sb.toString();
+    }
+
+    private String formatConsultHistory(List<QuestionConsultInput.ConsultTurn> consultHistory) {
+        if (consultHistory == null || consultHistory.isEmpty()) {
+            return "- 无";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (QuestionConsultInput.ConsultTurn turn : consultHistory) {
+            if (turn == null || safeString(turn.getContent()).isBlank()) {
+                continue;
+            }
+            if (!sb.isEmpty()) {
+                sb.append("\n");
+            }
+            sb.append("- ")
+                    .append(safeString(turn.getRole()))
+                    .append(": ")
+                    .append(safeString(turn.getContent()));
         }
         return sb.isEmpty() ? "- 无" : sb.toString();
     }

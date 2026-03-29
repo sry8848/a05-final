@@ -15,11 +15,11 @@ public final class InterviewPacingSupport {
 
     public static final String MAX_QUESTIONS_KEY = "max_questions";
 
-    private static final Profile INTERN     = profile(14, 1, 4, 3, 8,  9, 8,  1,  2);
-    private static final Profile FRESH_GRAD = profile(14, 1, 4, 4, 8,   8, 10, 2,  2);
-    private static final Profile JUNIOR     = profile(15, 2, 5, 4, 8,   8, 10, 3,  2);
-    private static final Profile MIDDLE     = profile(16, 3, 5, 4, 9,   8, 12, 3, 2);
-    private static final Profile SENIOR     = profile(17, 3, 6, 4, 10,   8, 12, 4, 2);
+    private static final Profile INTERN     = profile(14, 1, 3, 2, 6,  9, 6,  1,  2);
+    private static final Profile FRESH_GRAD = profile(14, 1, 3, 3, 7,   8, 7, 2,  2);
+    private static final Profile JUNIOR     = profile(15, 2, 4, 4, 6,   8, 8, 3,  2);
+    private static final Profile MIDDLE     = profile(16, 3, 4, 4, 5,   8, 9, 3, 2);
+    private static final Profile SENIOR     = profile(17, 3, 5, 3, 6,   8, 10, 4, 2);
     private static final Map<String, Profile> BY_LEVEL = Map.of(
             ExperienceLevel.INTERN.name(), INTERN,
             ExperienceLevel.FRESH_GRAD.name(), FRESH_GRAD,

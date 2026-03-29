@@ -9,6 +9,9 @@ spring:
       chat:
         options:
           model: ${OPENAI_MODEL:qwen-plus}
+      embedding:
+        options:
+          model: ${OPENAI_EMBEDDING_MODEL:text-embedding-v4}
   mail:
     host: smtp.qq.com
     port: 465
@@ -35,7 +38,7 @@ speech:
     enabled: ${ASR_ENABLED:true}
     api-key: ${ASR_API_KEY:${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:}}}
   tts:
-    enabled: ${TTS_ENABLED:false} #TODO: 已接入，关掉是省token
+    enabled: ${TTS_ENABLED:true} #TODO: 已接入，关掉是省token
     api-key: ${TTS_API_KEY:${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:}}}
 
 
@@ -44,3 +47,9 @@ auth:
     from: 3030256102@qq.com
     startup-check-enabled: ${SMTP_STARTUP_CHECK_ENABLED:true} # 启动时检查
 
+admin:
+  security:
+    accounts:
+      - username: admin
+        password-hash: "$2a$10$AZEfkMhBEM7LuF0GbTWZnOoyX0Ic4dfm7XtCz.IIGYmcAislxa6vy"
+        display-name: "本地管理员"

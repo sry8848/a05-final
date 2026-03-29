@@ -160,14 +160,7 @@ public class AiOutputContractValidator {
             log.warn("[契约] Report 输出为 null，返回最小降级对象");
             return buildFallbackReportOutput();
         }
-        if (output.getOverallScore() == null) {
-            output.setOverallScore(BigDecimal.ZERO);
-        } else {
-            BigDecimal score = output.getOverallScore();
-            if (score.compareTo(BigDecimal.ZERO) < 0 || score.compareTo(BigDecimal.valueOf(100)) > 0) {
-                output.setOverallScore(score.max(BigDecimal.ZERO).min(BigDecimal.valueOf(100)));
-            }
-        }
+        output.setOverallScore(clampScore(output.getOverallScore(), BigDecimal.ZERO));
         if (output.getSummary() == null || output.getSummary().isBlank()) {
             output.setSummary("（报告生成失败，请重试）");
         }
@@ -182,6 +175,19 @@ public class AiOutputContractValidator {
         }
         if (output.getSkillDomainScores() == null) {
             output.setSkillDomainScores(new ArrayList<>());
+        } else {
+            output.getSkillDomainScores().forEach(item -> {
+                if (item != null) {
+                    item.setScore(clampScore(item.getScore(), null));
+                }
+            });
+        }
+        if (output.getComprehensiveRadarScores() != null) {
+            output.getComprehensiveRadarScores().forEach(item -> {
+                if (item != null) {
+                    item.setScore(clampScore(item.getScore(), null));
+                }
+            });
         }
         return output;
     }
@@ -296,5 +302,12 @@ public class AiOutputContractValidator {
             return "null";
         }
         return json.length() > 200 ? json.substring(0, 200) + "..." : json;
+    }
+
+    private BigDecimal clampScore(BigDecimal score, BigDecimal fallbackWhenNull) {
+        if (score == null) {
+            return fallbackWhenNull;
+        }
+        return score.max(BigDecimal.ZERO).min(BigDecimal.valueOf(100));
     }
 }

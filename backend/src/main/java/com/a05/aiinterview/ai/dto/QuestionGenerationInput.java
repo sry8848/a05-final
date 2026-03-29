@@ -92,6 +92,7 @@ public class QuestionGenerationInput {
         private List<EvaluationDecisionOutput.RetrievalPlan> retrievalPlans;
         private List<RagContext.RetrievedMaterial> retrievedMaterials;
         private List<String> followUpCandidates;
+        private RagContext.RetrievalAudit retrievalAudit;
     }
 
     @Data

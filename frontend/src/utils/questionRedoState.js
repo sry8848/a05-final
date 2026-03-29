@@ -1,3 +1,5 @@
+import { normalizeHighlightedAnnotations } from './questionDetailAnnotationRender.js'
+
 export const REDO_DISABLED_REASON = '该旧记录缺少后端题目上下文，暂不支持单题重答'
 
 function normalizeId(value) {
@@ -89,6 +91,7 @@ export function normalizeQuestionRedoAttempt(value) {
     idealAnswerOutline: normalizeStringArray(value.idealAnswerOutline),
     rewrittenAnswer: String(value.rewrittenAnswer || '').trim(),
     evaluatedDomains: normalizeEvaluatedDomains(value.evaluatedDomains),
+    highlightedAnnotations: normalizeHighlightedAnnotations(value.highlightedAnnotations),
     highlightedSegments: normalizeHighlightedSegments(value.highlightedSegments),
     createdAt: value.createdAt || null
   }

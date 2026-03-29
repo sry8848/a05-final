@@ -94,7 +94,7 @@ class QuestionStreamServiceBuildInputTest {
     }
 
     @Test
-    void buildGenInput_shouldBuildNewPromptInput() throws Exception {
+    void buildGenInput_shouldHideProjectContextForPrincipleQuestion() throws Exception {
         QuestionStreamService service = newService();
 
         InterviewSession session = new InterviewSession();
@@ -159,9 +159,14 @@ class QuestionStreamServiceBuildInputTest {
         assertThat(new ObjectMapper().convertValue(input.getRoleContext(), Map.class))
                 .containsEntry("style", "stress")
                 .containsOnlyKeys("roundType", "style");
-        assertEquals("item-order", input.getProjectContext().getActiveItemKey());
-        assertEquals("PROJECT", input.getProjectContext().getItemType());
-        assertEquals("缓存击穿", input.getProjectContext().getCurrentFocus());
+        assertThat(input.getProjectContext())
+                .extracting(
+                        QuestionGenerationInput.ProjectContext::getActiveItemKey,
+                        QuestionGenerationInput.ProjectContext::getItemType,
+                        QuestionGenerationInput.ProjectContext::getItemName,
+                        QuestionGenerationInput.ProjectContext::getCurrentFocus
+                )
+                .containsExactly("", "", "", "");
         assertEquals("PRINCIPLE", input.getNextQuestionGoal().getQuestionType());
         assertEquals("缓存击穿", input.getNextQuestionGoal().getNextFocus());
         assertEquals("redis", input.getNextQuestionGoal().getRelatedDomainCode());
@@ -173,6 +178,134 @@ class QuestionStreamServiceBuildInputTest {
         assertThat(input.getRetrievalContext().getRetrievalPlans().getFirst().getDisplayQuery()).isEqualTo("缓存击穿");
         assertThat(input.getRetrievalContext().getRetrievalPlans().getFirst().getKeywordHints()).containsExactly("缓存击穿", "互斥锁", "逻辑过期");
         assertThat(input.getConstraints().getAvoidRepetitionFamilies()).isEmpty();
+    }
+
+    @Test
+    void buildGenInput_shouldHideProjectContextForScenarioAndBehavioralQuestions() throws Exception {
+        QuestionStreamService service = newService();
+
+        InterviewSession session = new InterviewSession();
+        session.setId(101L);
+        session.setPositionCode("JAVA_BACKEND");
+        session.setMode("practice");
+        session.setExperienceLevel("JUNIOR");
+        session.setSyllabusJson(Map.of());
+        session.setStateLedgerJson(Map.of(
+                "active_item_key", "item-order",
+                "active_item_type", "PROJECT",
+                "active_item_name", "订单系统",
+                "current_focus", "缓存击穿",
+                "interviewer_archetype", "guiding"
+        ));
+
+        InterviewAttempt attempt = new InterviewAttempt();
+        attempt.setAttemptId("attempt-non-project");
+        attempt.setAnswerText("候选人回答较泛。");
+
+        Method method = QuestionStreamService.class.getDeclaredMethod(
+                "buildGenInput",
+                InterviewSession.class,
+                QuestionStreamService.NextQuestionPlan.class,
+                List.class,
+                InterviewAttempt.class,
+                RagContext.class
+        );
+        method.setAccessible(true);
+
+        for (String questionType : List.of("SCENARIO", "BEHAVIORAL")) {
+            QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
+                    .interviewAction("CONTINUE")
+                    .targetQuestionType(questionType)
+                    .nextFocus("缓存击穿")
+                    .decisionReason("当前回答较泛，下一题需要换题型继续验证。")
+                    .retrievalPlans(List.of())
+                    .build();
+
+            QuestionGenerationInput input = (QuestionGenerationInput) method.invoke(
+                    service,
+                    session,
+                    plan,
+                    List.of(),
+                    attempt,
+                    RagContext.empty()
+            );
+
+            assertThat(input.getProjectContext())
+                    .extracting(
+                            QuestionGenerationInput.ProjectContext::getActiveItemKey,
+                            QuestionGenerationInput.ProjectContext::getItemType,
+                            QuestionGenerationInput.ProjectContext::getItemName,
+                            QuestionGenerationInput.ProjectContext::getCurrentFocus
+                    )
+                    .containsExactly("", "", "", "");
+            assertThat(input.getNextQuestionGoal().getQuestionType()).isEqualTo(questionType);
+        }
+    }
+
+    @Test
+    void buildGenInput_shouldRecoverProjectContextForProjectQuestionFromLedgerWhenPlanDoesNotProvideItem() throws Exception {
+        QuestionStreamService service = newService();
+
+        InterviewSession session = new InterviewSession();
+        session.setId(104L);
+        session.setPositionCode("JAVA_BACKEND");
+        session.setMode("practice");
+        session.setExperienceLevel("JUNIOR");
+        session.setSyllabusJson(Map.of());
+        session.setStateLedgerJson(Map.of(
+                "active_item_key", "project_ai",
+                "active_item_type", "PROJECT",
+                "active_item_name", "AI 模拟面试系统",
+                "current_focus", "事务消息回查",
+                "interviewer_archetype", "stress"
+        ));
+
+        InterviewAttempt attempt = new InterviewAttempt();
+        attempt.setAttemptId("attempt-project-fallback");
+        attempt.setAnswerText("候选人回答较完整。");
+
+        QuestionStreamService.NextQuestionPlan plan = QuestionStreamService.NextQuestionPlan.builder()
+                .interviewAction("CONTINUE")
+                .targetQuestionType("PROJECT_DEEP_DIVE")
+                .nextFocus("Redis缓存多轮对话上下文")
+                .decisionReason("需要回到项目主线继续验证真实落地。")
+                .retrievalPlans(List.of())
+                .build();
+
+        Method method = QuestionStreamService.class.getDeclaredMethod(
+                "buildGenInput",
+                InterviewSession.class,
+                QuestionStreamService.NextQuestionPlan.class,
+                List.class,
+                InterviewAttempt.class,
+                RagContext.class
+        );
+        method.setAccessible(true);
+
+        QuestionGenerationInput input = (QuestionGenerationInput) method.invoke(
+                service,
+                session,
+                plan,
+                List.of(),
+                attempt,
+                RagContext.empty()
+        );
+
+        assertThat(input.getProjectContext())
+                .extracting(
+                        QuestionGenerationInput.ProjectContext::getActiveItemKey,
+                        QuestionGenerationInput.ProjectContext::getItemType,
+                        QuestionGenerationInput.ProjectContext::getItemName,
+                        QuestionGenerationInput.ProjectContext::getCurrentFocus
+                )
+                .containsExactly("project_ai", "PROJECT", "AI 模拟面试系统", "事务消息回查");
+        assertThat(input.getNextQuestionGoal())
+                .extracting(
+                        QuestionGenerationInput.NextQuestionGoal::getRelatedItemKey,
+                        QuestionGenerationInput.NextQuestionGoal::getRelatedItemType,
+                        QuestionGenerationInput.NextQuestionGoal::getRelatedItemName
+                )
+                .containsExactly("project_ai", "PROJECT", "AI 模拟面试系统");
     }
 
     @Test
@@ -227,6 +360,14 @@ class QuestionStreamServiceBuildInputTest {
                         .keywords(List.of("缓存穿透", "布隆过滤器"))
                         .build()))
                 .followUpCandidates(List.of("redis-bloom-filter-false-positive-001"))
+                .retrievalAudit(RagContext.RetrievalAudit.builder()
+                        .retrievalTriggered(true)
+                        .lexicalCandidateCount(6)
+                        .denseCandidateCount(4)
+                        .rerankPreTopQuestionIds(List.of("redis-cache-penetration-001", "redis-null-cache-expire-001"))
+                        .rerankPostTopQuestionIds(List.of("redis-cache-penetration-001", "redis-null-cache-expire-001"))
+                        .injectedQuestionIds(List.of("redis-cache-penetration-001"))
+                        .build())
                 .hitCount(1)
                 .empty(false)
                 .build();
@@ -255,6 +396,13 @@ class QuestionStreamServiceBuildInputTest {
         assertThat(retrievalContextMap)
                 .containsEntry("summary", "命中 1 张题卡：缓存穿透高频题")
                 .containsEntry("followUpCandidates", List.of("redis-bloom-filter-false-positive-001"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> retrievalAudit = (Map<String, Object>) retrievalContextMap.get("retrievalAudit");
+        assertThat(retrievalAudit)
+                .containsEntry("retrievalTriggered", true)
+                .containsEntry("lexicalCandidateCount", 6)
+                .containsEntry("denseCandidateCount", 4)
+                .containsEntry("injectedQuestionIds", List.of("redis-cache-penetration-001"));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> retrievedMaterials =
                 (List<Map<String, Object>>) retrievalContextMap.get("retrievedMaterials");

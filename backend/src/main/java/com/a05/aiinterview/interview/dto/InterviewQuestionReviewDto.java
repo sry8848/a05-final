@@ -55,6 +55,9 @@ public class InterviewQuestionReviewDto {
     @Schema(description = "回答高亮片段（可为空）")
     private List<HighlightedSegmentDto> highlightedSegments;
 
+    @Schema(description = "回答定位批注（可为空）")
+    private List<HighlightedAnnotationDto> highlightedAnnotations;
+
     @Schema(description = "理想答案骨架（可为空）")
     private List<String> idealAnswerOutline;
 
@@ -77,6 +80,16 @@ public class InterviewQuestionReviewDto {
     @Schema(description = "高亮片段")
     public static class HighlightedSegmentDto {
         private String segment;
+        private String label;
+        private String comment;
+    }
+
+    @Data
+    @Schema(description = "回答定位批注")
+    public static class HighlightedAnnotationDto {
+        private Integer start;
+        private Integer end;
+        private String quote;
         private String label;
         private String comment;
     }

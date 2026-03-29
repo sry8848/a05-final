@@ -157,6 +157,18 @@ public class QuestionRedoService {
                     return mapped;
                 }).toList());
             }
+            if (output.getHighlightedAnnotations() != null) {
+                dto.setHighlightedAnnotations(output.getHighlightedAnnotations().stream().map(item -> {
+                    QuestionRedoAttemptDto.HighlightedAnnotationDto mapped =
+                            new QuestionRedoAttemptDto.HighlightedAnnotationDto();
+                    mapped.setStart(item.getStart());
+                    mapped.setEnd(item.getEnd());
+                    mapped.setQuote(item.getQuote());
+                    mapped.setLabel(item.getLabel());
+                    mapped.setComment(item.getComment());
+                    return mapped;
+                }).toList());
+            }
         } catch (Exception ex) {
             log.warn("单题重答 evaluationJson 解析失败, redoAttemptId={}", attempt.getId(), ex);
         }

@@ -9,6 +9,7 @@ import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.interview.service.support.HighlightedAnnotationLocator;
 import com.a05.aiinterview.interview.service.support.QuestionDetailEvaluationScoreSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -91,6 +92,7 @@ public class QuestionDetailEvaluationService {
             QuestionDetailEvaluationOutput output = QuestionDetailEvaluationScoreSupport.clampToPercentageRange(
                     aiClient.callQuestionDetailEvaluation(input).getOutput()
             );
+            output = HighlightedAnnotationLocator.resolve(attempt.getAnswerText(), output);
 
             Map<String, Object> stableJson = objectMapper.convertValue(output, Map.class);
             patchStatus(attempt.getId(), STATUS_READY, stableJson);

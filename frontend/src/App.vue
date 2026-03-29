@@ -154,6 +154,7 @@ import {
   resolveLogoutViewState,
   resolveUserLoginViewState
 } from './utils/authViewState'
+import { normalizeHighlightedAnnotations } from './utils/questionDetailAnnotationRender'
 import {
   ADMIN_TOKEN_KEY,
   USER_TOKEN_KEY,
@@ -469,7 +470,7 @@ export default {
       if (normalizeNullableScore(value.score) != null) return true
       const commentary = String(value.commentary ?? value.analysis ?? '').trim()
       if (commentary) return true
-      return ['strengthPoints', 'weakPoints', 'evaluatedDomains', 'highlightedSegments'].some((key) => (
+      return ['strengthPoints', 'weakPoints', 'evaluatedDomains', 'highlightedSegments', 'highlightedAnnotations'].some((key) => (
         Array.isArray(value[key]) && value[key].length > 0
       ))
     }
@@ -519,6 +520,8 @@ export default {
         .filter(Boolean)
     }
 
+    const mapBackendHighlightedAnnotations = (annotations = []) => normalizeHighlightedAnnotations(annotations)
+
     const mergeQuestionDetailFromBackend = (fallbackDetail, backendDetail) => {
       const merged = { ...(fallbackDetail || {}) }
       const source = (backendDetail && typeof backendDetail === 'object') ? backendDetail : null
@@ -550,6 +553,9 @@ export default {
       if (hasOwn(source, 'idealAnswerOutline')) merged.idealAnswerOutline = source.idealAnswerOutline
       if (hasOwn(source, 'highlightedSegments')) {
         merged.highlightedSegments = mapBackendHighlightedSegments(source.highlightedSegments)
+      }
+      if (hasOwn(source, 'highlightedAnnotations')) {
+        merged.highlightedAnnotations = mapBackendHighlightedAnnotations(source.highlightedAnnotations)
       }
       if (hasOwn(source, 'backfillFromLocalAllowed')) {
         merged.backfillFromLocalAllowed = source.backfillFromLocalAllowed
@@ -635,6 +641,7 @@ export default {
         answerStatus,
         evaluationStatus: hasFormalEvaluation ? 'ready' : 'pending',
         userAnswer: answerText,
+        highlightedAnnotations: hasFormalEvaluation ? mapBackendHighlightedAnnotations(answer.highlightedAnnotations) : [],
         highlightedSegments: hasFormalEvaluation ? mapBackendHighlightedSegments(answer.highlightedSegments) : [],
         score: hasFormalEvaluation ? answerScore : null,
         commentary: String(answer.commentary ?? '').trim() || null,
@@ -885,6 +892,7 @@ export default {
         answerStatus: !(item.userAnswer || item.answer) ? 'skipped' : 'answered',
         evaluationStatus: hasFormalEvaluation ? 'ready' : 'pending',
         userAnswer: item.userAnswer || item.answer || '',
+        highlightedAnnotations: hasFormalEvaluation ? mapBackendHighlightedAnnotations(item.highlightedAnnotations) : [],
         highlightedSegments: hasFormalEvaluation ? mapBackendHighlightedSegments(item.highlightedSegments) : [],
         score: hasFormalEvaluation ? bankScore : null,
         commentary: String(item.analysis ?? item.commentary ?? '').trim() || null,

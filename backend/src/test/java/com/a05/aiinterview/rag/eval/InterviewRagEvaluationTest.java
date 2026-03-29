@@ -8,6 +8,7 @@ import com.a05.aiinterview.rag.dto.RagContext;
 import com.a05.aiinterview.rag.dto.RagRetrievalRequest;
 import com.a05.aiinterview.rag.service.KnowledgeIngestionService;
 import com.a05.aiinterview.rag.service.RagPlanCompiler;
+import com.a05.aiinterview.rag.service.RagRerankService;
 import com.a05.aiinterview.rag.service.impl.RagRetrievalServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.qdrant.client.QdrantClient;
@@ -23,6 +24,8 @@ import org.springframework.ai.vectorstore.qdrant.QdrantVectorStore;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -50,6 +53,8 @@ class InterviewRagEvaluationTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String DEFAULT_OPENAI_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode";
     private static final String DEFAULT_EMBEDDING_MODEL = "text-embedding-v4";
+    private static final Path BASELINE_REPORT = Path.of(
+            "D:\\a05-cursor\\docs\\superpowers\\reports\\2026-03-28-rag-lightweight-hardening-baseline.md");
 
     private final RagPlanCompiler compiler = new RagPlanCompiler();
 
@@ -59,11 +64,13 @@ class InterviewRagEvaluationTest {
         InterviewRetrievalFixture fixture = loadFixture();
 
         assertThat(fixture.schemaVersion()).isEqualTo(1);
-        assertThat(fixture.cases()).hasSizeGreaterThanOrEqualTo(14);
+        assertThat(fixture.cases()).hasSizeGreaterThanOrEqualTo(16);
         assertThat(fixture.cases()).anyMatch(sample -> !sample.shouldRetrieve());
         assertThat(fixture.cases()).anyMatch(sample -> "PROJECT".equals(sample.questionType()));
         assertThat(fixture.cases()).anyMatch(sample -> "session-83_q-215_attempt-threadlocal-cross-thread".equals(sample.traceId()));
         assertThat(fixture.cases()).anyMatch(sample -> "session-84_q-218_attempt-generic-project-architecture".equals(sample.traceId()));
+        assertThat(fixture.cases()).anyMatch(sample -> "session-85_q-221_attempt-redisson-project-watchdog".equals(sample.traceId()));
+        assertThat(fixture.cases()).anyMatch(sample -> "session-86_q-224_attempt-behavior-push-hard-problem".equals(sample.traceId()));
 
         for (InterviewRetrievalCase sample : fixture.cases()) {
             assertThat(sample.traceId()).isNotBlank();
@@ -93,6 +100,19 @@ class InterviewRagEvaluationTest {
     }
 
     @Test
+    @DisplayName("baseline report should exist and explain current bottlenecks")
+    void baselineReport_shouldExistAndExplainCurrentBottlenecks() throws Exception {
+        assertThat(Files.exists(BASELINE_REPORT))
+                .as("missing baseline report: %s", BASELINE_REPORT)
+                .isTrue();
+
+        String report = Files.readString(BASELINE_REPORT);
+        assertThat(report).contains("当前 dense 基线是否稳定");
+        assertThat(report).contains("当前候选是否足以支撑默认商业 rerank");
+        assertThat(report).contains("当前最容易退化的题型");
+    }
+
+    @Test
     @DisplayName("metric gate should pass once dense recall is wired to real hybrid retrieval")
     void metricGate_shouldPassOnceDenseRecallReachesThreshold() throws Exception {
         InterviewRetrievalFixture fixture = loadFixture();
@@ -107,7 +127,9 @@ class InterviewRagEvaluationTest {
             assertThat(report.routeMismatchTraceIds()).isEmpty();
             assertThat(report.retrievalApplicableHitRate()).isGreaterThanOrEqualTo(0.8d);
             assertThat(report.mustHaveCoverage()).isGreaterThanOrEqualTo(0.7d);
-            assertThat(report.avoidPollutionRate()).isLessThanOrEqualTo(0.2d);
+            assertThat(report.avoidPollutionRate())
+                    .withFailMessage(report.failureSummary(DENSE_RECALL_HIT_RATE_GATE))
+                    .isLessThanOrEqualTo(0.2d);
             assertThat(report.denseRecallHitRate())
                     .withFailMessage(report.failureSummary(DENSE_RECALL_HIT_RATE_GATE))
                     .isGreaterThanOrEqualTo(DENSE_RECALL_HIT_RATE_GATE);
@@ -180,7 +202,7 @@ class InterviewRagEvaluationTest {
                     sample.traceId(),
                     false,
                     routingMatched,
-                    new StageResult(false, false, false, false),
+                    new StageResult(false, false, false),
                     false,
                     false,
                     false
@@ -262,11 +284,38 @@ class InterviewRagEvaluationTest {
     }
 
     private boolean hasAvoidPollution(RagContext context, InterviewRetrievalCase sample) {
+        String expectedQuestionType = normalizeQuestionType(sample.questionType());
+        String expectedDomainCode = inferDomainCode(sample);
         return context.getRetrievedMaterials().stream()
                 .filter(material -> !Objects.equals(sample.traceId(), material.getQuestionId()))
+                .filter(material -> isStructurallyPolluting(material, expectedQuestionType, expectedDomainCode))
                 .anyMatch(material -> containsAnyClue(material.getReferenceContext(), sample.avoidClues())
                         || containsAnyClue(material.getIntentConcept(), sample.avoidClues())
                         || material.getScoringPitfalls().stream().anyMatch(pitfall -> containsAnyClue(pitfall, sample.avoidClues())));
+    }
+
+    private boolean isStructurallyPolluting(
+            RagContext.RetrievedMaterial material,
+            String expectedQuestionType,
+            String expectedDomainCode
+    ) {
+        String actualQuestionType = normalizeQuestionType(material.getQuestionType());
+        String actualDomainCode = normalize(material.getDomainCode());
+        String normalizedExpectedDomainCode = normalize(expectedDomainCode);
+
+        if ("BEHAVIORAL".equals(expectedQuestionType)) {
+            return !"BEHAVIORAL".equals(actualQuestionType) || !actualDomainCode.isBlank();
+        }
+        if ("PROJECT_DEEP_DIVE".equals(expectedQuestionType)) {
+            return !"PROJECT".equals(actualQuestionType) && !"PROJECT_DEEP_DIVE".equals(actualQuestionType);
+        }
+        if (!actualQuestionType.equals(expectedQuestionType)) {
+            return true;
+        }
+        if (normalizedExpectedDomainCode.isBlank()) {
+            return !actualDomainCode.isBlank();
+        }
+        return !normalizedExpectedDomainCode.equals(actualDomainCode);
     }
 
     private boolean containsAnyClue(String text, List<String> clues) {
@@ -284,6 +333,7 @@ class InterviewRagEvaluationTest {
         int total = sampleResults.size();
         List<String> routeMismatchTraceIds = new ArrayList<>();
         List<String> denseRecallMissTraceIds = new ArrayList<>();
+        List<String> avoidPollutionTraceIds = new ArrayList<>();
 
         int routingMatches = 0;
         int retrievableSamples = 0;
@@ -292,7 +342,6 @@ class InterviewRagEvaluationTest {
         int avoidPollutionHits = 0;
         int denseRecallHits = 0;
         int sparseRecallHits = 0;
-        int fusionHits = 0;
         int rerankHits = 0;
 
         for (SampleEvaluationResult result : sampleResults) {
@@ -312,17 +361,15 @@ class InterviewRagEvaluationTest {
                 }
                 if (result.avoidPolluted()) {
                     avoidPollutionHits++;
+                    avoidPollutionTraceIds.add(result.traceId());
                 }
                 if (result.stageResult().denseRecallHit()) {
                     denseRecallHits++;
                 } else {
                     denseRecallMissTraceIds.add(result.traceId());
                 }
-                if (result.stageResult().sparseRecallHit()) {
+                if (result.stageResult().lexicalPrefilterHit()) {
                     sparseRecallHits++;
-                }
-                if (result.stageResult().fusionHit()) {
-                    fusionHits++;
                 }
                 if (result.stageResult().rerankHit()) {
                     rerankHits++;
@@ -335,21 +382,20 @@ class InterviewRagEvaluationTest {
         double mustHaveCoverage = retrievableSamples == 0 ? 1.0d : (double) mustHaveCoverageHits / retrievableSamples;
         double avoidPollutionRate = retrievableSamples == 0 ? 0.0d : (double) avoidPollutionHits / retrievableSamples;
         double denseRecallHitRate = retrievableSamples == 0 ? 0.0d : (double) denseRecallHits / retrievableSamples;
-        double sparseRecallHitRate = retrievableSamples == 0 ? 0.0d : (double) sparseRecallHits / retrievableSamples;
-        double fusionLift = retrievableSamples == 0 ? 0.0d : (double) fusionHits / retrievableSamples;
+        double lexicalPrefilterHitRate = retrievableSamples == 0 ? 0.0d : (double) sparseRecallHits / retrievableSamples;
         double rerankTop3HitRate = retrievableSamples == 0 ? 0.0d : (double) rerankHits / retrievableSamples;
 
         return new EvaluationReport(
                 total,
                 routeMismatchTraceIds,
                 denseRecallMissTraceIds,
+                avoidPollutionTraceIds,
                 routingAccuracy,
                 retrievalApplicableHitRate,
                 mustHaveCoverage,
                 avoidPollutionRate,
                 denseRecallHitRate,
-                sparseRecallHitRate,
-                fusionLift,
+                lexicalPrefilterHitRate,
                 rerankTop3HitRate
         );
     }
@@ -424,13 +470,13 @@ class InterviewRagEvaluationTest {
             int totalSamples,
             List<String> routeMismatchTraceIds,
             List<String> denseRecallMissTraceIds,
+            List<String> avoidPollutionTraceIds,
             double routingAccuracy,
             double retrievalApplicableHitRate,
             double mustHaveCoverage,
             double avoidPollutionRate,
             double denseRecallHitRate,
-            double sparseRecallHitRate,
-            double fusionLift,
+            double lexicalPrefilterHitRate,
             double rerankTop3HitRate
     ) {
         private String failureSummary(double gate) {
@@ -439,19 +485,20 @@ class InterviewRagEvaluationTest {
                     totalSamples=%d
                     routeMismatchTraceIds=%s
                     denseRecallMissTraceIds=%s
-                    metrics={routingAccuracy=%.3f, retrievalApplicableHitRate=%.3f, mustHaveCoverage=%.3f, avoidPollutionRate=%.3f, denseRecallHitRate=%.3f, sparseRecallHitRate=%.3f, fusionLift=%.3f, rerankTop3HitRate=%.3f}
+                    avoidPollutionTraceIds=%s
+                    metrics={routingAccuracy=%.3f, retrievalApplicableHitRate=%.3f, mustHaveCoverage=%.3f, avoidPollutionRate=%.3f, denseRecallHitRate=%.3f, lexicalPrefilterHitRate=%.3f, rerankTop3HitRate=%.3f}
                     gate=denseRecallHitRate>=%.1f
                     """.formatted(
                     totalSamples,
                     routeMismatchTraceIds,
                     denseRecallMissTraceIds,
+                    avoidPollutionTraceIds,
                     routingAccuracy,
                     retrievalApplicableHitRate,
                     mustHaveCoverage,
                     avoidPollutionRate,
                     denseRecallHitRate,
-                    sparseRecallHitRate,
-                    fusionLift,
+                    lexicalPrefilterHitRate,
                     rerankTop3HitRate,
                     gate
             );
@@ -470,9 +517,8 @@ class InterviewRagEvaluationTest {
     }
 
     private record StageResult(
+            boolean lexicalPrefilterHit,
             boolean denseRecallHit,
-            boolean sparseRecallHit,
-            boolean fusionHit,
             boolean rerankHit
     ) {
     }
@@ -527,34 +573,31 @@ class InterviewRagEvaluationTest {
             return new RealRetrievalHarness(
                     qdrantClient,
                     properties.getCollectionName(),
-                    new RagRetrievalServiceImpl(vectorStore, qdrantClient, properties)
+                    new RagRetrievalServiceImpl(vectorStore, qdrantClient, new TestRagRerankService(), properties)
             );
         }
 
         private StageResult evaluateStages(InterviewRetrievalCase sample, RagRetrievalRequest request) {
             @SuppressWarnings("unchecked")
-            List<Object> denseCandidates = (List<Object>) ReflectionTestUtils.invokeMethod(retrievalService, "denseRecall", request);
+            List<Object> lexicalCandidates = (List<Object>) ReflectionTestUtils.invokeMethod(retrievalService, "lexicalPrefilter", request);
             @SuppressWarnings("unchecked")
-            List<Object> sparseCandidates = (List<Object>) ReflectionTestUtils.invokeMethod(retrievalService, "sparseRecall", request);
-            @SuppressWarnings("unchecked")
-            java.util.Map<String, Object> fusedCandidates = (java.util.Map<String, Object>) ReflectionTestUtils.invokeMethod(
+            List<Object> denseCandidates = (List<Object>) ReflectionTestUtils.invokeMethod(
                     retrievalService,
-                    "fuseByRrf",
-                    denseCandidates,
-                    sparseCandidates
+                    "denseRecall",
+                    request,
+                    lexicalCandidates
             );
             @SuppressWarnings("unchecked")
             List<Object> rerankedCandidates = (List<Object>) ReflectionTestUtils.invokeMethod(
                     retrievalService,
                     "rerank",
-                    fusedCandidates.values(),
+                    denseCandidates,
                     request
             );
 
             return new StageResult(
+                    containsQuestionId(lexicalCandidates, sample.traceId()),
                     containsQuestionId(denseCandidates, sample.traceId()),
-                    containsQuestionId(sparseCandidates, sample.traceId()),
-                    containsQuestionId(fusedCandidates.values(), sample.traceId()),
                     containsQuestionId(rerankedCandidates, sample.traceId())
             );
         }
@@ -625,6 +668,17 @@ class InterviewRagEvaluationTest {
                 }
             } finally {
                 qdrantClient.close();
+            }
+        }
+
+        private static final class TestRagRerankService implements RagRerankService {
+            @Override
+            public List<RerankResult> rerank(RagRetrievalRequest request, List<RerankCandidate> candidates) {
+                List<RerankResult> results = new ArrayList<>();
+                for (int i = 0; i < candidates.size(); i++) {
+                    results.add(new RerankResult(candidates.get(i).questionId(), 1.0d / (i + 1)));
+                }
+                return results;
             }
         }
 

@@ -3,6 +3,7 @@ package com.a05.aiinterview.rag.service.impl;
 import com.a05.aiinterview.rag.config.RagProperties;
 import com.a05.aiinterview.rag.dto.RagContext;
 import com.a05.aiinterview.rag.dto.RagRetrievalRequest;
+import com.a05.aiinterview.rag.service.RagRerankService;
 import com.a05.aiinterview.rag.service.RagRetrievalService;
 import io.qdrant.client.ConditionFactory;
 import io.qdrant.client.QdrantClient;
@@ -17,7 +18,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -30,8 +30,8 @@ import java.util.stream.Collectors;
 /**
  * 面试题卡检索服务真实实现。
  *
- * <p>固定链路：过滤 -> dense recall -> sparse recall -> RRF -> 业务重排 -> 结构化结果。
- * 不允许伪融合，也不允许忽略 mustHaveClues / avoidClues。
+ * <p>固定链路：lexical 预过滤 -> dense recall -> 业务重排 -> 结构化结果。
+ * lexical 仅负责候选收缩，不承担独立排序；不再保留旧的伪 sparse + RRF 链路。
  */
 @Slf4j
 @Service
@@ -39,11 +39,11 @@ import java.util.stream.Collectors;
 @ConditionalOnProperty(name = "rag.enabled", havingValue = "true")
 public class RagRetrievalServiceImpl implements RagRetrievalService {
 
-    private static final int RRF_K = 60;
-    private static final int SPARSE_FETCH_MULTIPLIER = 4;
+    private static final int LEXICAL_PREFILTER_MULTIPLIER = 4;
 
     private final VectorStore vectorStore;
     private final QdrantClient qdrantClient;
+    private final RagRerankService ragRerankService;
     private final RagProperties ragProperties;
 
     @Override
@@ -57,15 +57,24 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
                 request.getQuestionType(), request.getDomainCode(),
                 request.getDifficultyHint(), request.getDisplayQuery());
         try {
-            List<Candidate> denseCandidates = denseRecall(request);
-            List<Candidate> sparseCandidates = sparseRecall(request);
-
-            Map<String, Candidate> fusedCandidates = fuseByRrf(denseCandidates, sparseCandidates);
-            List<Candidate> reranked = rerank(fusedCandidates.values(), request);
+            List<Candidate> lexicalCandidates = lexicalPrefilter(request);
+            List<Candidate> denseCandidates = denseRecall(request, lexicalCandidates);
+            List<Candidate> rerankInputCandidates = List.copyOf(denseCandidates);
+            List<Candidate> reranked = rerank(rerankInputCandidates, request);
+            List<String> rerankPostTopQuestionIds = topQuestionIds(reranked, resolveResultLimit());
+            reranked = applyHardGuardrails(reranked, request);
+            RagContext.RetrievalAudit retrievalAudit = RagContext.RetrievalAudit.builder()
+                    .retrievalTriggered(true)
+                    .lexicalCandidateCount(lexicalCandidates.size())
+                    .denseCandidateCount(denseCandidates.size())
+                    .rerankPreTopQuestionIds(topQuestionIds(rerankInputCandidates, resolveResultLimit()))
+                    .rerankPostTopQuestionIds(rerankPostTopQuestionIds)
+                    .injectedQuestionIds(List.of())
+                    .build();
             if (reranked.isEmpty()) {
                 log.info("RAG 检索无命中, questionType={}, domainCode={}",
                         request.getQuestionType(), request.getDomainCode());
-                return RagContext.empty();
+                return RagContext.emptyTriggered(retrievalAudit);
             }
 
             int resultLimit = resolveResultLimit();
@@ -84,81 +93,78 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
                     .contextText(contextText)
                     .retrievedMaterials(retrievedMaterials)
                     .followUpCandidates(followUpCandidates)
+                    .retrievalAudit(RagContext.RetrievalAudit.builder()
+                            .retrievalTriggered(true)
+                            .lexicalCandidateCount(retrievalAudit.getLexicalCandidateCount())
+                            .denseCandidateCount(retrievalAudit.getDenseCandidateCount())
+                            .rerankPreTopQuestionIds(retrievalAudit.getRerankPreTopQuestionIds())
+                            .rerankPostTopQuestionIds(retrievalAudit.getRerankPostTopQuestionIds())
+                            .injectedQuestionIds(topQuestionIds(topCandidates, resultLimit))
+                            .build())
                     .hitCount(retrievedMaterials.size())
                     .empty(false)
                     .build();
         } catch (Exception e) {
             log.error("RAG 检索异常, questionType={}, domainCode={}",
                     request.getQuestionType(), request.getDomainCode(), e);
-            return RagContext.empty();
+            return RagContext.emptyTriggered(RagContext.RetrievalAudit.empty(true));
         }
     }
 
-    private List<Candidate> denseRecall(RagRetrievalRequest request) {
+    private List<Candidate> denseRecall(RagRetrievalRequest request, List<Candidate> lexicalCandidates) {
         String queryText = resolveDenseQueryText(request);
         if (!hasText(queryText)) {
             return List.of();
         }
 
-        SearchRequest searchRequest = buildDenseSearchRequest(queryText, request);
+        SearchRequest searchRequest = buildDenseSearchRequest(queryText, request, hasLexicalPrefilter(lexicalCandidates));
         List<Document> docs = vectorStore.similaritySearch(searchRequest);
         if (docs == null || docs.isEmpty()) {
             return List.of();
         }
 
+        LinkedHashSet<String> allowedQuestionIds = allowedQuestionIds(lexicalCandidates);
         List<Candidate> candidates = new ArrayList<>(docs.size());
         for (int i = 0; i < docs.size(); i++) {
             Candidate candidate = candidateFromDocument(docs.get(i));
             if (!candidate.active) {
                 continue;
             }
-            candidate.denseRank = i + 1;
-            candidate.rrfScore += reciprocalRank(candidate.denseRank);
+            if (!allowedQuestionIds.isEmpty() && !allowedQuestionIds.contains(candidate.questionId)) {
+                continue;
+            }
+            candidate.denseRank = candidates.size() + 1;
             candidates.add(candidate);
         }
         return candidates;
     }
 
-    private List<Candidate> sparseRecall(RagRetrievalRequest request) throws Exception {
-        if (request.getKeywordQueries() == null || request.getKeywordQueries().isEmpty()) {
+    private List<Candidate> lexicalPrefilter(RagRetrievalRequest request) throws Exception {
+        List<String> lexicalTerms = resolveLexicalTerms(request);
+        if (lexicalTerms.isEmpty()) {
             return List.of();
         }
 
-        Points.ScrollPoints scrollRequest = buildSparseScrollRequest(request);
+        Points.ScrollPoints scrollRequest = buildLexicalPrefilterScrollRequest(request, lexicalTerms);
         Points.ScrollResponse response = qdrantClient.scrollAsync(scrollRequest).get(3, TimeUnit.SECONDS);
         if (response == null || response.getResultList().isEmpty()) {
             return List.of();
         }
 
-        List<Candidate> scored = new ArrayList<>();
+        List<Candidate> candidates = new ArrayList<>();
         for (Points.RetrievedPoint point : response.getResultList()) {
             Candidate candidate = candidateFromPoint(point);
-            candidate.sparseKeywordScore = keywordScore(candidate, request.getKeywordQueries());
-            if (candidate.sparseKeywordScore > 0) {
-                scored.add(candidate);
+            if (candidate.active) {
+                candidates.add(candidate);
             }
         }
-
-        scored.sort((left, right) -> {
-            int scoreCompare = Double.compare(right.sparseKeywordScore, left.sparseKeywordScore);
-            if (scoreCompare != 0) {
-                return scoreCompare;
-            }
-            return left.questionId.compareTo(right.questionId);
-        });
-
-        for (int i = 0; i < scored.size(); i++) {
-            Candidate candidate = scored.get(i);
-            candidate.sparseRank = i + 1;
-            candidate.rrfScore += reciprocalRank(candidate.sparseRank);
-        }
-        return scored;
+        return dedupeByQuestionId(candidates);
     }
 
-    private SearchRequest buildDenseSearchRequest(String queryText, RagRetrievalRequest request) {
+    private SearchRequest buildDenseSearchRequest(String queryText, RagRetrievalRequest request, boolean widenForPrefilter) {
         SearchRequest.Builder builder = SearchRequest.builder()
                 .query(queryText)
-                .topK(resolveResultLimit())
+                .topK(resolveDenseFetchLimit(widenForPrefilter))
                 .similarityThreshold(ragProperties.getMinScore());
 
         String filterExpression = buildDenseFilterExpression(request);
@@ -180,17 +186,17 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
         return String.join(" && ", filters);
     }
 
-    private Points.ScrollPoints buildSparseScrollRequest(RagRetrievalRequest request) {
+    private Points.ScrollPoints buildLexicalPrefilterScrollRequest(RagRetrievalRequest request, List<String> lexicalTerms) {
         return Points.ScrollPoints.newBuilder()
                 .setCollectionName(ragProperties.getCollectionName())
-                .setFilter(buildSparseFilter(request))
-                .setLimit(resolveSparseFetchLimit())
+                .setFilter(buildLexicalPrefilterFilter(request, lexicalTerms))
+                .setLimit(resolveLexicalPrefilterLimit())
                 .setWithPayload(Points.WithPayloadSelector.newBuilder().setEnable(true).build())
                 .setWithVectors(Points.WithVectorsSelector.newBuilder().setEnable(false).build())
                 .build();
     }
 
-    private Points.Filter buildSparseFilter(RagRetrievalRequest request) {
+    private Points.Filter buildLexicalPrefilterFilter(RagRetrievalRequest request, List<String> lexicalTerms) {
         List<Points.Condition> must = new ArrayList<>();
         must.add(ConditionFactory.match("active", true));
 
@@ -202,37 +208,47 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
             must.add(ConditionFactory.matchKeyword("domain_code", request.getDomainCode().trim()));
         }
 
-        return Points.Filter.newBuilder().addAllMust(must).build();
-    }
-
-    private Map<String, Candidate> fuseByRrf(List<Candidate> denseCandidates, List<Candidate> sparseCandidates) {
-        Map<String, Candidate> fused = new LinkedHashMap<>();
-        mergeCandidates(fused, denseCandidates);
-        mergeCandidates(fused, sparseCandidates);
-        return fused;
-    }
-
-    private void mergeCandidates(Map<String, Candidate> fused, List<Candidate> incoming) {
-        for (Candidate candidate : incoming) {
-            Candidate existing = fused.get(candidate.questionId);
-            if (existing == null) {
-                fused.put(candidate.questionId, candidate);
-                continue;
-            }
-            existing.merge(candidate);
+        List<Points.Condition> should = new ArrayList<>();
+        for (String term : lexicalTerms) {
+            should.add(ConditionFactory.matchText("question_text", term));
+            should.add(ConditionFactory.matchText("intent_concept", term));
+            should.add(ConditionFactory.matchKeyword("keywords", term));
         }
+        return Points.Filter.newBuilder()
+                .addAllMust(must)
+                .setMinShould(Points.MinShould.newBuilder()
+                        .addAllConditions(should)
+                        .setMinCount(1)
+                        .build())
+                .build();
     }
 
-    private List<Candidate> rerank(Collection<Candidate> fusedCandidates, RagRetrievalRequest request) {
-        List<Candidate> reranked = new ArrayList<>(fusedCandidates);
-        for (Candidate candidate : reranked) {
-            candidate.mustHaveHits = clueHits(candidate.combinedText(), request.getMustHaveClues());
-            candidate.avoidHits = clueHits(candidate.combinedText(), request.getAvoidClues());
-            candidate.finalScore = candidate.rrfScore
-                    + mustHaveBonus(candidate.mustHaveHits)
-                    - avoidPenalty(candidate.avoidHits)
-                    + difficultyBonus(candidate, request.getDifficultyHint())
-                    + projectKeywordBonus(candidate, request);
+    private List<Candidate> rerank(List<Candidate> denseCandidates, RagRetrievalRequest request) {
+        List<Candidate> reranked = new ArrayList<>(denseCandidates);
+        if (reranked.isEmpty()) {
+            return reranked;
+        }
+
+        try {
+            List<RagRerankService.RerankCandidate> rerankCandidates = reranked.stream()
+                    .map(this::toRerankCandidate)
+                    .toList();
+            Map<String, Double> rerankScores = ragRerankService.rerank(request, rerankCandidates).stream()
+                    .collect(Collectors.toMap(
+                            RagRerankService.RerankResult::questionId,
+                            RagRerankService.RerankResult::relevanceScore,
+                            Math::max,
+                            LinkedHashMap::new
+                    ));
+            for (Candidate candidate : reranked) {
+                candidate.finalScore = rerankScores.getOrDefault(candidate.questionId, 0.0d);
+            }
+        } catch (Exception e) {
+            log.warn("RAG 商业 rerank 失败，回退到本地排序, displayQuery={}, reason={}",
+                    request.getDisplayQuery(), e.getMessage());
+            for (Candidate candidate : reranked) {
+                candidate.finalScore = denseRankScore(candidate.denseRank);
+            }
         }
 
         reranked.sort((left, right) -> {
@@ -240,82 +256,76 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
             if (scoreCompare != 0) {
                 return scoreCompare;
             }
-            int rrfCompare = Double.compare(right.rrfScore, left.rrfScore);
-            if (rrfCompare != 0) {
-                return rrfCompare;
+            int denseRankCompare = Integer.compare(nullSafeRank(left.denseRank), nullSafeRank(right.denseRank));
+            if (denseRankCompare != 0) {
+                return denseRankCompare;
             }
             return left.questionId.compareTo(right.questionId);
         });
         return reranked;
     }
 
-    private double mustHaveBonus(int hitCount) {
-        return hitCount * 2.0d;
-    }
-
-    private double avoidPenalty(int hitCount) {
-        return hitCount * 2.5d;
-    }
-
-    private double difficultyBonus(Candidate candidate, String difficultyHint) {
-        int target = difficultyLevel(difficultyHint);
-        int actual = difficultyLevel(candidate.difficulty);
-        if (target <= 0 || actual <= 0) {
-            return 0.0d;
+    private List<Candidate> applyHardGuardrails(List<Candidate> candidates, RagRetrievalRequest request) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
         }
-        int delta = Math.abs(target - actual);
-        return switch (delta) {
-            case 0 -> 1.0d;
-            case 1 -> 0.5d;
-            default -> 0.0d;
-        };
+
+        String expectedQuestionType = normalizeQuestionTypeForCorpus(request.getQuestionType());
+        String expectedDomainCode = normalizeText(request.getDomainCode());
+
+        return candidates.stream()
+                .filter(candidate -> matchesHardGuardrails(candidate, expectedQuestionType, expectedDomainCode))
+                .toList();
     }
 
-    private double projectKeywordBonus(Candidate candidate, RagRetrievalRequest request) {
-        if (!"PROJECT".equalsIgnoreCase(normalizeQuestionTypeForCorpus(request.getQuestionType()))) {
-            return 0.0d;
-        }
-        return keywordScore(candidate, request.getKeywordQueries()) * 0.25d;
-    }
+    private boolean matchesHardGuardrails(Candidate candidate, String expectedQuestionType, String expectedDomainCode) {
+        String actualQuestionType = normalizeQuestionTypeForCorpus(candidate.questionType);
+        String actualDomainCode = normalizeText(candidate.domainCode);
 
-    private int clueHits(String haystack, List<String> clues) {
-        if (!hasText(haystack) || clues == null || clues.isEmpty()) {
-            return 0;
+        if ("BEHAVIORAL".equals(expectedQuestionType)) {
+            return "BEHAVIORAL".equals(actualQuestionType) && actualDomainCode.isBlank();
         }
-        String normalizedHaystack = haystack.toLowerCase(Locale.ROOT);
-        int hits = 0;
-        for (String clue : clues) {
-            if (hasText(clue) && normalizedHaystack.contains(clue.trim().toLowerCase(Locale.ROOT))) {
-                hits++;
+
+        if ("PROJECT".equals(expectedQuestionType)) {
+            if (!"PROJECT".equals(actualQuestionType)) {
+                return false;
             }
+            if (expectedDomainCode.isBlank()) {
+                return true;
+            }
+            return expectedDomainCode.equals(actualDomainCode);
         }
-        return hits;
+
+        if (!expectedQuestionType.isBlank() && !expectedQuestionType.equals(actualQuestionType)) {
+            return false;
+        }
+        if (expectedDomainCode.isBlank()) {
+            return true;
+        }
+        return expectedDomainCode.equals(actualDomainCode);
     }
 
-    private double keywordScore(Candidate candidate, List<String> keywordQueries) {
-        if (keywordQueries == null || keywordQueries.isEmpty()) {
+    private RagRerankService.RerankCandidate toRerankCandidate(Candidate candidate) {
+        return new RagRerankService.RerankCandidate(
+                candidate.questionId,
+                candidate.questionText,
+                candidate.intentConcept,
+                candidate.referenceContext,
+                candidate.scoringKeyPoints,
+                candidate.scoringPitfalls
+        );
+    }
+
+    private double denseRankScore(Integer denseRank) {
+        if (denseRank == null || denseRank <= 0) {
             return 0.0d;
         }
-        String haystack = candidate.combinedText().toLowerCase(Locale.ROOT);
-        double score = 0.0d;
-        for (String keyword : keywordQueries) {
-            if (hasText(keyword) && haystack.contains(keyword.trim().toLowerCase(Locale.ROOT))) {
-                score += 1.0d;
-            }
-        }
-        return score;
-    }
-
-    private double reciprocalRank(int rank) {
-        return 1.0d / (RRF_K + rank);
+        return 1.0d / denseRank;
     }
 
     private List<String> collectFollowUpCandidates(List<Candidate> candidates, int resultLimit) {
         LinkedHashSet<String> followUps = new LinkedHashSet<>();
         for (Candidate candidate : candidates) {
-            if (candidate.avoidHits > 0 && candidate.mustHaveHits == 0) {
-                continue;
-            }
             for (String followUpId : safeList(candidate.followUpIds)) {
                 followUps.add(followUpId);
                 if (followUps.size() >= resultLimit * 2) {
@@ -324,6 +334,17 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
             }
         }
         return List.copyOf(followUps);
+    }
+
+    private List<String> topQuestionIds(List<Candidate> candidates, int limit) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        return candidates.stream()
+                .map(candidate -> candidate.questionId)
+                .filter(this::hasText)
+                .limit(Math.max(0, limit))
+                .toList();
     }
 
     private String buildSummary(List<RagContext.RetrievedMaterial> materials) {
@@ -473,8 +494,15 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
         return Math.max(1, ragProperties.getTopK());
     }
 
-    private int resolveSparseFetchLimit() {
-        return Math.max(resolveResultLimit() * SPARSE_FETCH_MULTIPLIER, resolveResultLimit());
+    private int resolveDenseFetchLimit(boolean widenForPrefilter) {
+        if (!widenForPrefilter) {
+            return resolveResultLimit();
+        }
+        return Math.max(resolveResultLimit() * LEXICAL_PREFILTER_MULTIPLIER, resolveResultLimit());
+    }
+
+    private int resolveLexicalPrefilterLimit() {
+        return Math.max(resolveResultLimit() * LEXICAL_PREFILTER_MULTIPLIER, resolveResultLimit());
     }
 
     private String normalizeQuestionTypeForCorpus(String questionType) {
@@ -486,17 +514,6 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
             case "PROJECT_DEEP_DIVE" -> "PROJECT";
             default -> normalized;
         };
-    }
-
-    private int difficultyLevel(String difficulty) {
-        if (!hasText(difficulty)) {
-            return -1;
-        }
-        try {
-            return Integer.parseInt(difficulty.trim().substring(1));
-        } catch (RuntimeException ignored) {
-            return -1;
-        }
     }
 
     private List<String> asStringList(Object value) {
@@ -537,6 +554,70 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
         return value != null && !value.isBlank();
     }
 
+    private String normalizeText(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private boolean hasLexicalPrefilter(List<Candidate> lexicalCandidates) {
+        return lexicalCandidates != null && !lexicalCandidates.isEmpty();
+    }
+
+    private LinkedHashSet<String> allowedQuestionIds(List<Candidate> lexicalCandidates) {
+        LinkedHashSet<String> allowed = new LinkedHashSet<>();
+        if (lexicalCandidates == null) {
+            return allowed;
+        }
+        for (Candidate candidate : lexicalCandidates) {
+            if (hasText(candidate.questionId)) {
+                allowed.add(candidate.questionId);
+            }
+        }
+        return allowed;
+    }
+
+    private List<Candidate> dedupeByQuestionId(List<Candidate> candidates) {
+        Map<String, Candidate> byQuestionId = new LinkedHashMap<>();
+        for (Candidate candidate : candidates) {
+            if (hasText(candidate.questionId)) {
+                byQuestionId.putIfAbsent(candidate.questionId, candidate);
+            }
+        }
+        return List.copyOf(byQuestionId.values());
+    }
+
+    private List<String> resolveLexicalTerms(RagRetrievalRequest request) {
+        LinkedHashSet<String> lexicalTerms = new LinkedHashSet<>();
+        addLexicalTerms(lexicalTerms, request.getKeywordQueries());
+        if (lexicalTerms.isEmpty()) {
+            addLexicalTerm(lexicalTerms, request.getDisplayQuery());
+            addLexicalTerm(lexicalTerms, request.getFocusPoint());
+        }
+        return List.copyOf(lexicalTerms);
+    }
+
+    private void addLexicalTerms(LinkedHashSet<String> collector, List<String> values) {
+        if (values == null) {
+            return;
+        }
+        for (String value : values) {
+            addLexicalTerm(collector, value);
+        }
+    }
+
+    private void addLexicalTerm(LinkedHashSet<String> collector, String value) {
+        if (!hasText(value)) {
+            return;
+        }
+        String normalized = value.trim();
+        if (!normalized.isBlank()) {
+            collector.add(normalized);
+        }
+    }
+
+    private int nullSafeRank(Integer rank) {
+        return rank == null ? Integer.MAX_VALUE : rank;
+    }
+
     @lombok.Builder
     private static class Candidate {
         private String questionId;
@@ -557,99 +638,6 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
         private String docContent;
         private boolean active;
         private Integer denseRank;
-        private Integer sparseRank;
-        private double sparseKeywordScore;
-        private double rrfScore;
         private double finalScore;
-        private int mustHaveHits;
-        private int avoidHits;
-
-        private void merge(Candidate other) {
-            if (other == null) {
-                return;
-            }
-            if (denseRank == null && other.denseRank != null) {
-                denseRank = other.denseRank;
-            }
-            if (sparseRank == null && other.sparseRank != null) {
-                sparseRank = other.sparseRank;
-            }
-            sparseKeywordScore = Math.max(sparseKeywordScore, other.sparseKeywordScore);
-            rrfScore += other.rrfScore;
-            questionText = firstNonBlankValue(questionText, other.questionText);
-            intentConcept = firstNonBlankValue(intentConcept, other.intentConcept);
-            referenceContext = firstNonBlankValue(referenceContext, other.referenceContext);
-            docContent = firstNonBlankValue(docContent, other.docContent);
-            scoringKeyPoints = mergeDistinct(scoringKeyPoints, other.scoringKeyPoints);
-            scoringPitfalls = mergeDistinct(scoringPitfalls, other.scoringPitfalls);
-            followUpIds = mergeDistinct(followUpIds, other.followUpIds);
-            keywords = mergeDistinct(keywords, other.keywords);
-            domainCode = firstNonBlankValue(domainCode, other.domainCode);
-            questionType = firstNonBlankValue(questionType, other.questionType);
-            difficulty = firstNonBlankValue(difficulty, other.difficulty);
-        }
-
-        private String combinedText() {
-            return StreamBuilder.of(questionText, intentConcept, referenceContext, docContent)
-                    .addAll(scoringKeyPoints)
-                    .addAll(scoringPitfalls)
-                    .addAll(keywords)
-                    .build();
-        }
-
-        private static String firstNonBlankValue(String left, String right) {
-            if (left != null && !left.isBlank()) {
-                return left;
-            }
-            return right == null ? "" : right;
-        }
-
-        private static List<String> mergeDistinct(List<String> left, List<String> right) {
-            LinkedHashSet<String> merged = new LinkedHashSet<>();
-            if (left != null) {
-                left.stream().filter(Objects::nonNull).filter(value -> !value.isBlank()).forEach(merged::add);
-            }
-            if (right != null) {
-                right.stream().filter(Objects::nonNull).filter(value -> !value.isBlank()).forEach(merged::add);
-            }
-            return List.copyOf(merged);
-        }
-    }
-
-    private static final class StreamBuilder {
-        private final StringBuilder builder = new StringBuilder();
-
-        private static StreamBuilder of(String... values) {
-            StreamBuilder streamBuilder = new StreamBuilder();
-            if (values != null) {
-                for (String value : values) {
-                    streamBuilder.add(value);
-                }
-            }
-            return streamBuilder;
-        }
-
-        private StreamBuilder add(String value) {
-            if (value != null && !value.isBlank()) {
-                if (!builder.isEmpty()) {
-                    builder.append('\n');
-                }
-                builder.append(value.trim());
-            }
-            return this;
-        }
-
-        private StreamBuilder addAll(List<String> values) {
-            if (values != null) {
-                for (String value : values) {
-                    add(value);
-                }
-            }
-            return this;
-        }
-
-        private String build() {
-            return builder.toString();
-        }
     }
 }

@@ -60,6 +60,9 @@ class InterviewQuestionReviewServiceTest {
                         "commentary", "latest",
                         "strengthPoints", java.util.List.of("结构清晰"),
                         "weakPoints", java.util.List.of("缺少量化指标"),
+                        "highlightedAnnotations", java.util.List.of(
+                                Map.of("start", 0, "end", 8, "quote", "主要提升了系统性能", "label", "strength", "comment", "建议补充具体指标")
+                        ),
                         "highlightedSegments", java.util.List.of(
                                 Map.of("segment", "主要提升了系统性能", "label", "strength", "comment", "建议补充具体指标")
                         ),
@@ -77,6 +80,7 @@ class InterviewQuestionReviewServiceTest {
         assertEquals(BigDecimal.valueOf(88.5), dto.getScore());
         assertEquals("latest", dto.getCommentary());
         assertEquals("主要提升了系统性能", dto.getHighlightedSegments().get(0).getSegment());
+        assertEquals("主要提升了系统性能", dto.getHighlightedAnnotations().get(0).getQuote());
         assertEquals("Java 并发", dto.getDomainName());
     }
 

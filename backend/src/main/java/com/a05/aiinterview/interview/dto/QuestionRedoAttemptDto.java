@@ -41,6 +41,9 @@ public class QuestionRedoAttemptDto {
     @Schema(description = "高亮片段")
     private List<HighlightedSegmentDto> highlightedSegments;
 
+    @Schema(description = "定位批注")
+    private List<HighlightedAnnotationDto> highlightedAnnotations;
+
     @Schema(description = "理想答案骨架")
     private List<String> idealAnswerOutline;
 
@@ -63,6 +66,16 @@ public class QuestionRedoAttemptDto {
     @Schema(description = "高亮片段")
     public static class HighlightedSegmentDto {
         private String segment;
+        private String label;
+        private String comment;
+    }
+
+    @Data
+    @Schema(description = "定位批注")
+    public static class HighlightedAnnotationDto {
+        private Integer start;
+        private Integer end;
+        private String quote;
         private String label;
         private String comment;
     }

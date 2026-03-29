@@ -195,6 +195,21 @@ export function getLatestQuestionRedoAttempt(sessionId, questionId) {
   })
 }
 
+/** Get question consult messages */
+export function getQuestionConsultMessages(sessionId, questionId) {
+  return request('/interviews/' + sessionId + '/questions/' + questionId + '/ai-consult/messages', {
+    method: 'GET'
+  })
+}
+
+/** Create question consult messages */
+export function createQuestionConsultMessage(sessionId, questionId, payload) {
+  return request('/interviews/' + sessionId + '/questions/' + questionId + '/ai-consult/messages', {
+    method: 'POST',
+    body: payload
+  })
+}
+
 /** Get learning recommendations for interview report */
 export function getLearningRecommendations(sessionId) {
   return request('/interviews/' + sessionId + '/report/learning-recommendations', { method: 'GET' })
@@ -308,6 +323,19 @@ function isAbortLikeError(err) {
 export async function streamInterviewQuestion(sessionId, attemptId, handlers = {}, signal, options = {}) {
   const url = buildApiUrl('/interviews/' + sessionId + '/questions/stream')
     + '?attemptId=' + encodeURIComponent(attemptId)
+  return streamSseByUrl(url, handlers, signal, options)
+}
+
+/** Stream question consult assistant message via fetch-based SSE */
+export async function streamQuestionConsultMessage(sessionId, questionId, assistantMessageId, handlers = {}, signal) {
+  const url = buildApiUrl(
+    '/interviews/' + sessionId + '/questions/' + questionId
+    + '/ai-consult/messages/' + assistantMessageId + '/stream'
+  )
+  return streamSseByUrl(url, handlers, signal)
+}
+
+async function streamSseByUrl(url, handlers = {}, signal, options = {}) {
   const headers = {
     Accept: 'text/event-stream',
     Authorization: getAuthHeader()
@@ -381,7 +409,6 @@ export async function streamInterviewQuestion(sessionId, attemptId, handlers = {
         if (!line) {
           await dispatch()
           if (terminalEvent) {
-            // 终止事件已到达时无需等待服务端主动断开连接，避免前端长期卡在 waiting 状态。
             shouldStopReading = true
             break
           }

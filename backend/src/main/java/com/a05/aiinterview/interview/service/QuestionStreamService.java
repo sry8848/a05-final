@@ -647,8 +647,15 @@ public class QuestionStreamService {
         ResolvedDomain resolvedDomain = resolveRelatedDomain(session, plan);
         ResolvedItem resolvedItem = resolveActiveItem(session, plan);
         String questionGoalFocus = resolveQuestionGoalFocus(plan);
+        String targetQuestionType = firstNonBlank(plan.getTargetQuestionType(), "PRINCIPLE");
 
         QuestionGenerationInput.RetrievalContext retrievalContext = buildRetrievalContext(plan, ragContext);
+        QuestionGenerationInput.ProjectContext projectContext = buildProjectContextForPrompt(
+                session,
+                plan,
+                resolvedItem,
+                targetQuestionType
+        );
 
         QuestionGenerationInput input = QuestionGenerationInput.builder()
                 .interviewId(session.getId())
@@ -660,12 +667,7 @@ public class QuestionStreamService {
                         .roundType("")
                         .style(InterviewerArchetypeSupport.resolveFromLedger(session.getStateLedgerJson()))
                         .build())
-                .projectContext(QuestionGenerationInput.ProjectContext.builder()
-                        .activeItemKey(resolvedItem.itemKey)
-                        .itemType(resolvedItem.itemType)
-                        .itemName(resolvedItem.itemName)
-                        .currentFocus(firstNonBlank(extractLedgerString(session, "current_focus"), plan.getNextProjectPoint(), plan.getNextFocus()))
-                        .build())
+                .projectContext(projectContext)
                 .recentContext(QuestionGenerationInput.RecentContext.builder()
                         .lastQuestion(historyQuestions.isEmpty() ? "" : historyQuestions.getLast().getStem())
                         .lastAnswerSummary(summarizeAnswer(attempt != null ? attempt.getAnswerText() : ""))
@@ -673,7 +675,7 @@ public class QuestionStreamService {
                         .lastAnswerHighlights(List.of())
                         .build())
                 .nextQuestionGoal(QuestionGenerationInput.NextQuestionGoal.builder()
-                        .questionType(firstNonBlank(plan.getTargetQuestionType(), "PRINCIPLE"))
+                        .questionType(targetQuestionType)
                         .nextFocus(questionGoalFocus)
                         .goalSummary(buildGoalSummary(plan))
                         .relatedDomainCode(resolvedDomain.domainCode)
@@ -695,6 +697,30 @@ public class QuestionStreamService {
         return input;
     }
 
+    private QuestionGenerationInput.ProjectContext buildProjectContextForPrompt(InterviewSession session,
+                                                                                NextQuestionPlan plan,
+                                                                                ResolvedItem resolvedItem,
+                                                                                String targetQuestionType) {
+        if (!"PROJECT_DEEP_DIVE".equalsIgnoreCase(firstNonBlank(targetQuestionType, ""))) {
+            return QuestionGenerationInput.ProjectContext.builder()
+                    .activeItemKey("")
+                    .itemType("")
+                    .itemName("")
+                    .currentFocus("")
+                    .build();
+        }
+        return QuestionGenerationInput.ProjectContext.builder()
+                .activeItemKey(resolvedItem.itemKey)
+                .itemType(resolvedItem.itemType)
+                .itemName(resolvedItem.itemName)
+                .currentFocus(firstNonBlank(
+                        extractLedgerString(session, "current_focus"),
+                        plan != null ? plan.getNextProjectPoint() : "",
+                        plan != null ? plan.getNextFocus() : ""
+                ))
+                .build();
+    }
+
     private QuestionGenerationInput.RetrievalContext buildRetrievalContext(NextQuestionPlan plan, RagContext ragContext) {
         List<EvaluationDecisionOutput.RetrievalPlan> retrievalPlans =
                 plan == null || plan.getRetrievalPlans() == null ? List.of() : plan.getRetrievalPlans();
@@ -706,6 +732,10 @@ public class QuestionStreamService {
                 ragContext == null || ragContext.getFollowUpCandidates() == null
                         ? List.of()
                         : ragContext.getFollowUpCandidates();
+        RagContext.RetrievalAudit retrievalAudit =
+                ragContext == null || ragContext.getRetrievalAudit() == null
+                        ? RagContext.RetrievalAudit.empty(false)
+                        : ragContext.getRetrievalAudit();
         String summary = ragContext != null && !ragContext.isEmpty() && ragContext.getSummary() != null
                 && !ragContext.getSummary().isBlank()
                 ? ragContext.getSummary()
@@ -716,6 +746,7 @@ public class QuestionStreamService {
                 .retrievalPlans(retrievalPlans)
                 .retrievedMaterials(retrievedMaterials)
                 .followUpCandidates(followUpCandidates)
+                .retrievalAudit(retrievalAudit)
                 .build();
     }
 

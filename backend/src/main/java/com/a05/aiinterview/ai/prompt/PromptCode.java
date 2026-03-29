@@ -12,7 +12,8 @@ public enum PromptCode {
     EVALUATION_DECISION("evaluation_decision"),
     REPORT_GENERATION("report_generation"),
     INTRO_REWRITE("intro_rewrite"),
-    QUESTION_DETAIL_EVALUATION("question_detail_evaluation");
+    QUESTION_DETAIL_EVALUATION("question_detail_evaluation"),
+    QUESTION_CONSULT("question_consult");
 
     private final String code;
 

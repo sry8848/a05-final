@@ -37,6 +37,9 @@ public class RagContext {
     @Builder.Default
     private List<String> followUpCandidates = new ArrayList<>();
 
+    /** 轻量检索审计信息，供日志、调试和出题上下文回放使用。 */
+    private RetrievalAudit retrievalAudit;
+
     /** 实际命中的文档片段数量 */
     private int hitCount;
 
@@ -55,6 +58,19 @@ public class RagContext {
                 .hitCount(0)
                 .retrievedMaterials(List.of())
                 .followUpCandidates(List.of())
+                .retrievalAudit(RetrievalAudit.empty(false))
+                .empty(true)
+                .build();
+    }
+
+    public static RagContext emptyTriggered(RetrievalAudit retrievalAudit) {
+        return RagContext.builder()
+                .contextText("")
+                .summary("")
+                .hitCount(0)
+                .retrievedMaterials(List.of())
+                .followUpCandidates(List.of())
+                .retrievalAudit(retrievalAudit == null ? RetrievalAudit.empty(true) : retrievalAudit)
                 .empty(true)
                 .build();
     }
@@ -76,6 +92,16 @@ public class RagContext {
         }
         if (followUpCandidates != null && !followUpCandidates.isEmpty()) {
             map.put("followUpCandidates", followUpCandidates);
+        }
+        if (retrievalAudit != null) {
+            Map<String, Object> auditMap = new LinkedHashMap<>();
+            auditMap.put("retrievalTriggered", retrievalAudit.isRetrievalTriggered());
+            auditMap.put("lexicalCandidateCount", retrievalAudit.getLexicalCandidateCount());
+            auditMap.put("denseCandidateCount", retrievalAudit.getDenseCandidateCount());
+            auditMap.put("rerankPreTopQuestionIds", retrievalAudit.getRerankPreTopQuestionIds());
+            auditMap.put("rerankPostTopQuestionIds", retrievalAudit.getRerankPostTopQuestionIds());
+            auditMap.put("injectedQuestionIds", retrievalAudit.getInjectedQuestionIds());
+            map.put("retrievalAudit", auditMap);
         }
         if (!empty && contextText != null && !contextText.isBlank()) {
             // 审计日志只截取前 500 字符，避免日志过大
@@ -106,5 +132,32 @@ public class RagContext {
         private String difficulty;
         @Builder.Default
         private List<String> keywords = new ArrayList<>();
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class RetrievalAudit {
+        private boolean retrievalTriggered;
+        private int lexicalCandidateCount;
+        private int denseCandidateCount;
+        @Builder.Default
+        private List<String> rerankPreTopQuestionIds = new ArrayList<>();
+        @Builder.Default
+        private List<String> rerankPostTopQuestionIds = new ArrayList<>();
+        @Builder.Default
+        private List<String> injectedQuestionIds = new ArrayList<>();
+
+        public static RetrievalAudit empty(boolean retrievalTriggered) {
+            return RetrievalAudit.builder()
+                    .retrievalTriggered(retrievalTriggered)
+                    .lexicalCandidateCount(0)
+                    .denseCandidateCount(0)
+                    .rerankPreTopQuestionIds(List.of())
+                    .rerankPostTopQuestionIds(List.of())
+                    .injectedQuestionIds(List.of())
+                    .build();
+        }
     }
 }

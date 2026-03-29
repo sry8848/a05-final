@@ -97,7 +97,7 @@
       "difficultyHint": "L3",
       "expectedKeywords": ["Redisson", "看门狗", "续期", "分布式锁"],
       "mustHaveClues": ["续期条件", "失败场景", "锁过期"],
-      "avoidClues": ["基础 API 用法", "安装部署"],
+      "avoidClues": ["只背 API 不讲项目链路", "不说明项目失败场景"],
       "expectedFollowUpIds": ["redisson-lock-leak-001"],
       "retrievalPlans": [
         {
@@ -107,7 +107,7 @@
           "keywordHints": ["Redisson", "看门狗", "续期", "分布式锁"],
           "difficultyHint": "L3",
           "mustHaveClues": ["续期条件", "失败场景", "锁过期"],
-          "avoidClues": ["基础 API 用法", "安装部署"]
+          "avoidClues": ["只背 API 不讲项目链路", "不说明项目失败场景"]
         }
       ]
     },
@@ -288,6 +288,50 @@
       "avoidClues": [],
       "expectedFollowUpIds": [],
       "retrievalPlans": []
+    },
+    {
+      "traceId": "session-85_q-221_attempt-redisson-project-watchdog",
+      "questionType": "PROJECT",
+      "focusPoint": "你们项目里 Redisson 看门狗为什么会自动续期",
+      "shouldRetrieve": true,
+      "difficultyHint": "L3",
+      "expectedKeywords": ["Redisson", "看门狗", "续期", "分布式锁"],
+      "mustHaveClues": ["续期条件", "显式 leaseTime", "失败场景"],
+      "avoidClues": ["基础 API 用法", "安装部署"],
+      "expectedFollowUpIds": ["redisson-lock-leak-001"],
+      "retrievalPlans": [
+        {
+          "goal": "补充项目里 Redisson 看门狗的技术深挖边界",
+          "displayQuery": "Redisson 看门狗项目追问",
+          "queryText": "项目里 Redisson 看门狗为什么会自动续期 显式 leaseTime 有什么影响 失败场景是什么",
+          "keywordHints": ["Redisson", "看门狗", "续期", "分布式锁"],
+          "difficultyHint": "L3",
+          "mustHaveClues": ["续期条件", "显式 leaseTime", "失败场景"],
+          "avoidClues": ["基础 API 用法", "安装部署"]
+        }
+      ]
+    },
+    {
+      "traceId": "session-86_q-224_attempt-behavior-push-hard-problem",
+      "questionType": "BEHAVIORAL",
+      "focusPoint": "讲一次你推动一个很难落地的问题最终解决的经历",
+      "shouldRetrieve": true,
+      "difficultyHint": "L2",
+      "expectedKeywords": ["推动", "协作", "阻力", "复盘"],
+      "mustHaveClues": ["个人动作", "推进过程", "结果复盘"],
+      "avoidClues": ["技术原理", "空泛价值观表态"],
+      "expectedFollowUpIds": ["behavior-push-hard-problem-001"],
+      "retrievalPlans": [
+        {
+          "goal": "补充行为题中推动复杂问题落地的高频问法",
+          "displayQuery": "推动难题落地",
+          "queryText": "行为面试 推动复杂问题落地 遇到阻力 如何推进 最终结果和复盘",
+          "keywordHints": ["推动", "协作", "阻力", "复盘"],
+          "difficultyHint": "L2",
+          "mustHaveClues": ["个人动作", "推进过程", "结果复盘"],
+          "avoidClues": ["技术原理", "空泛价值观表态"]
+        }
+      ]
     }
   ]
 }

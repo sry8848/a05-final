@@ -3,11 +3,14 @@ package com.a05.aiinterview.interview;
 import com.a05.aiinterview.common.ApiResponse;
 import com.a05.aiinterview.interview.dto.CreateInterviewRequest;
 import com.a05.aiinterview.interview.dto.CreateInterviewResponse;
+import com.a05.aiinterview.interview.dto.CreateQuestionConsultMessageRequest;
+import com.a05.aiinterview.interview.dto.CreateQuestionConsultMessageResponse;
 import com.a05.aiinterview.interview.dto.InterviewDetailDto;
 import com.a05.aiinterview.interview.dto.InterviewHistoryPageDto;
 import com.a05.aiinterview.interview.dto.InterviewQuestionReviewDto;
 import com.a05.aiinterview.interview.dto.InterviewReportDto;
 import com.a05.aiinterview.interview.dto.LearningRecommendationDto;
+import com.a05.aiinterview.interview.dto.QuestionConsultMessageDto;
 import com.a05.aiinterview.interview.dto.QuestionRedoAttemptDto;
 import com.a05.aiinterview.interview.dto.QuestionRedoAttemptRequest;
 import com.a05.aiinterview.interview.dto.SubmitAttemptRequest;
@@ -19,6 +22,7 @@ import com.a05.aiinterview.interview.service.InterviewQuestionReviewService;
 import com.a05.aiinterview.interview.service.InterviewReportService;
 import com.a05.aiinterview.interview.service.InterviewService;
 import com.a05.aiinterview.interview.service.LearningRecommendationService;
+import com.a05.aiinterview.interview.service.QuestionConsultService;
 import com.a05.aiinterview.interview.service.QuestionRedoService;
 import com.a05.aiinterview.interview.service.QuestionStreamService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -42,6 +46,7 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * Interview session APIs.
@@ -61,6 +66,7 @@ public class InterviewController {
     private final LearningRecommendationService learningRecommendationService;
     private final QuestionStreamService questionStreamService;
     private final QuestionRedoService questionRedoService;
+    private final QuestionConsultService questionConsultService;
 
     @Operation(summary = "Get interview history list")
     @GetMapping
@@ -205,6 +211,37 @@ public class InterviewController {
             @PathVariable Long sessionId,
             @PathVariable Long questionId) {
         return ApiResponse.ok(questionRedoService.getLatestRedoAttempt(sessionId, questionId, userId));
+    }
+
+    @Operation(summary = "Get question consult messages")
+    @GetMapping("/{sessionId}/questions/{questionId}/ai-consult/messages")
+    public ApiResponse<List<QuestionConsultMessageDto>> getQuestionConsultMessages(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId,
+            @PathVariable Long questionId) {
+        return ApiResponse.ok(questionConsultService.listMessages(sessionId, questionId, userId));
+    }
+
+    @Operation(summary = "Create question consult messages")
+    @PostMapping("/{sessionId}/questions/{questionId}/ai-consult/messages")
+    public ApiResponse<CreateQuestionConsultMessageResponse> createQuestionConsultMessage(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId,
+            @PathVariable Long questionId,
+            @Valid @RequestBody CreateQuestionConsultMessageRequest request) {
+        return ApiResponse.ok(questionConsultService.createMessage(sessionId, questionId, userId, request));
+    }
+
+    @Operation(summary = "Stream question consult assistant message")
+    @GetMapping(
+            value = "/{sessionId}/questions/{questionId}/ai-consult/messages/{assistantMessageId}/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> streamQuestionConsultMessage(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId,
+            @PathVariable Long questionId,
+            @PathVariable Long assistantMessageId) {
+        return questionConsultService.streamAssistantMessage(sessionId, questionId, assistantMessageId, userId);
     }
 
     @Operation(summary = "Get state ledger for debugging")
