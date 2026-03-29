@@ -1,0 +1,81 @@
+<h2>问答详情页批注改版</h2>
+<p class="subtitle">目标：正文先保证可读性，批注只做轻提示，不再整段刷红刷绿</p>
+
+<div class="section">
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">现状问题</div>
+      <div class="mockup-body">
+        <div style="background:#aeb4c1;border-radius:24px;padding:24px 26px;">
+          <div style="font-size:14px;color:#6b7280;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
+            <strong style="font-size:18px;color:#1f2937;">我的回答</strong>
+            <span>整段大面积红绿高亮</span>
+          </div>
+          <div style="background:#9ca3af;border-radius:18px;padding:18px 18px;line-height:1.95;font-size:17px;color:#1f2937;">
+            <span style="background:rgba(16,185,129,.16);color:#2dd4bf;">我们遵循的核心原则是尽量消除共享，必须共享时确保原子性。</span>
+            <span style="background:rgba(16,185,129,.16);color:#2dd4bf;">ThreadLocal 和不可变 DTO 被整段刷绿。</span>
+            <span style="background:rgba(239,68,68,.16);color:#f87171;">而真正需要补强的部分也被整段刷红，视觉负担很重。</span>
+          </div>
+          <div style="margin-top:16px;display:grid;gap:10px;">
+            <div style="color:#34d399;font-size:15px;">● 下面批注也是高饱和绿色，和正文抢视觉</div>
+            <div style="color:#f87171;font-size:15px;">● 红绿太大面积，像涂改，不像点评</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mockup" data-choice="recommended" onclick="toggleSelect(this)">
+      <div class="mockup-header">推荐方案 A</div>
+      <div class="mockup-body">
+        <div style="background:#eef3fb;border-radius:24px;padding:24px 26px;">
+          <div style="font-size:14px;color:#64748b;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
+            <strong style="font-size:18px;color:#0f172a;">我的回答</strong>
+            <span>仅少量片段改字体色</span>
+          </div>
+          <div style="background:#ffffff;border:1px solid #dbe5f0;border-radius:18px;padding:18px 18px;line-height:2;font-size:17px;color:#1f2937;box-shadow:0 8px 24px rgba(148,163,184,.10);">
+            <span style="color:#1f2937;">我们遵循的核心原则是 </span>
+            <span style="color:#0f9f6e;font-weight:600;">“尽量消除共享，必须共享时确保原子性”</span>
+            <span style="color:#1f2937;">。我们主要通过 </span>
+            <span style="color:#0f9f6e;font-weight:600;">ThreadLocal 与不可变 DTO</span>
+            <span style="color:#1f2937;"> 做隔离，这部分表达是清楚的。至于 </span>
+            <span style="color:#d14343;font-weight:600;">ThreadLocal 的内存泄漏风险、锁选型依据与 volatile 的适用场景</span>
+            <span style="color:#1f2937;">，这里没有展开，所以应该补充，但未标注的正文保持正常阅读色。</span>
+          </div>
+          <div style="margin-top:18px;display:grid;gap:10px;">
+            <div style="background:#f5fbf8;border:1px solid #d7eee3;border-radius:12px;padding:12px 14px;display:flex;gap:10px;align-items:flex-start;">
+              <div style="width:22px;height:22px;border-radius:999px;background:#0f9f6e;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;flex:none;">✓</div>
+              <div style="color:#24443a;font-size:15px;line-height:1.7;">亮点批注：正文已点出并发原则，也把 ThreadLocal 和 DTO 的角色区分清楚。</div>
+            </div>
+            <div style="background:#fff7f7;border:1px solid #f2d6d6;border-radius:12px;padding:12px 14px;display:flex;gap:10px;align-items:flex-start;">
+              <div style="width:22px;height:22px;border-radius:999px;background:#d14343;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;flex:none;">!</div>
+              <div style="color:#5b2d2d;font-size:15px;line-height:1.7;">待补强批注：下面的说明仍然可读，但不再整行纯红，重点是内容，不是颜色。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="cards">
+    <div class="card">
+      <div class="card-body">
+        <h3>设计规则</h3>
+        <p>1. 正文框改为浅白底，深色正文，先解决“看不清”。</p>
+        <p>2. 只有被 AI 标中的片段才改字体色，普通文本不再染色。</p>
+        <p>3. 绿色和红色改为更稳的文字强调色，不再配大面积背景块。</p>
+        <p>4. 下方批注改成浅底提示卡，文字用深色，不再整条亮绿或亮红。</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <h3>准备落地的细节</h3>
+        <p>正文底：白色或非常浅的冷白，边框轻灰蓝。</p>
+        <p>亮点字：偏深青绿，保证清晰，不用荧光绿。</p>
+        <p>问题字：偏深暖红，避免刺眼粉红。</p>
+        <p>批注字：统一深色，仅靠图标和浅底区分正负向。</p>
+      </div>
+    </div>
+  </div>
+</div>
