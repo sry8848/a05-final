@@ -30,4 +30,15 @@ public class AiCallResult<T> {
 
     /** 端到端调用延迟（毫秒），从发起请求到收到完整响应 */
     private final long latencyMs;
+
+    // ==================== 调试字段 ====================
+
+    /** 系统提示词（调试用） */
+    private final String systemPrompt;
+
+    /** 用户提示词（调试用） */
+    private final String userPrompt;
+
+    /** AI 原始返回文本（调试用） */
+    private final String rawResponse;
 }

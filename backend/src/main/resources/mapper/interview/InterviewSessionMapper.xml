@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.a05.aiinterview.interview.mapper.InterviewSessionMapper">
+
+    <resultMap id="InterviewSessionResultMap" type="com.a05.aiinterview.interview.entity.InterviewSession">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="resume_id" property="resumeId"/>
+        <result column="title" property="title"/>
+        <result column="position_code" property="positionCode"/>
+        <result column="experience_level" property="experienceLevel"/>
+        <result column="mode" property="mode"/>
+        <result column="job_description" property="jobDescription"/>
+        <result column="focus_topics" property="focusTopics"/>
+        <result column="current_question_no" property="currentQuestionNo"/>
+        <result column="context_window_size" property="contextWindowSize"/>
+        <result column="think_time_limit_seconds" property="thinkTimeLimitSeconds"/>
+        <result column="answer_time_limit_seconds" property="answerTimeLimitSeconds"/>
+        <result column="first_question_json"
+                property="firstQuestionJson"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="syllabus_json"
+                property="syllabusJson"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="state_ledger_json"
+                property="stateLedgerJson"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="status" property="status"/>
+        <result column="model_provider" property="modelProvider"/>
+        <result column="model_name" property="modelName"/>
+        <result column="started_at" property="startedAt"/>
+        <result column="finished_at" property="finishedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="selectForUpdate" resultMap="InterviewSessionResultMap">
+        SELECT *
+        FROM interview_sessions
+        WHERE id = #{sessionId}
+        FOR UPDATE
+    </select>
+
+    <resultMap id="InterviewHistoryItemResultMap" type="com.a05.aiinterview.interview.dto.InterviewHistoryItemDto">
+        <result column="session_id" property="sessionId"/>
+        <result column="title" property="title"/>
+        <result column="position_code" property="positionCode"/>
+        <result column="mode" property="mode"/>
+        <result column="overall_score" property="overallScore"/>
+        <result column="question_count" property="questionCount"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <sql id="historyWhere">
+        s.user_id = #{userId}
+        <if test="status != null and status != ''">
+            AND s.status = #{status}
+        </if>
+        <if test="positionCode != null and positionCode != ''">
+            AND s.position_code = #{positionCode}
+        </if>
+        <if test="dateFrom != null">
+            AND s.created_at &gt;= #{dateFrom}
+        </if>
+        <if test="dateTo != null">
+            AND s.created_at &lt;= #{dateTo}
+        </if>
+    </sql>
+
+    <select id="selectHistoryPage" resultMap="InterviewHistoryItemResultMap">
+        SELECT s.id AS session_id,
+               s.title,
+               s.position_code,
+               s.mode,
+               r.overall_score,
+               s.current_question_no AS question_count,
+               s.status,
+               s.created_at
+        FROM interview_sessions s
+                 LEFT JOIN interview_reports r ON r.session_id = s.id
+        WHERE <include refid="historyWhere"/>
+        ORDER BY
+        <choose>
+            <when test="sortBy == 'overallScore'">
+                r.overall_score
+            </when>
+            <otherwise>
+                s.created_at
+            </otherwise>
+        </choose>
+        <choose>
+            <when test="sortOrder == 'asc'">ASC</when>
+            <otherwise>DESC</otherwise>
+        </choose>,
+        s.id DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countHistory" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM interview_sessions s
+        WHERE <include refid="historyWhere"/>
+    </select>
+
+    <select id="selectPlannerRecentSessions" resultMap="InterviewSessionResultMap">
+        SELECT *
+        FROM interview_sessions
+        WHERE user_id = #{userId}
+          AND position_code = #{positionCode}
+          <if test="dateFrom != null">
+              AND COALESCE(finished_at, updated_at, created_at) &gt;= #{dateFrom}
+          </if>
+          <if test="excludeSessionId != null">
+              AND id != #{excludeSessionId}
+          </if>
+          <if test="statuses != null and statuses.size() &gt; 0">
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                  #{status}
+              </foreach>
+          </if>
+        ORDER BY COALESCE(finished_at, updated_at, created_at) DESC, id DESC
+        LIMIT #{limit}
+    </select>
+</mapper>

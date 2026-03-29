@@ -112,8 +112,11 @@ public class ClasspathPromptTemplateService implements PromptTemplateService {
         }
 
         List<String> lines = Arrays.asList(content.split("\\R", -1));
-        int systemHeading = findHeading(lines, "## System Prompt");
+        int systemHeading = findHeadingAny(lines, SYSTEM_HEADINGS);
         int userHeading = findUserHeading(lines);
+        if (userHeading < 0) {
+            userHeading = findHeadingAny(lines, USER_HEADINGS);
+        }
 
         if (systemHeading < 0 || userHeading < 0 || userHeading <= systemHeading) {
             throw new PromptTemplateParseException("模板缺少有效的 System/User 段落: " + sourcePath);
@@ -132,6 +135,19 @@ public class ClasspathPromptTemplateService implements PromptTemplateService {
         return new PromptTemplate(promptCode.trim(), promptVersion.trim(), sourcePath, systemPrompt, userPrompt);
     }
 
+    private static final List<String> SYSTEM_HEADINGS = List.of(
+            "## System Prompt",
+            "## 系统提示",
+            "## 系统提示词"
+    );
+
+    private static final List<String> USER_HEADINGS = List.of(
+            "## User Prompt Template",
+            "## User Prompt",
+            "## 用户提示模板",
+            "## 用户提示"
+    );
+
     private int findHeading(List<String> lines, String heading) {
         for (int i = 0; i < lines.size(); i++) {
             if (heading.equalsIgnoreCase(lines.get(i).trim())) {
@@ -143,8 +159,19 @@ public class ClasspathPromptTemplateService implements PromptTemplateService {
 
     private int findUserHeading(List<String> lines) {
         for (int i = 0; i < lines.size(); i++) {
-            if (lines.get(i).trim().startsWith("## User Prompt")) {
+            String line = lines.get(i).trim();
+            if (line.startsWith("## User Prompt") || line.startsWith("## 用户提示")) {
                 return i;
+            }
+        }
+        return -1;
+    }
+
+    private int findHeadingAny(List<String> lines, List<String> headings) {
+        for (String heading : headings) {
+            int index = findHeading(lines, heading);
+            if (index >= 0) {
+                return index;
             }
         }
         return -1;

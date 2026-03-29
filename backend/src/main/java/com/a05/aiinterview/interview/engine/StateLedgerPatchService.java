@@ -2,11 +2,17 @@ package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.common.enums.DomainStatus;
+import com.a05.aiinterview.interview.debug.InterviewDebugTraceService;
+import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.entity.SessionSkillState;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.a05.aiinterview.interview.mapper.SessionSkillStateMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -14,23 +20,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
- * 状态账本 Patch 应用服务（单一职责）。
- *
- * <p>职责：将评估决策服务返回的 {@link EvaluationDecisionOutput.LedgerPatch} 安全地写入：
- * <ol>
- *   <li>{@code interview_sessions.state_ledger_json} —— 更新 domain_states、question_mix_progress、
- *       asked_total、last_attempt_id</li>
- *   <li>{@code session_skill_states} —— 更新对应行的 current_depth、saturated、status、tested_count</li>
- * </ol>
- *
- * <p>并发安全：通过 {@code SELECT FOR UPDATE} 对同一 sessionId 的会话行加排他锁，
- * 保证同一场面试的账本 Patch 串行执行，避免并发覆写。
- *
- * <p>事务：整个方法在同一数据库事务中完成，任何子步骤失败均整体回滚。
+ * 账本写入服务。
+ * 新版本只接受结构化 mutation，再交由 reducer 计算新账本。
  */
 @Slf4j
 @Service
@@ -39,171 +37,339 @@ public class StateLedgerPatchService {
 
     private final InterviewSessionMapper interviewSessionMapper;
     private final SessionSkillStateMapper sessionSkillStateMapper;
+    private final StateLedgerReducer stateLedgerReducer;
+    private final StateLedgerDiffService stateLedgerDiffService;
+    private final InterviewDebugTraceService interviewDebugTraceService;
 
-    /**
-     * 将评估决策 Patch 应用到账本，同时更新 session_skill_states 行。
-     *
-     * @param sessionId          面试会话 ID
-     * @param patch              评估决策返回的账本变更描述
-     * @param attemptId          本次 attempt 的幂等键（写入账本 last_attempt_id）
-     * @param evidenceQuestionId 本次被回答题目的 ID（追加到账本 evidence_refs，可为 null）
-     */
     @Transactional(rollbackFor = Exception.class)
-    public void applyPatch(Long sessionId,
-                           EvaluationDecisionOutput.LedgerPatch patch,
-                           String attemptId,
-                           Long evidenceQuestionId) {
-        log.info("开始应用账本 Patch, sessionId={}, domainCode={}, attemptId={}",
-                sessionId, patch != null ? patch.getDomainCode() : "null", attemptId);
-
-        // 以排他行锁加载会话，保证同 session 的 Patch 串行
+    public ReductionAudit applyReduction(Long sessionId,
+                                         EvaluationDecisionOutput evalOutput,
+                                         DecisionExecutionPlan executionPlan,
+                                         InterviewQuestion currentQuestion,
+                                         String attemptId,
+                                         Long evidenceQuestionId,
+                                         String answerText) {
         InterviewSession session = interviewSessionMapper.selectForUpdate(sessionId);
         if (session == null) {
             throw new IllegalArgumentException("面试会话不存在, sessionId=" + sessionId);
         }
-
-        Map<String, Object> ledger = session.getStateLedgerJson();
-        if (ledger == null) {
+        if (session.getStateLedgerJson() == null) {
             throw new IllegalStateException("状态账本为空, sessionId=" + sessionId);
         }
 
-        // 更新账本 domain_states
-        if (patch != null && patch.getDomainCode() != null) {
-            applyDomainStatePatch(ledger, patch, evidenceQuestionId);
-        }
+        Map<String, Object> normalizedLedger = normalizeLedgerForReduction(session);
+        LedgerMutation mutation = buildMutation(session, currentQuestion, evalOutput, executionPlan, answerText);
+        Map<String, Object> newLedger = stateLedgerReducer.reduce(
+                normalizedLedger, mutation, attemptId, evidenceQuestionId);
+        DecisionFallbackStateSupport.applyPlan(newLedger, executionPlan);
+        Map<String, Object> diff = stateLedgerDiffService.diff(normalizedLedger, newLedger);
 
-        // 递增 question_mix_progress 计数
-        if (patch != null && patch.getQuestionType() != null) {
-            incrementMixProgress(ledger, patch.getQuestionType());
-        }
-
-        // 递增 asked_total
-        int askedTotal = toInt(ledger.getOrDefault("asked_total", 0)) + 1;
-        ledger.put("asked_total", askedTotal);
-
-        // 更新 last_attempt_id
-        ledger.put("last_attempt_id", attemptId);
-
-        // 写回会话
         InterviewSession update = new InterviewSession();
         update.setId(sessionId);
-        update.setStateLedgerJson(ledger);
+        update.setStateLedgerJson(newLedger);
         update.setUpdatedAt(LocalDateTime.now());
         interviewSessionMapper.updateById(update);
 
-        // 同步更新 session_skill_states 行
-        if (patch != null && patch.getDomainId() != null) {
-            updateSkillState(sessionId, patch);
-        }
+        syncSkillState(sessionId, mutation, newLedger, evidenceQuestionId);
+        logReductionDebug(sessionId, currentQuestion, mutation, diff, normalizedLedger, newLedger, attemptId);
 
-        log.info("账本 Patch 应用完成, sessionId={}, domain={}, depth={}, askedTotal={}, attemptId={}",
-                sessionId, patch != null ? patch.getDomainCode() : "null",
-                patch != null ? patch.getCurrentDepth() : "null",
-                askedTotal, attemptId);
+        return ReductionAudit.builder()
+                .newLedger(newLedger)
+                .diff(diff)
+                .domainClosureReason(resolveDomainClosureReason(mutation))
+                .build();
     }
 
-    // ────────────────────────────────────────────────────────────
-    // 私有方法
-    // ────────────────────────────────────────────────────────────
+    private LedgerMutation buildMutation(InterviewSession session,
+                                         InterviewQuestion currentQuestion,
+                                         EvaluationDecisionOutput evalOutput,
+                                         DecisionExecutionPlan executionPlan,
+                                         String answerText) {
+        Map<String, Object> generationContext = currentQuestion.getGenerationContextJson() != null
+                ? currentQuestion.getGenerationContextJson()
+                : Map.of();
+        Map<String, Object> ledger = session.getStateLedgerJson() != null ? session.getStateLedgerJson() : Map.of();
+        String currentDomainCode = resolveCurrentDomainCode(session, currentQuestion);
+        String currentFocus = firstNonBlank(
+                asString(generationContext.get("focusPoint")),
+                currentQuestion.getFocusPoint(),
+                asString(ledger.get("current_focus")));
 
-    /**
-     * 更新账本 domain_states 中对应域的条目。
-     * 匹配规则：账本中 domain_id 字段存储的是知识域编码（domainCode）。
-     */
-    @SuppressWarnings("unchecked")
-    private void applyDomainStatePatch(Map<String, Object> ledger,
-                                       EvaluationDecisionOutput.LedgerPatch patch,
-                                       Long evidenceQuestionId) {
-        Object domainStatesObj = ledger.get("domain_states");
-        if (!(domainStatesObj instanceof List<?> rawList)) {
+        String currentItemKey = firstNonBlank(
+                asString(generationContext.get("activeItemKey")),
+                asString(ledger.get("active_item_key")));
+        String currentItemType = firstNonBlank(
+                asString(generationContext.get("activeItemType")),
+                asString(ledger.get("active_item_type")));
+        String currentItemName = firstNonBlank(
+                asString(generationContext.get("activeItemName")),
+                asString(ledger.get("active_item_name")));
+
+        return LedgerMutation.builder()
+                .questionType(currentQuestion.getQuestionType())
+                .currentDomainCode(currentDomainCode)
+                .currentFocus(currentFocus)
+                .currentItemKey(currentItemKey)
+                .currentItemType(currentItemType)
+                .currentItemName(currentItemName)
+                .nextFocus(firstNonBlank(executionPlan != null ? executionPlan.getNextFocus() : null, evalOutput.getNextFocus()))
+                .nextItemKey(currentItemKey)
+                .nextItemType(currentItemType)
+                .nextItemName(currentItemName)
+                .questionFamilyId(buildQuestionFamilyId(executionPlan))
+                .skipCurrentQuestion("[skip]".equals(answerText))
+                .interviewAction(firstNonBlank(executionPlan != null ? executionPlan.getInterviewAction() : null, evalOutput.getInterviewAction()))
+                .newCoveredDomains(toCoveredDomains(executionPlan, evalOutput))
+                .newCoveredPoints(executionPlan != null && executionPlan.getNewCoveredPoints() != null
+                        ? executionPlan.getNewCoveredPoints()
+                        : evalOutput.getNewCoveredPoints())
+                .build();
+    }
+
+    private String resolveDomainClosureReason(LedgerMutation mutation) {
+        if (mutation.getNewCoveredDomains() != null && !mutation.getNewCoveredDomains().isEmpty()) {
+            return "COVERED";
+        }
+        if (mutation.isSkipCurrentQuestion()) {
+            return "SKIPPED";
+        }
+        if ("WRAPUP".equalsIgnoreCase(mutation.getInterviewAction())) {
+            return "WRAPUP";
+        }
+        return null;
+    }
+
+    private void syncSkillState(Long sessionId,
+                                LedgerMutation mutation,
+                                Map<String, Object> newLedger,
+                                Long evidenceQuestionId) {
+        for (String domainCode : collectSkillStateSyncDomainCodes(mutation)) {
+            syncSingleSkillState(sessionId, domainCode, newLedger, evidenceQuestionId);
+        }
+    }
+
+    private void syncSingleSkillState(Long sessionId,
+                                      String domainCode,
+                                      Map<String, Object> newLedger,
+                                      Long evidenceQuestionId) {
+        if (domainCode == null || domainCode.isBlank()) {
             return;
         }
-
-        for (Object item : rawList) {
-            if (!(item instanceof Map<?, ?> rawMap)) continue;
-            Map<String, Object> ds = (Map<String, Object>) rawMap;
-            if (!patch.getDomainCode().equals(ds.get("domain_id"))) continue;
-
-            ds.put("current_depth", patch.getCurrentDepth());
-            // 统一使用枚举 getValue() 写入账本，确保始终为 UNASKED/IN_PROGRESS/COVERED/CIRCUIT_BROKEN
-            DomainStatus domainStatus = patch.getDomainStatus() != null
-                    ? patch.getDomainStatus() : DomainStatus.IN_PROGRESS;
-            ds.put("status", domainStatus.getValue());
-            ds.put("saturated", patch.isSaturated());
-
-            // 追加 evidence_ref（题目 ID）
-            if (evidenceQuestionId != null) {
-                List<Object> refs = (List<Object>) ds.computeIfAbsent("evidence_refs", k -> new ArrayList<>());
-                refs.add(evidenceQuestionId);
-            }
-            break;
-        }
-    }
-
-    /**
-     * 递增 question_mix_progress 中指定题型的计数。
-     */
-    @SuppressWarnings("unchecked")
-    private void incrementMixProgress(Map<String, Object> ledger, String questionType) {
-        Object mixObj = ledger.get("question_mix_progress");
-        if (!(mixObj instanceof Map<?, ?> rawMap)) {
-            return;
-        }
-        Map<String, Object> mixProgress = (Map<String, Object>) rawMap;
-        int current = toInt(mixProgress.getOrDefault(questionType, 0));
-        mixProgress.put(questionType, current + 1);
-    }
-
-    /**
-     * 更新 session_skill_states 表对应行的覆盖状态。
-     */
-    private void updateSkillState(Long sessionId, EvaluationDecisionOutput.LedgerPatch patch) {
         SessionSkillState existing = sessionSkillStateMapper.selectOne(
                 new LambdaQueryWrapper<SessionSkillState>()
                         .eq(SessionSkillState::getSessionId, sessionId)
-                        .eq(SessionSkillState::getDomainId, patch.getDomainId())
-        );
-
+                        .eq(SessionSkillState::getDomainCode, domainCode));
         if (existing == null) {
-            log.warn("session_skill_states 未找到对应行, sessionId={}, domainId={}", sessionId, patch.getDomainId());
             return;
         }
 
-        // 枚举直接提供关系表侧的写入值，无需字符串映射转换
-        String skillStatus = resolveSkillStateValue(patch.getDomainStatus(), patch.isSaturated());
-
-        existing.setCurrentDepth(patch.getCurrentDepth());
-        existing.setSaturated(patch.isSaturated());
-        existing.setStatus(skillStatus);
-        existing.setTestedCount(existing.getTestedCount() + 1);
-        if (patch.getEvidenceQuestionId() != null) {
-            List<Long> refs = existing.getEvidenceRefs() != null
-                    ? new ArrayList<>(existing.getEvidenceRefs()) : new ArrayList<>();
-            refs.add(patch.getEvidenceQuestionId());
+        Map<String, Object> domainState = findDomainState(newLedger, domainCode);
+        if (domainState == null) {
+            return;
+        }
+        existing.setStatus(DomainStatus.fromLedgerValue(asString(domainState.get("status"))).getSkillStateValue());
+        existing.setSaturated(Boolean.TRUE.equals(domainState.get("saturated")));
+        existing.setTestedCount(existing.getTestedCount() == null ? 1 : existing.getTestedCount() + 1);
+        if (evidenceQuestionId != null) {
+            List<Long> refs = existing.getEvidenceRefs() != null ? new ArrayList<>(existing.getEvidenceRefs()) : new ArrayList<>();
+            refs.add(evidenceQuestionId);
             existing.setEvidenceRefs(refs);
         }
         existing.setUpdatedAt(LocalDateTime.now());
         sessionSkillStateMapper.updateById(existing);
     }
 
-    /**
-     * 将 {@link DomainStatus} 枚举解析为 session_skill_states.status 列的写入值。
-     * saturated=true 时强制写 COVERED，否则直接使用枚举的 skillStateValue。
-     *
-     * @param domainStatus 账本侧枚举（可为 null，兜底为 IN_PROGRESS）
-     * @param saturated    是否已问透
-     * @return session_skill_states.status 列应写入的字符串（小写下划线风格）
-     */
-    private String resolveSkillStateValue(DomainStatus domainStatus, boolean saturated) {
-        if (saturated) {
-            return DomainStatus.COVERED.getSkillStateValue();
+    private List<String> collectSkillStateSyncDomainCodes(LedgerMutation mutation) {
+        if (mutation == null) {
+            return List.of();
         }
-        DomainStatus effective = domainStatus != null ? domainStatus : DomainStatus.IN_PROGRESS;
-        return effective.getSkillStateValue();
+        LinkedHashSet<String> domainCodes = new LinkedHashSet<>();
+        if (mutation.getCurrentDomainCode() != null && !mutation.getCurrentDomainCode().isBlank()) {
+            domainCodes.add(mutation.getCurrentDomainCode().trim());
+        }
+        if (mutation.getNewCoveredDomains() != null) {
+            for (LedgerMutation.CoveredDomainByCode coveredDomain : mutation.getNewCoveredDomains()) {
+                if (coveredDomain == null || coveredDomain.getDomainCode() == null || coveredDomain.getDomainCode().isBlank()) {
+                    continue;
+                }
+                domainCodes.add(coveredDomain.getDomainCode().trim());
+            }
+        }
+        return new ArrayList<>(domainCodes);
     }
 
-    private int toInt(Object val) {
-        if (val instanceof Number n) return n.intValue();
-        try { return Integer.parseInt(String.valueOf(val)); } catch (Exception e) { return 0; }
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> findDomainState(Map<String, Object> ledger, String domainCode) {
+        Object rawStates = ledger.get("domain_states");
+        if (!(rawStates instanceof List<?> states)) {
+            return null;
+        }
+        for (Object stateObj : states) {
+            if (!(stateObj instanceof Map<?, ?> state)) {
+                continue;
+            }
+            if (Objects.equals(domainCode, asString(state.get("domainCode")))) {
+                return new LinkedHashMap<>((Map<String, Object>) state);
+            }
+        }
+        return null;
+    }
+
+    private String buildQuestionFamilyId(DecisionExecutionPlan executionPlan) {
+        if (executionPlan == null || "WRAPUP".equalsIgnoreCase(executionPlan.getInterviewAction())) {
+            return null;
+        }
+        String questionType = executionPlan.getTargetQuestionType() == null
+                ? ""
+                : executionPlan.getTargetQuestionType().trim().toUpperCase();
+        String focus = executionPlan.getNextFocus() == null
+                ? ""
+                : executionPlan.getNextFocus().trim().replaceAll("\\s+", "_");
+        if (questionType.isBlank() || focus.isBlank()) {
+            return null;
+        }
+        return questionType + "." + focus;
+    }
+
+    private Map<String, Object> normalizeLedgerForReduction(InterviewSession session) {
+        Map<String, Object> normalized = session.getStateLedgerJson() == null
+                ? new LinkedHashMap<>()
+                : new LinkedHashMap<>(session.getStateLedgerJson());
+        int askedTotal = session.getCurrentQuestionNo() != null
+                ? Math.max(session.getCurrentQuestionNo(), 0)
+                : QuotaStateSupport.toInt(normalized.get("asked_total"));
+        normalized.put("asked_total", askedTotal);
+        return normalized;
+    }
+
+    private String resolveCurrentDomainCode(InterviewSession session, InterviewQuestion question) {
+        String domainCode = extractDomainCode(question != null ? question.getGenerationContextJson() : null);
+        if (!domainCode.isBlank()) {
+            return domainCode;
+        }
+        if (question != null && question.getDomainCode() != null && !question.getDomainCode().isBlank()) {
+            return question.getDomainCode();
+        }
+        return "";
+    }
+
+    private String extractDomainCode(Map<String, Object> generationContext) {
+        if (generationContext == null) {
+            return "";
+        }
+        Object domainCode = generationContext.get("domainCode");
+        return domainCode instanceof String code ? code : "";
+    }
+
+    private List<LedgerMutation.CoveredDomainByCode> toCoveredDomains(DecisionExecutionPlan executionPlan,
+                                                                      EvaluationDecisionOutput evalOutput) {
+        List<EvaluationDecisionOutput.CoveredDomain> rawDomains = executionPlan != null && executionPlan.getNewCoveredDomains() != null
+                ? executionPlan.getNewCoveredDomains()
+                : evalOutput.getNewCoveredDomains();
+        if (rawDomains == null || rawDomains.isEmpty()) {
+            return List.of();
+        }
+        List<LedgerMutation.CoveredDomainByCode> coveredDomains = new ArrayList<>(rawDomains.size());
+        for (EvaluationDecisionOutput.CoveredDomain rawDomain : rawDomains) {
+            if (rawDomain == null || rawDomain.getDomainCode() == null || rawDomain.getDomainCode().isBlank()) {
+                continue;
+            }
+            coveredDomains.add(LedgerMutation.CoveredDomainByCode.builder()
+                    .domainCode(rawDomain.getDomainCode().trim())
+                    .domainName(firstNonBlank(rawDomain.getDomainName(), ""))
+                    .build());
+        }
+        return coveredDomains;
+    }
+
+    private void logReductionDebug(Long sessionId,
+                                   InterviewQuestion currentQuestion,
+                                   LedgerMutation mutation,
+                                   Map<String, Object> diff,
+                                   Map<String, Object> oldLedger,
+                                   Map<String, Object> newLedger,
+                                   String attemptId) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sessionId", sessionId);
+        payload.put("attemptId", attemptId);
+        payload.put("questionId", currentQuestion != null ? currentQuestion.getId() : null);
+        payload.put("interviewAction", mutation.getInterviewAction());
+        payload.put("currentDomainCode", mutation.getCurrentDomainCode());
+        payload.put("currentFocus", mutation.getCurrentFocus());
+        payload.put("nextFocus", mutation.getNextFocus());
+        payload.put("ledgerBefore", summarizeLedger(oldLedger));
+        payload.put("ledgerAfter", summarizeLedger(newLedger));
+        payload.put("diff", diff);
+        interviewDebugTraceService.recordQuestionStage(
+                sessionId,
+                currentQuestion != null ? currentQuestion.getId() : null,
+                attemptId,
+                "ledgerPatch",
+                payload,
+                buildLedgerDebugSummary(mutation, diff)
+        );
+    }
+
+    private Map<String, Object> buildLedgerDebugSummary(LedgerMutation mutation, Map<String, Object> diff) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("currentFocus", asString(firstNonBlank(mutation.getCurrentFocus(), "")));
+        summary.put("nextFocus", asString(firstNonBlank(mutation.getNextFocus(), "")));
+        summary.put("diffKeys", diff == null ? List.of() : new ArrayList<>(diff.keySet()));
+        return summary;
+    }
+
+    private Map<String, Object> summarizeLedger(Map<String, Object> ledger) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        if (ledger == null) {
+            return summary;
+        }
+        summary.put("asked_total", ledger.get("asked_total"));
+        summary.put("current_focus", ledger.get("current_focus"));
+        summary.put("active_item_key", ledger.get("active_item_key"));
+        summary.put("covered_domains", ledger.get("covered_domains"));
+        summary.put("covered_points", ledger.get("covered_points"));
+        summary.put("quota_state", ledger.get("quota_state"));
+        summary.put("decision_fallback_state", ledger.get("decision_fallback_state"));
+        return summary;
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private String asString(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ReductionAudit {
+        private Map<String, Object> newLedger;
+        private Map<String, Object> diff;
+        private String domainClosureReason;
     }
 }

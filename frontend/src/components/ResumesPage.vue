@@ -6,7 +6,7 @@
           <i class="fas fa-file-alt"></i>
           简历管理
         </h1>
-        <p class="page-desc">管理多份简历，用于面试上下文。支持 PDF、DOCX 上传与识别文本编辑。</p>
+        <p class="page-desc">管理多份简历，用于面试上下文。支持 PDF、DOCX、MD 上传与识别文本编辑。</p>
       </div>
       <div class="header-actions">
         <button type="button" class="btn btn-primary glass-btn" @click="showUploadModal = true">
@@ -34,14 +34,15 @@
         >
           <div class="card-main">
             <div class="card-icon">
-              <i class="fas fa-file-pdf" v-if="(item.name || '').toLowerCase().endsWith('.pdf')"></i>
-              <i class="fas fa-file-word" v-else></i>
+              <i class="fas fa-file-pdf" v-if="resumeFileKind(item) === 'pdf'"></i>
+              <i class="fas fa-file-word" v-else-if="resumeFileKind(item) === 'word'"></i>
+              <i class="fas fa-file-code" v-else-if="resumeFileKind(item) === 'markdown'"></i>
+              <i class="fas fa-file-alt" v-else></i>
             </div>
             <div class="card-info">
               <span class="card-name">{{ item.name || '未命名简历' }}</span>
               <span class="card-time">{{ formatTime(item.createdAt) }}</span>
               <div class="card-tags">
-                <span v-if="item.isDefault" class="tag default">默认</span>
                 <span class="tag status" :class="item.parseStatus">{{ parseStatusText(item.parseStatus) }}</span>
               </div>
             </div>
@@ -49,14 +50,6 @@
           <div class="card-actions">
             <button type="button" class="action-btn" @click="openDetail(item)">
               详情
-            </button>
-            <button
-              v-if="!item.isDefault"
-              type="button"
-              class="action-btn"
-              @click="setDefault(item)"
-            >
-              设为默认
             </button>
             <button type="button" class="action-btn danger" @click="confirmDelete(item)">
               删除
@@ -68,7 +61,7 @@
 
     <!-- 上传弹窗 -->
     <div v-if="showUploadModal" class="modal-overlay" @click.self="closeUploadModal">
-      <div class="modal-content glass-card upload-modal">
+      <div class="modal-content modal-panel upload-modal">
         <div class="modal-header">
           <h3><i class="fas fa-cloud-upload-alt"></i> 上传简历</h3>
           <button type="button" class="close-btn" @click="closeUploadModal" :disabled="uploading">
@@ -87,13 +80,13 @@
             <input
               ref="fileInput"
               type="file"
-              accept=".pdf,.docx"
+              accept=".pdf,.docx,.md"
               class="file-input"
               @change="onFileSelect"
             />
             <template v-if="!uploading">
               <i class="fas fa-cloud-upload-alt"></i>
-              <p>将 PDF 或 DOCX 文件拖到此处，或点击选择</p>
+              <p>将 PDF、DOCX 或 MD 文件拖到此处，或点击选择</p>
             </template>
             <template v-else>
               <i class="fas fa-spinner fa-spin"></i>
@@ -106,7 +99,7 @@
 
     <!-- 详情/编辑弹窗 -->
     <div v-if="showDetailModal" class="modal-overlay" @click.self="closeDetailModal">
-      <div class="modal-content glass-card detail-modal">
+      <div class="modal-content modal-panel detail-modal">
         <div class="modal-header">
           <h3><i class="fas fa-edit"></i> 简历详情 · 识别文本</h3>
           <button type="button" class="close-btn" @click="closeDetailModal" :disabled="saving">
@@ -168,8 +161,9 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import * as resumeApi from '@/api/resume'
+import { buildUploadedResumeItem, detectResumeFileKind, patchResumeListItem } from '@/utils/resumeState'
 
 const PARSE_STATUS_MAP = {
   parsing: '解析中',
@@ -196,7 +190,7 @@ export default {
       parseStatus: '',
       parsedText: ''
     })
-    let detailPollTimer = null
+    const listPollTimers = new Map()
 
     function parseStatusText(status) {
       return PARSE_STATUS_MAP[status] || status || '未知'
@@ -213,12 +207,18 @@ export default {
       return d.toLocaleDateString('zh-CN')
     }
 
+    function resumeFileKind(item) {
+      return detectResumeFileKind(item?.name)
+    }
+
     async function loadList() {
       loading.value = true
       try {
         const data = await resumeApi.getResumes()
         list.value = Array.isArray(data) ? data : []
+        restartParsingPolls()
       } catch (e) {
+        clearAllListPolls()
         list.value = []
         console.warn('简历列表加载失败:', e.message)
       } finally {
@@ -246,8 +246,8 @@ export default {
 
     async function doUpload(file) {
       const name = (file.name || '').toLowerCase()
-      if (!name.endsWith('.pdf') && !name.endsWith('.docx')) {
-        alert('仅支持 PDF、DOCX 格式')
+      if (!name.endsWith('.pdf') && !name.endsWith('.docx') && !name.endsWith('.md')) {
+        alert('仅支持 PDF、DOCX、MD 格式')
         return
       }
       uploading.value = true
@@ -255,12 +255,15 @@ export default {
       try {
         const data = await resumeApi.uploadResume(file)
         const resumeId = data?.resumeId ?? data?.id
-        uploadStatusText.value = '解析中...'
-        list.value = [{ id: resumeId, name: file.name, sourceType: 'file', parseStatus: data?.parseStatus || 'parsing', isDefault: false, createdAt: new Date().toISOString() }, ...list.value]
+        uploadStatusText.value = data?.parseStatus === 'parsed' ? '已完成' : '解析中...'
+        const uploadedItem = buildUploadedResumeItem({
+          resumeId,
+          fileName: file.name,
+          parseStatus: data?.parseStatus || 'parsing'
+        })
+        list.value = [uploadedItem, ...list.value]
         closeUploadModal()
-        if (data?.parseStatus === 'parsing' && resumeId) {
-          pollParseStatus(resumeId)
-        }
+        openDetail(uploadedItem)
       } catch (e) {
         alert(e.message || '上传失败')
       } finally {
@@ -268,16 +271,87 @@ export default {
       }
     }
 
-    function pollParseStatus(resumeId) {
-      const poll = async () => {
+    function stopListPoll(resumeId) {
+      const timer = listPollTimers.get(resumeId)
+      if (timer) {
+        clearTimeout(timer)
+        listPollTimers.delete(resumeId)
+      }
+    }
+
+    function clearAllListPolls() {
+      for (const timer of listPollTimers.values()) {
+        clearTimeout(timer)
+      }
+      listPollTimers.clear()
+    }
+
+    function syncListItem(resumeId, patch) {
+      list.value = patchResumeListItem(list.value, resumeId, patch)
+    }
+
+    async function refreshDetail(resumeId = detailForm.id) {
+      if (!resumeId) return
+      try {
+        const data = await resumeApi.getResume(resumeId)
+        if (detailForm.id !== resumeId) return
+        detailForm.name = data?.name ?? detailForm.name
+        detailForm.parseStatus = data?.parseStatus ?? detailForm.parseStatus
+        detailForm.parsedText = data?.parsedText ?? data?.parsed_text ?? ''
+        syncListItem(resumeId, {
+          name: detailForm.name,
+          parseStatus: detailForm.parseStatus
+        })
+        if (detailForm.parseStatus === 'parsing') {
+          scheduleListPoll(resumeId)
+        }
+      } catch (e) {
+        if (detailForm.id === resumeId) {
+          detailForm.parsedText = ''
+        }
+      } finally {
+        if (detailForm.id === resumeId) {
+          detailLoading.value = false
+        }
+      }
+    }
+
+    function scheduleListPoll(resumeId, delayMs = 2500) {
+      if (!resumeId) return
+      stopListPoll(resumeId)
+      const timer = setTimeout(async () => {
+        listPollTimers.delete(resumeId)
         try {
           const data = await resumeApi.getParseStatus(resumeId)
-          const item = list.value.find(r => r.id === resumeId)
-          if (item) item.parseStatus = data?.parseStatus || item.parseStatus
-          if (data?.parseStatus === 'parsing') setTimeout(poll, 2500)
-        } catch (_) {}
-      }
-      setTimeout(poll, 2000)
+          const nextStatus = data?.parseStatus
+          if (nextStatus) {
+            syncListItem(resumeId, { parseStatus: nextStatus })
+            if (detailForm.id === resumeId) {
+              detailForm.parseStatus = nextStatus
+              if (data?.parsedTextPreview) {
+                detailForm.parsedText = data.parsedTextPreview
+              }
+            }
+          }
+          if (nextStatus === 'parsing') {
+            scheduleListPoll(resumeId)
+            return
+          }
+          if (nextStatus === 'parsed' && detailForm.id === resumeId) {
+            await refreshDetail(resumeId)
+          }
+        } catch (_) {
+          scheduleListPoll(resumeId)
+        }
+      }, delayMs)
+      listPollTimers.set(resumeId, timer)
+    }
+
+    function restartParsingPolls() {
+      clearAllListPolls()
+      list.value
+        .filter(item => item?.parseStatus === 'parsing')
+        .forEach(item => scheduleListPoll(item.id))
     }
 
     function closeUploadModal() {
@@ -294,45 +368,7 @@ export default {
       detailForm.parseStatus = item.parseStatus || ''
       detailForm.parsedText = ''
       detailLoading.value = true
-      fetchDetail()
-    }
-
-    async function fetchDetail() {
-      if (!detailForm.id) return
-      try {
-        const data = await resumeApi.getResume(detailForm.id)
-        detailForm.name = data?.name ?? detailForm.name
-        detailForm.parseStatus = data?.parseStatus ?? detailForm.parseStatus
-        detailForm.parsedText = data?.parsedText ?? data?.parsed_text ?? ''
-        if (detailForm.parseStatus === 'parsing') {
-          if (!detailPollTimer) detailPollTimer = setInterval(pollDetailStatus, 2500)
-        } else {
-          clearPoll()
-        }
-      } catch (e) {
-        detailForm.parsedText = ''
-      } finally {
-        detailLoading.value = false
-      }
-    }
-
-    function pollDetailStatus() {
-      if (!detailForm.id || detailForm.parseStatus !== 'parsing') return
-      resumeApi.getParseStatus(detailForm.id).then(data => {
-        detailForm.parseStatus = data?.parseStatus ?? detailForm.parseStatus
-        if (data?.parsedTextPreview) detailForm.parsedText = data.parsedTextPreview
-        if (detailForm.parseStatus !== 'parsing') {
-          clearPoll()
-          if (detailForm.parseStatus === 'parsed') resumeApi.getResume(detailForm.id).then(r => { detailForm.parsedText = r?.parsedText ?? r?.parsed_text ?? detailForm.parsedText })
-        }
-      }).catch(() => {})
-    }
-
-    function clearPoll() {
-      if (detailPollTimer) {
-        clearInterval(detailPollTimer)
-        detailPollTimer = null
-      }
+      refreshDetail(item.id)
     }
 
     async function saveDetail() {
@@ -343,8 +379,7 @@ export default {
           name: detailForm.name,
           parsedText: detailForm.parsedText
         })
-        const item = list.value.find(r => r.id === detailForm.id)
-        if (item) item.name = detailForm.name
+        syncListItem(detailForm.id, { name: detailForm.name })
         closeDetailModal()
       } catch (e) {
         alert(e.message || '保存失败')
@@ -354,28 +389,25 @@ export default {
     }
 
     function closeDetailModal() {
-      clearPoll()
       showDetailModal.value = false
-    }
-
-    async function setDefault(item) {
-      try {
-        await resumeApi.setDefaultResume(item.id)
-        list.value.forEach(r => { r.isDefault = r.id === item.id })
-      } catch (e) {
-        alert(e.message || '设置失败')
-      }
+      detailLoading.value = false
+      detailForm.id = null
+      detailForm.name = ''
+      detailForm.parseStatus = ''
+      detailForm.parsedText = ''
     }
 
     function confirmDelete(item) {
       if (!confirm('确定删除这份简历吗？')) return
       resumeApi.deleteResume(item.id).then(() => {
+        stopListPoll(item.id)
         list.value = list.value.filter(r => r.id !== item.id)
         if (showDetailModal.value && detailForm.id === item.id) closeDetailModal()
       }).catch(e => alert(e.message || '删除失败'))
     }
 
     onMounted(() => { loadList() })
+    onBeforeUnmount(() => { clearAllListPolls() })
 
     return {
       list,
@@ -390,6 +422,7 @@ export default {
       saving,
       detailForm,
       parseStatusText,
+      resumeFileKind,
       formatTime,
       triggerFileInput,
       onDrop,
@@ -398,7 +431,6 @@ export default {
       openDetail,
       closeDetailModal,
       saveDetail,
-      setDefault,
       confirmDelete
     }
   }
@@ -531,11 +563,6 @@ export default {
   border-radius: 4px;
 }
 
-.tag.default {
-  background: rgba(59, 89, 152, 0.2);
-  color: var(--primary-color);
-}
-
 .tag.status {
   background: rgba(255,255,255,0.08);
   color: var(--text-secondary);
@@ -610,7 +637,7 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 20px 24px;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--modal-surface-border);
 }
 
 .modal-header h3 {
@@ -619,7 +646,7 @@ export default {
   gap: 10px;
   font-size: 18px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--modal-text-primary);
   margin: 0;
 }
 
@@ -633,7 +660,7 @@ export default {
   border: none;
   background: transparent;
   border-radius: var(--radius-sm);
-  color: var(--text-secondary);
+  color: var(--modal-text-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -642,7 +669,7 @@ export default {
 }
 
 .close-btn:hover:not(:disabled) {
-  background: rgba(59, 89, 152, 0.1);
+  background: rgba(59, 89, 152, 0.08);
   color: var(--primary-color);
 }
 
@@ -664,13 +691,13 @@ export default {
   text-align: center;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: rgba(59, 89, 152, 0.05);
+  background: var(--modal-section-bg);
 }
 
 .upload-zone:hover:not(.uploading),
 .upload-zone.dragover {
   border-color: var(--primary-color);
-  background: rgba(59, 89, 152, 0.1);
+  background: rgba(59, 89, 152, 0.12);
 }
 
 .upload-zone i {
@@ -683,7 +710,7 @@ export default {
 .upload-zone p {
   margin: 0;
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--modal-text-secondary);
 }
 
 .upload-zone.uploading {
@@ -705,7 +732,7 @@ export default {
   gap: 12px;
   padding: 24px;
   justify-content: center;
-  color: var(--text-secondary);
+  color: var(--modal-text-secondary);
 }
 
 .form-group {
@@ -716,34 +743,35 @@ export default {
   display: block;
   font-size: 14px;
   font-weight: 500;
-  color: var(--text-primary);
+  color: var(--modal-text-primary);
   margin-bottom: 8px;
 }
 
 .glass-input {
   width: 100%;
   padding: 12px 16px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--modal-input-bg);
+  border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: var(--radius-md);
   font-size: 14px;
-  color: var(--text-primary);
+  color: var(--modal-text-primary);
   font-family: inherit;
 }
 
 .glass-input:focus {
   outline: none;
   border-color: var(--primary-color);
+  background: #ffffff;
 }
 
 .glass-textarea {
   width: 100%;
   padding: 12px 16px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--modal-input-bg);
+  border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: var(--radius-md);
   font-size: 14px;
-  color: var(--text-primary);
+  color: var(--modal-text-primary);
   font-family: inherit;
   resize: vertical;
   min-height: 200px;
@@ -752,6 +780,7 @@ export default {
 .glass-textarea:focus {
   outline: none;
   border-color: var(--primary-color);
+  background: #ffffff;
 }
 
 .status-badge {
@@ -770,6 +799,6 @@ export default {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 24px;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid var(--modal-surface-border);
 }
 </style>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.a05.aiinterview.interview.mapper.InterviewReportMapper">
+
+    <resultMap id="InterviewReportResultMap" type="com.a05.aiinterview.interview.entity.InterviewReport">
+        <id column="id" property="id"/>
+        <result column="session_id" property="sessionId"/>
+        <result column="overall_score" property="overallScore"/>
+        <result column="skill_domain_scores"
+                property="skillDomainScores"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="comprehensive_radar_scores"
+                property="comprehensiveRadarScores"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="summary" property="summary"/>
+        <result column="strengths"
+                property="strengths"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="weaknesses"
+                property="weaknesses"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="improvement_suggestions"
+                property="improvementSuggestions"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="recommended_topics"
+                property="recommendedTopics"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="interactive_transcript_json"
+                property="interactiveTranscriptJson"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="selectBySessionId" resultMap="InterviewReportResultMap">
+        SELECT *
+        FROM interview_reports
+        WHERE session_id = #{sessionId}
+        LIMIT 1
+    </select>
+</mapper>

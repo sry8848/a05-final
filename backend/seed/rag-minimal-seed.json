@@ -1,0 +1,151 @@
+{
+  "documents": [
+    {
+      "id": "redis-cache-penetration-001",
+      "questionText": "讲一下 Redis 缓存穿透",
+      "intentConcept": "考察候选人对缓存空对象、布隆过滤器以及数据库保护方案的理解",
+      "referenceContext": "高并发查询不存在数据时，如果缓存层没有做好兜底，请求会持续打到数据库，导致后端压力异常升高。常见思路是缓存空对象和布隆过滤器。",
+      "scoringKeyPoints": [
+        "解释缓存穿透场景",
+        "提到缓存空对象",
+        "提到布隆过滤器",
+        "说明方案局限性或权衡"
+      ],
+      "scoringPitfalls": [
+        "把缓存穿透和缓存击穿混淆",
+        "只会背概念不会说处理方案"
+      ],
+      "followUpIds": [
+        "redis-bloom-filter-false-positive-001"
+      ],
+      "domainCode": "redis",
+      "questionType": "PRINCIPLE",
+      "difficulty": "L2",
+      "keywords": [
+        "Redis",
+        "缓存穿透",
+        "布隆过滤器",
+        "空对象缓存"
+      ],
+      "source": "manual_test",
+      "active": true,
+      "version": "v1"
+    },
+    {
+      "id": "redis-bloom-filter-false-positive-001",
+      "questionText": "布隆过滤器误判了怎么办",
+      "intentConcept": "考察候选人对布隆过滤器误判、副作用和兜底策略的理解",
+      "referenceContext": "布隆过滤器可以快速拦截明显不存在的数据，但存在误判概率，因此仍要结合业务容错、回源策略和过滤器维护成本来权衡。",
+      "scoringKeyPoints": [
+        "知道布隆过滤器可能误判",
+        "说明误判的影响",
+        "能讲出兜底或补偿方案"
+      ],
+      "scoringPitfalls": [
+        "把误判说成漏判",
+        "认为布隆过滤器可以完全替代回源校验"
+      ],
+      "followUpIds": [],
+      "domainCode": "redis",
+      "questionType": "PRINCIPLE",
+      "difficulty": "L3",
+      "keywords": [
+        "Redis",
+        "布隆过滤器",
+        "误判"
+      ],
+      "source": "manual_test",
+      "active": true,
+      "version": "v1"
+    },
+    {
+      "id": "behavior-conflict-001",
+      "questionText": "讲一次你和产品意见不一致的经历",
+      "intentConcept": "考察冲突沟通、推动过程、结果和反思",
+      "referenceContext": "行为题关注真实经历、个人动作、推进过程和结果复盘，不考察技术原理本身。",
+      "scoringKeyPoints": [
+        "讲清楚冲突背景",
+        "说明自己的动作",
+        "说明推进过程",
+        "说明结果和反思"
+      ],
+      "scoringPitfalls": [
+        "只有情绪没有行动",
+        "空泛价值观表态"
+      ],
+      "followUpIds": [],
+      "domainCode": "",
+      "questionType": "BEHAVIORAL",
+      "difficulty": "L2",
+      "keywords": [
+        "沟通",
+        "冲突",
+        "推进",
+        "协作"
+      ],
+      "source": "manual_test",
+      "active": true,
+      "version": "v1"
+    },
+    {
+      "id": "project-seata-xid-loss-001",
+      "questionText": "你们项目里 Seata XID 丢失是怎么定位和修复的",
+      "intentConcept": "考察分布式事务上下文传播、Feign 调用链、XID 透传和问题定位能力",
+      "referenceContext": "在 Seata AT 模式的微服务调用链中，如果全局事务上下文没有正确透传，下游服务无法注册分支事务，导致回滚链断裂。常见修复方式是定位 XID 丢失点并补充透传逻辑。",
+      "scoringKeyPoints": [
+        "说明 XID 传播链路",
+        "说明丢失发生的位置",
+        "说明修复点或拦截器位置",
+        "说明如何验证修复生效"
+      ],
+      "scoringPitfalls": [
+        "只会说加注解",
+        "说不清具体传播链路"
+      ],
+      "followUpIds": [
+        "project-seata-undo-log-timing-001"
+      ],
+      "domainCode": "distributed",
+      "questionType": "PROJECT",
+      "difficulty": "L4",
+      "keywords": [
+        "Seata",
+        "XID",
+        "Feign",
+        "AT",
+        "Header透传"
+      ],
+      "source": "manual_test",
+      "active": true,
+      "version": "v1"
+    },
+    {
+      "id": "project-seata-undo-log-timing-001",
+      "questionText": "Seata AT 模式下 undo_log 是什么时候写入的",
+      "intentConcept": "考察候选人对 Seata AT 模式事务时序和回滚机制的理解",
+      "referenceContext": "undo_log 与本地事务和 before image/after image 有明确时序关系，只有理解这一点，才能解释 Seata 的回滚机制和性能影响。",
+      "scoringKeyPoints": [
+        "知道 undo_log 与本地事务有关",
+        "说明大致写入时机",
+        "说明它和回滚的关系"
+      ],
+      "scoringPitfalls": [
+        "只会背概念",
+        "讲不清时序"
+      ],
+      "followUpIds": [],
+      "domainCode": "distributed",
+      "questionType": "PRINCIPLE",
+      "difficulty": "L4",
+      "keywords": [
+        "Seata",
+        "undo_log",
+        "AT",
+        "事务时序"
+      ],
+      "source": "manual_test",
+      "active": true,
+      "version": "v1"
+    }
+  ]
+}

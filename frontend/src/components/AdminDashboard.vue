@@ -2,184 +2,106 @@
   <div class="dashboard-page">
     <div class="overview-section">
       <div class="overview-cards">
-        <div class="overview-card glass-card">
-          <div class="card-icon users">
-            <i class="fas fa-users"></i>
+        <div
+          v-for="card in viewModel.overviewStats"
+          :key="card.key"
+          class="overview-card glass-card"
+          :class="{ highlight: card.highlight }"
+        >
+          <div class="card-icon" :class="card.iconClass">
+            <i :class="getOverviewIcon(card.key)"></i>
           </div>
           <div class="card-content">
-            <span class="card-value">{{ overviewStats.totalUsers }}</span>
-            <span class="card-label">总用户数</span>
+            <span class="card-value" :class="{ live: card.key === 'activeInterviews' }">
+              {{ getOverviewValue(card) }}
+            </span>
+            <span class="card-label">{{ card.label }}</span>
           </div>
-          <div class="card-trend up">
-            <i class="fas fa-arrow-up"></i>
-            +{{ overviewStats.newUsersToday }}
-            <span class="trend-label">今日新增</span>
-          </div>
-        </div>
 
-        <div class="overview-card glass-card">
-          <div class="card-icon interviews">
-            <i class="fas fa-comments"></i>
-          </div>
-          <div class="card-content">
-            <span class="card-value">{{ overviewStats.totalInterviews }}</span>
-            <span class="card-label">面试总场次</span>
-          </div>
-          <div class="card-trend up">
-            <i class="fas fa-arrow-up"></i>
-            +{{ overviewStats.interviewsToday }}
-            <span class="trend-label">今日场次</span>
-          </div>
-        </div>
-
-        <div class="overview-card glass-card highlight">
-          <div class="card-icon active">
-            <i class="fas fa-video"></i>
-          </div>
-          <div class="card-content">
-            <span class="card-value live">{{ overviewStats.activeRooms }}</span>
-            <span class="card-label">活跃面试房间</span>
-          </div>
-          <div class="live-indicator">
+          <div v-if="card.meta.tone === 'live'" class="live-indicator">
             <span class="pulse"></span>
-            <span>进行中</span>
+            <span>{{ hasOverviewData ? card.meta.value : '加载中' }}</span>
           </div>
-        </div>
 
-        <div class="overview-card glass-card">
-          <div class="card-icon tokens">
-            <i class="fas fa-coins"></i>
-          </div>
-          <div class="card-content">
-            <span class="card-value">${{ overviewStats.todayCost }}</span>
-            <span class="card-label">今日Token成本</span>
-          </div>
-          <div class="card-trend down">
-            <i class="fas fa-arrow-down"></i>
-            -3.2%
-            <span class="trend-label">较昨日</span>
+          <div v-else class="card-trend" :class="card.meta.tone">
+            <i v-if="card.meta.tone === 'up'" class="fas fa-arrow-up"></i>
+            <span>{{ getOverviewMetaValue(card) }}</span>
+            <span class="trend-label">{{ card.meta.label }}</span>
           </div>
         </div>
+      </div>
+      <div v-if="panelState.overview.error" class="section-note" :class="{ stale: hasOverviewData }">
+        {{ hasOverviewData ? '概览接口暂时失败，当前展示上次结果' : panelState.overview.error }}
       </div>
     </div>
 
     <div class="main-grid">
       <div class="left-section">
-        <div class="chart-card glass-card">
+        <div v-for="chart in chartCards" :key="chart.key" class="chart-card glass-card">
           <div class="card-header">
             <h4>
-              <i class="fas fa-user-plus"></i>
-              新增用户趋势
+              <i :class="chart.icon"></i>
+              {{ chart.title }}
             </h4>
             <span class="chart-badge">最近7天</span>
           </div>
-          <div class="chart-container">
-            <svg viewBox="0 0 350 150" class="trend-chart">
-              <defs>
-                <linearGradient id="userGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stop-color="rgba(59, 89, 152, 0.4)" />
-                  <stop offset="100%" stop-color="rgba(59, 89, 152, 0.05)" />
-                </linearGradient>
-              </defs>
-              <g class="grid-lines">
-                <line v-for="i in 4" :key="i" x1="30" :y1="20 + (i-1) * 30" x2="340" :y2="20 + (i-1) * 30" stroke="rgba(59, 89, 152, 0.1)" />
-              </g>
-              <path :d="userAreaPath" fill="url(#userGradient)" />
-              <path :d="userLinePath" fill="none" stroke="var(--primary-color)" stroke-width="2" />
-              <circle v-for="(point, index) in userPoints" :key="index" :cx="point.x" :cy="point.y" r="4" fill="var(--primary-color)" />
-            </svg>
-            <div class="chart-x-labels">
-              <span v-for="label in dateLabels" :key="label">{{ label }}</span>
-            </div>
-          </div>
-          <div class="chart-summary">
-            <div class="summary-item">
-              <span class="summary-label">本周新增</span>
-              <span class="summary-value">{{ weeklyUserStats.total }}</span>
-            </div>
-            <div class="summary-item">
-              <span class="summary-label">日均增长</span>
-              <span class="summary-value">{{ weeklyUserStats.avg }}</span>
-            </div>
-          </div>
-        </div>
 
-        <div class="chart-card glass-card">
-          <div class="card-header">
-            <h4>
-              <i class="fas fa-calendar-check"></i>
-              面试场次趋势
-            </h4>
-            <span class="chart-badge">最近7天</span>
+          <div v-if="panelState.trends.error" class="card-note" :class="{ stale: hasTrendsData }">
+            {{ hasTrendsData ? '趋势接口暂时失败，当前展示上次结果' : panelState.trends.error }}
           </div>
-          <div class="chart-container">
-            <svg viewBox="0 0 350 150" class="trend-chart">
-              <defs>
-                <linearGradient id="interviewGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stop-color="rgba(16, 185, 129, 0.4)" />
-                  <stop offset="100%" stop-color="rgba(16, 185, 129, 0.05)" />
-                </linearGradient>
-              </defs>
-              <g class="grid-lines">
-                <line v-for="i in 4" :key="i" x1="30" :y1="20 + (i-1) * 30" x2="340" :y2="20 + (i-1) * 30" stroke="rgba(16, 185, 129, 0.1)" />
-              </g>
-              <path :d="interviewAreaPath" fill="url(#interviewGradient)" />
-              <path :d="interviewLinePath" fill="none" stroke="#10b981" stroke-width="2" />
-              <circle v-for="(point, index) in interviewPoints" :key="index" :cx="point.x" :cy="point.y" r="4" fill="#10b981" />
-            </svg>
-            <div class="chart-x-labels">
-              <span v-for="label in dateLabels" :key="label">{{ label }}</span>
-            </div>
-          </div>
-          <div class="chart-summary">
-            <div class="summary-item">
-              <span class="summary-label">本周场次</span>
-              <span class="summary-value">{{ weeklyInterviewStats.total }}</span>
-            </div>
-            <div class="summary-item">
-              <span class="summary-label">日均场次</span>
-              <span class="summary-value">{{ weeklyInterviewStats.avg }}</span>
-            </div>
-          </div>
-        </div>
 
-        <div class="chart-card glass-card">
-          <div class="card-header">
-            <h4>
-              <i class="fas fa-coins"></i>
-              Token消耗成本
-            </h4>
-            <span class="chart-badge">最近7天</span>
+          <div v-if="panelState.trends.loading && !hasTrendsData" class="panel-message">
+            趋势数据加载中...
           </div>
-          <div class="chart-container">
-            <svg viewBox="0 0 350 150" class="trend-chart">
-              <defs>
-                <linearGradient id="costGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stop-color="rgba(245, 158, 11, 0.4)" />
-                  <stop offset="100%" stop-color="rgba(245, 158, 11, 0.05)" />
-                </linearGradient>
-              </defs>
-              <g class="grid-lines">
-                <line v-for="i in 4" :key="i" x1="30" :y1="20 + (i-1) * 30" x2="340" :y2="20 + (i-1) * 30" stroke="rgba(245, 158, 11, 0.1)" />
-              </g>
-              <path :d="costAreaPath" fill="url(#costGradient)" />
-              <path :d="costLinePath" fill="none" stroke="#f59e0b" stroke-width="2" />
-              <circle v-for="(point, index) in costPoints" :key="index" :cx="point.x" :cy="point.y" r="4" fill="#f59e0b" />
-            </svg>
-            <div class="chart-x-labels">
-              <span v-for="label in dateLabels" :key="label">{{ label }}</span>
-            </div>
+          <div v-else-if="panelState.trends.empty" class="panel-message">
+            最近7天暂无数据
           </div>
-          <div class="chart-summary">
-            <div class="summary-item">
-              <span class="summary-label">本周消耗</span>
-              <span class="summary-value">${{ weeklyCostStats.total }}</span>
+          <template v-else>
+            <div class="chart-container">
+              <svg viewBox="0 0 350 150" class="trend-chart">
+                <defs>
+                  <linearGradient :id="chart.gradientId" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" :stop-color="chart.gradientStart" />
+                    <stop offset="100%" :stop-color="chart.gradientEnd" />
+                  </linearGradient>
+                </defs>
+                <g class="grid-lines">
+                  <line
+                    v-for="i in 4"
+                    :key="i"
+                    x1="30"
+                    :y1="20 + (i - 1) * 30"
+                    x2="340"
+                    :y2="20 + (i - 1) * 30"
+                    :stroke="chart.gridColor"
+                  />
+                </g>
+                <path :d="chart.areaPath" :fill="`url(#${chart.gradientId})`" />
+                <path :d="chart.linePath" fill="none" :stroke="chart.stroke" stroke-width="2" />
+                <circle
+                  v-for="point in chart.points"
+                  :key="point.key"
+                  :cx="point.x"
+                  :cy="point.y"
+                  r="4"
+                  :fill="chart.stroke"
+                />
+              </svg>
+              <div class="chart-x-labels">
+                <span v-for="label in viewModel.dateLabels" :key="label">{{ label }}</span>
+              </div>
             </div>
-            <div class="summary-item">
-              <span class="summary-label">日均成本</span>
-              <span class="summary-value">${{ weeklyCostStats.avg }}</span>
+            <div class="chart-summary">
+              <div class="summary-item">
+                <span class="summary-label">{{ chart.totalLabel }}</span>
+                <span class="summary-value">{{ chart.summary.total }}</span>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">{{ chart.avgLabel }}</span>
+                <span class="summary-value">{{ chart.summary.avg }}</span>
+              </div>
             </div>
-          </div>
+          </template>
         </div>
       </div>
 
@@ -190,27 +112,44 @@
               <i class="fas fa-plug"></i>
               模型API状态
             </h4>
-            <span class="status-badge healthy">全部正常</span>
+            <span class="status-badge" :class="viewModel.modelPanel.badge.tone">
+              {{ viewModel.modelPanel.badge.text }}
+            </span>
           </div>
-          <div class="api-list">
-            <div v-for="api in apiStatusList" :key="api.name" class="api-item">
+
+          <div v-if="panelState.models.error" class="card-note" :class="{ stale: hasModelsData }">
+            {{ hasModelsData ? '模型状态接口暂时失败，当前展示上次结果' : panelState.models.error }}
+          </div>
+
+          <div v-if="panelState.models.loading && !hasModelsData" class="panel-message">
+            模型状态加载中...
+          </div>
+          <div v-else-if="viewModel.modelPanel.items.length === 0" class="panel-message">
+            最近15分钟暂无调用
+          </div>
+          <div v-else class="api-list">
+            <div v-for="api in viewModel.modelPanel.items" :key="api.key" class="api-item">
               <div class="api-info">
-                <div class="api-icon" :style="{ background: api.color }">
-                  <i :class="api.icon"></i>
+                <div class="api-icon" :style="{ background: getProviderVisual(api.providerLabel).color }">
+                  <i :class="getProviderVisual(api.providerLabel).icon"></i>
                 </div>
                 <div class="api-details">
-                  <span class="api-name">{{ api.name }}</span>
-                  <span class="api-model">{{ api.model }}</span>
+                  <span class="api-name">{{ api.providerLabel }}</span>
+                  <span class="api-model">{{ api.modelName }}</span>
                 </div>
               </div>
               <div class="api-metrics">
                 <div class="metric">
                   <span class="metric-label">延迟</span>
-                  <span class="metric-value" :class="getLatencyClass(api.latency)">{{ api.latency }}ms</span>
+                  <span class="metric-value" :class="getLatencyClass(api.latencyText)">{{ api.latencyText }}</span>
                 </div>
                 <div class="metric">
                   <span class="metric-label">错误率</span>
-                  <span class="metric-value" :class="getErrorClass(api.errorRate)">{{ api.errorRate }}%</span>
+                  <span class="metric-value" :class="getErrorClass(api.errorRateText)">{{ api.errorRateText }}</span>
+                </div>
+                <div class="metric subtle">
+                  <span class="metric-label">请求量</span>
+                  <span class="metric-value">{{ api.requestCountText }}</span>
                 </div>
                 <div class="status-dot" :class="api.status"></div>
               </div>
@@ -221,55 +160,27 @@
         <div class="queue-status-card glass-card">
           <div class="card-header">
             <h4>
-              <i class="fas fa-tasks"></i>
-              任务队列状态
+              <i class="fas fa-server"></i>
+              系统摘要
             </h4>
           </div>
-          <div class="queue-stats">
-            <div class="queue-item">
-              <div class="queue-icon pending">
-                <i class="fas fa-clock"></i>
-              </div>
-              <div class="queue-info">
-                <span class="queue-value">{{ queueStats.pending }}</span>
-                <span class="queue-label">等待中</span>
-              </div>
-            </div>
-            <div class="queue-item">
-              <div class="queue-icon processing">
-                <i class="fas fa-spinner"></i>
-              </div>
-              <div class="queue-info">
-                <span class="queue-value">{{ queueStats.processing }}</span>
-                <span class="queue-label">处理中</span>
-              </div>
-            </div>
-            <div class="queue-item">
-              <div class="queue-icon completed">
-                <i class="fas fa-check"></i>
-              </div>
-              <div class="queue-info">
-                <span class="queue-value">{{ queueStats.completed }}</span>
-                <span class="queue-label">已完成</span>
-              </div>
-            </div>
-            <div class="queue-item">
-              <div class="queue-icon failed">
-                <i class="fas fa-times"></i>
-              </div>
-              <div class="queue-info">
-                <span class="queue-value">{{ queueStats.failed }}</span>
-                <span class="queue-label">失败</span>
-              </div>
-            </div>
+
+          <div class="system-status-line" :class="viewModel.systemSummaryPanel.statusTone">
+            {{ viewModel.systemSummaryPanel.statusLine }}
           </div>
-          <div class="queue-progress">
-            <div class="progress-header">
-              <span>队列处理进度</span>
-              <span>{{ queueStats.progress }}%</span>
-            </div>
-            <div class="progress-bar">
-              <div class="progress-fill" :style="{ width: queueStats.progress + '%' }"></div>
+
+          <div v-if="systemSummaryNotice" class="card-note" :class="{ stale: true }">
+            {{ systemSummaryNotice }}
+          </div>
+
+          <div class="summary-grid">
+            <div
+              v-for="item in viewModel.systemSummaryPanel.items"
+              :key="item.label"
+              class="summary-grid-item"
+            >
+              <span class="summary-grid-label">{{ item.label }}</span>
+              <span class="summary-grid-value">{{ item.value }}</span>
             </div>
           </div>
         </div>
@@ -278,25 +189,38 @@
           <div class="card-header">
             <h4>
               <i class="fas fa-history"></i>
-              Prompt版本更新
+              Prompt摘要
             </h4>
-            <button class="view-all-btn">
-              查看全部
-              <i class="fas fa-chevron-right"></i>
-            </button>
           </div>
-          <div class="updates-list">
-            <div v-for="update in promptUpdates" :key="update.id" class="update-item">
-              <div class="update-icon" :class="update.type">
-                <i :class="getUpdateIcon(update.type)"></i>
+
+          <div v-if="panelState.prompts.error" class="card-note" :class="{ stale: hasPromptsData }">
+            {{ hasPromptsData ? 'Prompt 摘要接口暂时失败，当前展示上次结果' : panelState.prompts.error }}
+          </div>
+
+          <div v-if="panelState.prompts.loading && !hasPromptsData" class="panel-message">
+            Prompt 摘要加载中...
+          </div>
+          <div v-else-if="viewModel.promptSummaryPanel.items.length === 0" class="panel-message">
+            当前没有可展示的 Prompt 摘要
+          </div>
+          <div v-else class="updates-list">
+            <div
+              v-for="item in viewModel.promptSummaryPanel.items"
+              :key="item.key"
+              class="update-item"
+              :class="{ warning: item.status === 'warning' }"
+            >
+              <div class="update-icon" :class="item.status">
+                <i :class="item.status === 'warning' ? 'fas fa-exclamation-triangle' : 'fas fa-file-alt'"></i>
               </div>
               <div class="update-content">
-                <span class="update-title">{{ update.title }}</span>
-                <span class="update-desc">{{ update.description }}</span>
+                <span class="update-title">{{ item.title }}</span>
+                <span class="update-desc">{{ item.subtitle }}</span>
+                <span class="update-subdesc">{{ item.usageText }}</span>
               </div>
               <div class="update-meta">
-                <span class="update-version">v{{ update.version }}</span>
-                <span class="update-time">{{ update.time }}</span>
+                <span class="update-version">v{{ item.versionText }}</span>
+                <span class="update-time">{{ item.timeText }}</span>
               </div>
             </div>
           </div>
@@ -307,135 +231,519 @@
 </template>
 
 <script>
-import { ref, computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import {
+  getAdminDashboardModels,
+  getAdminDashboardOverview,
+  getAdminDashboardPrompts,
+  getAdminDashboardSystemPing,
+  getAdminDashboardTrends
+} from '@/api/adminDashboard.js'
+import { buildAdminDashboardViewModel } from '@/utils/adminDashboardViewModel.js'
+
+function createPanelState(empty = false) {
+  return {
+    loading: false,
+    error: '',
+    empty
+  }
+}
+
+function generatePoints(series) {
+  if (!Array.isArray(series) || series.length === 0) {
+    return []
+  }
+
+  const maxVal = Math.max(...series, 1)
+  const startX = 50
+  const endX = 340
+  const step = series.length === 1 ? 0 : (endX - startX) / (series.length - 1)
+
+  return series.map((value, index) => ({
+    key: `${index}-${value}`,
+    x: startX + index * step,
+    y: 130 - (Math.max(0, Number(value) || 0) / maxVal) * 100
+  }))
+}
+
+function generateLinePath(points) {
+  if (!points.length) {
+    return ''
+  }
+
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ')
+}
+
+function generateAreaPath(points) {
+  if (!points.length) {
+    return ''
+  }
+
+  const linePath = generateLinePath(points)
+  return `${linePath} L ${points[points.length - 1].x} 130 L ${points[0].x} 130 Z`
+}
+
+function isUnauthorized(error) {
+  return error?.status === 401 || error?.status === 403
+}
+
+function getErrorMessage(error) {
+  return error?.message || '加载失败'
+}
+
+function hasTrendData(data) {
+  return Array.isArray(data?.dates) && data.dates.length > 0
+}
+
+function hasSystemPingData(data) {
+  return Boolean(data && typeof data.serverTime === 'string' && data.serverTime.trim())
+}
+
+function getProviderVisual(providerLabel) {
+  const normalized = String(providerLabel || '').toLowerCase()
+
+  if (normalized === 'openai') {
+    return { icon: 'fas fa-robot', color: '#10a37f' }
+  }
+
+  if (normalized === 'mock') {
+    return { icon: 'fas fa-vial', color: '#64748b' }
+  }
+
+  return { icon: 'fas fa-microchip', color: '#3b5998' }
+}
 
 export default {
   name: 'AdminDashboard',
-  setup() {
-    const overviewStats = ref({
-      totalUsers: 2847,
-      newUsersToday: 156,
-      totalInterviews: 15632,
-      interviewsToday: 423,
-      activeRooms: 23,
-      todayCost: 234.56
+  props: {
+    refreshNonce: {
+      type: Number,
+      default: 0
+    },
+    currentAdminName: {
+      type: String,
+      default: '管理员'
+    }
+  },
+  emits: ['refresh-meta', 'auth-expired'],
+  setup(props, { emit }) {
+    const overview = ref(null)
+    const trends = ref(null)
+    const models = ref([])
+    const prompts = ref([])
+    const systemPing = ref(null)
+    const lastRefreshedAt = ref(null)
+    const activeRequestId = ref(0)
+    let realtimeTimerId = null
+    let visibilityChangeHandler = null
+
+    const panelState = reactive({
+      overview: createPanelState(),
+      trends: createPanelState(true),
+      models: createPanelState(true),
+      prompts: createPanelState(true),
+      system: createPanelState(true)
     })
 
-    const dateLabels = ['3/1', '3/2', '3/3', '3/4', '3/5', '3/6', '3/7']
+    const hasOverviewData = computed(() => overview.value !== null)
+    const hasTrendsData = computed(() => hasTrendData(trends.value))
+    const hasModelsData = computed(() => Array.isArray(models.value) && models.value.length > 0)
+    const hasPromptsData = computed(() => Array.isArray(prompts.value) && prompts.value.length > 0)
+    const hasSystemStatusData = computed(() => hasSystemPingData(systemPing.value))
 
-    const userData = ref([120, 145, 132, 178, 156, 189, 156])
-    const interviewData = ref([320, 380, 350, 420, 390, 450, 423])
-    const costData = ref([180, 210, 195, 245, 220, 260, 234])
+    const anyLoading = computed(() =>
+      Object.values(panelState).some((state) => state.loading)
+    )
 
-    const generatePoints = (data) => {
-      const maxVal = Math.max(...data)
-      return data.map((val, index) => ({
-        x: 50 + (index * 45),
-        y: 130 - (val / maxVal) * 100
-      }))
-    }
+    const viewModel = computed(() =>
+      buildAdminDashboardViewModel({
+        overview: overview.value || {},
+        trends: trends.value || {},
+        models: models.value || [],
+        prompts: prompts.value || [],
+        systemPing: systemPing.value,
+        systemPingState: panelState.system,
+        currentAdminName: props.currentAdminName,
+        lastRefreshedAt: lastRefreshedAt.value
+      })
+    )
 
-    const generateLinePath = (points) => {
-      return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
-    }
+    const chartCards = computed(() => {
+      const cards = [
+        {
+          key: 'users',
+          title: '新增用户趋势',
+          icon: 'fas fa-user-plus',
+          gradientId: 'userGradient',
+          gradientStart: 'rgba(59, 89, 152, 0.4)',
+          gradientEnd: 'rgba(59, 89, 152, 0.05)',
+          gridColor: 'rgba(59, 89, 152, 0.1)',
+          stroke: 'var(--primary-color)',
+          totalLabel: '本周新增',
+          avgLabel: '日均增长',
+          summary: viewModel.value.weeklyUserStats,
+          series: viewModel.value.userSeries
+        },
+        {
+          key: 'interviews',
+          title: '面试场次趋势',
+          icon: 'fas fa-calendar-check',
+          gradientId: 'interviewGradient',
+          gradientStart: 'rgba(16, 185, 129, 0.4)',
+          gradientEnd: 'rgba(16, 185, 129, 0.05)',
+          gridColor: 'rgba(16, 185, 129, 0.1)',
+          stroke: '#10b981',
+          totalLabel: '本周场次',
+          avgLabel: '日均场次',
+          summary: viewModel.value.weeklyInterviewStats,
+          series: viewModel.value.interviewSeries
+        },
+        {
+          key: 'tokens',
+          title: 'Token消耗趋势',
+          icon: 'fas fa-coins',
+          gradientId: 'tokenGradient',
+          gradientStart: 'rgba(245, 158, 11, 0.4)',
+          gradientEnd: 'rgba(245, 158, 11, 0.05)',
+          gridColor: 'rgba(245, 158, 11, 0.1)',
+          stroke: '#f59e0b',
+          totalLabel: '本周消耗',
+          avgLabel: '日均消耗',
+          summary: viewModel.value.weeklyTokenStats,
+          series: viewModel.value.tokenSeries
+        }
+      ]
 
-    const generateAreaPath = (points) => {
-      const linePath = generateLinePath(points)
-      const lastX = points[points.length - 1].x
-      return `${linePath} L ${lastX} 130 L 50 130 Z`
-    }
-
-    const userPoints = computed(() => generatePoints(userData.value))
-    const userLinePath = computed(() => generateLinePath(userPoints.value))
-    const userAreaPath = computed(() => generateAreaPath(userPoints.value))
-
-    const interviewPoints = computed(() => generatePoints(interviewData.value))
-    const interviewLinePath = computed(() => generateLinePath(interviewPoints.value))
-    const interviewAreaPath = computed(() => generateAreaPath(interviewPoints.value))
-
-    const costPoints = computed(() => generatePoints(costData.value))
-    const costLinePath = computed(() => generateLinePath(costPoints.value))
-    const costAreaPath = computed(() => generateAreaPath(costPoints.value))
-
-    const weeklyUserStats = computed(() => ({
-      total: userData.value.reduce((a, b) => a + b, 0),
-      avg: Math.round(userData.value.reduce((a, b) => a + b, 0) / 7)
-    }))
-
-    const weeklyInterviewStats = computed(() => ({
-      total: interviewData.value.reduce((a, b) => a + b, 0),
-      avg: Math.round(interviewData.value.reduce((a, b) => a + b, 0) / 7)
-    }))
-
-    const weeklyCostStats = computed(() => ({
-      total: costData.value.reduce((a, b) => a + b, 0).toFixed(2),
-      avg: (costData.value.reduce((a, b) => a + b, 0) / 7).toFixed(2)
-    }))
-
-    const apiStatusList = ref([
-      { name: 'OpenAI', model: 'GPT-4 / GPT-3.5', icon: 'fas fa-robot', color: '#10a37f', latency: 245, errorRate: 0.1, status: 'healthy' },
-      { name: 'Anthropic', model: 'Claude 3', icon: 'fas fa-brain', color: '#d97706', latency: 312, errorRate: 0.2, status: 'healthy' },
-      { name: 'Google', model: 'Gemini Pro', icon: 'fab fa-google', color: '#4285f4', latency: 189, errorRate: 0.3, status: 'healthy' },
-      { name: 'Azure', model: 'OpenAI Services', icon: 'fab fa-microsoft', color: '#0078d4', latency: 156, errorRate: 0.0, status: 'healthy' }
-    ])
-
-    const queueStats = ref({
-      pending: 45,
-      processing: 12,
-      completed: 1892,
-      failed: 3,
-      progress: 76
+      return cards.map((card) => {
+        const points = generatePoints(card.series)
+        return {
+          ...card,
+          points,
+          linePath: generateLinePath(points),
+          areaPath: generateAreaPath(points)
+        }
+      })
     })
 
-    const promptUpdates = ref([
-      { id: 1, title: '技术面试评估模板', description: '优化了评分逻辑和反馈生成', version: '2.3.1', type: 'update', time: '2小时前' },
-      { id: 2, title: '行为面试引导', description: '新增追问机制和深度挖掘', version: '1.8.0', type: 'feature', time: '5小时前' },
-      { id: 3, title: '系统提示词', description: '修复了角色扮演的一致性问题', version: '3.1.2', type: 'fix', time: '1天前' },
-      { id: 4, title: '答案评估模板', description: '提升了代码评估的准确性', version: '2.0.0', type: 'update', time: '2天前' }
-    ])
+    const systemSummaryNotice = computed(() => {
+      const notices = []
 
-    const getLatencyClass = (latency) => {
+      if (panelState.models.error) {
+        notices.push(hasModelsData.value ? '模型数使用上次结果' : '模型数暂不可用')
+      }
+
+      if (panelState.prompts.error) {
+        notices.push(hasPromptsData.value ? 'Prompt 数使用上次结果' : 'Prompt 数暂不可用')
+      }
+
+      return notices.join('，')
+    })
+
+    function emitRefreshMeta() {
+      emit('refresh-meta', {
+        lastRefreshedAt: lastRefreshedAt.value,
+        loading: anyLoading.value
+      })
+    }
+
+    function updatePanelState(key, { loading, error, empty }) {
+      panelState[key].loading = loading
+      panelState[key].error = error
+      panelState[key].empty = empty
+    }
+
+    function isPageVisible() {
+      if (typeof document === 'undefined') {
+        return true
+      }
+
+      return document.visibilityState === 'visible'
+    }
+
+    function buildTaskDefinitions() {
+      return [
+        { key: 'overview', authProtected: true, fetcher: () => getAdminDashboardOverview() },
+        { key: 'trends', authProtected: true, fetcher: () => getAdminDashboardTrends(7) },
+        { key: 'models', authProtected: true, fetcher: () => getAdminDashboardModels(15) },
+        { key: 'prompts', authProtected: true, fetcher: () => getAdminDashboardPrompts() },
+        { key: 'system', authProtected: false, fetcher: () => getAdminDashboardSystemPing() }
+      ]
+    }
+
+    function applyTaskSuccess(taskKey, value) {
+      if (taskKey === 'overview') {
+        overview.value = value
+        updatePanelState('overview', {
+          loading: false,
+          error: '',
+          empty: false
+        })
+        return
+      }
+
+      if (taskKey === 'trends') {
+        trends.value = value
+        updatePanelState('trends', {
+          loading: false,
+          error: '',
+          empty: !hasTrendData(value)
+        })
+        return
+      }
+
+      if (taskKey === 'models') {
+        models.value = value
+        updatePanelState('models', {
+          loading: false,
+          error: '',
+          empty: !Array.isArray(value) || value.length === 0
+        })
+        return
+      }
+
+      if (taskKey === 'prompts') {
+        prompts.value = value
+        updatePanelState('prompts', {
+          loading: false,
+          error: '',
+          empty: !Array.isArray(value) || value.length === 0
+        })
+        return
+      }
+
+      if (taskKey === 'system') {
+        systemPing.value = value
+        updatePanelState('system', {
+          loading: false,
+          error: '',
+          empty: !hasSystemPingData(value)
+        })
+      }
+    }
+
+    function applyTaskError(taskKey, error) {
+      if (taskKey === 'overview') {
+        updatePanelState('overview', {
+          loading: false,
+          error: getErrorMessage(error),
+          empty: !hasOverviewData.value
+        })
+        return
+      }
+
+      if (taskKey === 'trends') {
+        updatePanelState('trends', {
+          loading: false,
+          error: getErrorMessage(error),
+          empty: !hasTrendsData.value
+        })
+        return
+      }
+
+      if (taskKey === 'models') {
+        updatePanelState('models', {
+          loading: false,
+          error: getErrorMessage(error),
+          empty: !hasModelsData.value
+        })
+        return
+      }
+
+      if (taskKey === 'prompts') {
+        updatePanelState('prompts', {
+          loading: false,
+          error: getErrorMessage(error),
+          empty: !hasPromptsData.value
+        })
+        return
+      }
+
+      if (taskKey === 'system') {
+        updatePanelState('system', {
+          loading: false,
+          error: getErrorMessage(error),
+          empty: !hasSystemStatusData.value
+        })
+      }
+    }
+
+    async function runTaskGroup(taskKeys) {
+      if (anyLoading.value) {
+        return
+      }
+
+      const taskDefinitions = buildTaskDefinitions().filter((task) => taskKeys.includes(task.key))
+      const requestId = activeRequestId.value + 1
+      activeRequestId.value = requestId
+
+      taskKeys.forEach((taskKey) => {
+        updatePanelState(taskKey, {
+          loading: true,
+          error: '',
+          empty: panelState[taskKey].empty
+        })
+      })
+      emitRefreshMeta()
+
+      const results = await Promise.allSettled(taskDefinitions.map((task) => task.fetcher()))
+
+      if (requestId !== activeRequestId.value) {
+        return
+      }
+
+      let shouldLogout = false
+      let hasSuccessfulUpdate = false
+
+      results.forEach((result, index) => {
+        const task = taskDefinitions[index]
+
+        if (result.status === 'fulfilled') {
+          hasSuccessfulUpdate = true
+          applyTaskSuccess(task.key, result.value)
+          return
+        }
+
+        const error = result.reason
+        shouldLogout = shouldLogout || (task.authProtected && isUnauthorized(error))
+        applyTaskError(task.key, error)
+      })
+
+      if (hasSuccessfulUpdate) {
+        lastRefreshedAt.value = new Date().toISOString()
+      }
+
+      emitRefreshMeta()
+
+      if (shouldLogout) {
+        emit('auth-expired')
+      }
+    }
+
+    async function loadAllPanels() {
+      await runTaskGroup(['overview', 'trends', 'models', 'prompts', 'system'])
+    }
+
+    async function loadRealtimePanels() {
+      if (!isPageVisible()) {
+        return
+      }
+
+      await runTaskGroup(['overview', 'models', 'system'])
+    }
+
+    function startRealtimePolling() {
+      if (typeof window !== 'undefined') {
+        realtimeTimerId = window.setInterval(() => {
+          if (!isPageVisible()) {
+            return
+          }
+
+          loadRealtimePanels()
+        }, 30000)
+      }
+
+      if (typeof document !== 'undefined') {
+        visibilityChangeHandler = () => {
+          if (document.visibilityState === 'visible') {
+            loadRealtimePanels()
+          }
+        }
+
+        document.addEventListener('visibilitychange', visibilityChangeHandler)
+      }
+    }
+
+    function stopRealtimePolling() {
+      if (realtimeTimerId != null && typeof window !== 'undefined') {
+        window.clearInterval(realtimeTimerId)
+        realtimeTimerId = null
+      }
+
+      if (visibilityChangeHandler && typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', visibilityChangeHandler)
+        visibilityChangeHandler = null
+      }
+    }
+
+    function getOverviewIcon(key) {
+      if (key === 'totalUsers') return 'fas fa-users'
+      if (key === 'totalInterviews') return 'fas fa-comments'
+      if (key === 'activeInterviews') return 'fas fa-video'
+      return 'fas fa-coins'
+    }
+
+    function getOverviewValue(card) {
+      if (!hasOverviewData.value && panelState.overview.loading) {
+        return '--'
+      }
+
+      if (!hasOverviewData.value && panelState.overview.error) {
+        return '--'
+      }
+
+      return card.value
+    }
+
+    function getOverviewMetaValue(card) {
+      if (!hasOverviewData.value && panelState.overview.loading) {
+        return '加载中'
+      }
+
+      if (!hasOverviewData.value && panelState.overview.error) {
+        return '--'
+      }
+
+      return card.meta.value
+    }
+
+    function getLatencyClass(latencyText) {
+      const latency = Number.parseInt(String(latencyText).replace('ms', ''), 10)
       if (latency < 200) return 'fast'
       if (latency < 400) return 'normal'
+      if (latency < 1500) return 'good'
       return 'slow'
     }
 
-    const getErrorClass = (rate) => {
-      if (rate < 0.5) return 'good'
-      if (rate < 2) return 'warning'
+    function getErrorClass(errorRateText) {
+      const rate = Number.parseFloat(String(errorRateText).replace('%', ''))
+      if (rate < 1) return 'good'
+      if (rate < 5) return 'warning'
       return 'danger'
     }
 
-    const getUpdateIcon = (type) => {
-      const icons = {
-        update: 'fas fa-sync-alt',
-        feature: 'fas fa-plus',
-        fix: 'fas fa-bug'
-      }
-      return icons[type] || 'fas fa-code'
-    }
+    watch(() => props.refreshNonce, () => {
+      loadAllPanels()
+    })
+
+    watch(anyLoading, () => {
+      emitRefreshMeta()
+    })
+
+    onMounted(() => {
+      loadAllPanels()
+      startRealtimePolling()
+    })
+
+    onBeforeUnmount(() => {
+      stopRealtimePolling()
+    })
 
     return {
-      overviewStats,
-      dateLabels,
-      userPoints,
-      userLinePath,
-      userAreaPath,
-      interviewPoints,
-      interviewLinePath,
-      interviewAreaPath,
-      costPoints,
-      costLinePath,
-      costAreaPath,
-      weeklyUserStats,
-      weeklyInterviewStats,
-      weeklyCostStats,
-      apiStatusList,
-      queueStats,
-      promptUpdates,
-      getLatencyClass,
+      chartCards,
       getErrorClass,
-      getUpdateIcon
+      getLatencyClass,
+      getOverviewIcon,
+      getOverviewValue,
+      getOverviewMetaValue,
+      getProviderVisual,
+      hasModelsData,
+      hasOverviewData,
+      hasPromptsData,
+      hasSystemStatusData,
+      hasTrendsData,
+      panelState,
+      systemSummaryNotice,
+      viewModel
     }
   }
 }
@@ -525,9 +833,9 @@ export default {
   color: #10b981;
 }
 
-.card-trend.down {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+.card-trend.neutral {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
 }
 
 .trend-label {
@@ -560,26 +868,64 @@ export default {
   50% { opacity: 0.5; transform: scale(1.2); }
 }
 
+.section-note,
+.card-note {
+  font-size: 12px;
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+.section-note {
+  margin-top: 12px;
+}
+
+.card-note {
+  margin-bottom: 14px;
+}
+
+.section-note.stale,
+.card-note.stale {
+  color: #92400e;
+}
+
+.panel-message {
+  min-height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-md);
+  background: rgba(59, 89, 152, 0.04);
+}
+
 .main-grid {
   display: grid;
   grid-template-columns: 1fr 380px;
   gap: 24px;
 }
 
-.left-section {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
+.left-section,
 .right-section {
   display: flex;
   flex-direction: column;
   gap: 24px;
 }
 
-.chart-card {
+.chart-card,
+.api-status-card,
+.queue-status-card,
+.prompt-updates-card {
   padding: 20px;
+}
+
+.prompt-updates-card {
+  flex: 1;
 }
 
 .card-header {
@@ -603,13 +949,37 @@ export default {
   color: var(--primary-color);
 }
 
-.chart-badge {
+.chart-badge,
+.status-badge {
   padding: 4px 10px;
-  background: rgba(59, 89, 152, 0.1);
   border-radius: var(--radius-sm);
   font-size: 11px;
-  color: var(--primary-color);
   font-weight: 500;
+}
+
+.chart-badge {
+  background: rgba(59, 89, 152, 0.1);
+  color: var(--primary-color);
+}
+
+.status-badge.healthy {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.status-badge.warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.status-badge.error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.status-badge.neutral {
+  background: rgba(100, 116, 139, 0.15);
+  color: #64748b;
 }
 
 .chart-container {
@@ -654,32 +1024,19 @@ export default {
   color: var(--text-primary);
 }
 
-.api-status-card {
-  padding: 20px;
-}
-
-.status-badge {
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.status-badge.healthy {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-}
-
-.api-list {
+.api-list,
+.updates-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.api-item {
+.api-item,
+.update-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 12px;
   background: var(--glass-bg);
   border-radius: var(--radius-md);
@@ -691,7 +1048,8 @@ export default {
   gap: 12px;
 }
 
-.api-icon {
+.api-icon,
+.update-icon {
   width: 36px;
   height: 36px;
   border-radius: var(--radius-sm);
@@ -699,22 +1057,27 @@ export default {
   align-items: center;
   justify-content: center;
   color: white;
-  font-size: 16px;
+  flex-shrink: 0;
 }
 
-.api-details {
+.api-details,
+.update-content {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
-.api-name {
+.api-name,
+.update-title {
   font-size: 14px;
   font-weight: 500;
   color: var(--text-primary);
 }
 
-.api-model {
+.api-model,
+.update-desc,
+.update-subdesc {
   font-size: 11px;
   color: var(--text-secondary);
 }
@@ -722,7 +1085,7 @@ export default {
 .api-metrics {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
 }
 
 .metric {
@@ -730,6 +1093,11 @@ export default {
   flex-direction: column;
   align-items: center;
   gap: 2px;
+}
+
+.metric.subtle .metric-value {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .metric-label {
@@ -742,12 +1110,23 @@ export default {
   font-weight: 600;
 }
 
-.metric-value.fast { color: #10b981; }
-.metric-value.normal { color: var(--text-primary); }
-.metric-value.slow { color: #f59e0b; }
-.metric-value.good { color: #10b981; }
-.metric-value.warning { color: #f59e0b; }
-.metric-value.danger { color: #ef4444; }
+.metric-value.fast,
+.metric-value.good {
+  color: #10b981;
+}
+
+.metric-value.normal {
+  color: var(--text-primary);
+}
+
+.metric-value.slow,
+.metric-value.warning {
+  color: #f59e0b;
+}
+
+.metric-value.danger {
+  color: #ef4444;
+}
 
 .status-dot {
   width: 10px;
@@ -759,159 +1138,80 @@ export default {
 .status-dot.warning { background: #f59e0b; box-shadow: 0 0 8px rgba(245, 158, 11, 0.5); }
 .status-dot.error { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.5); }
 
-.queue-status-card {
-  padding: 20px;
-}
-
-.queue-stats {
+.summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 12px;
-  margin-bottom: 16px;
 }
 
-.queue-item {
+.system-status-line {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid transparent;
+}
+
+.system-status-line.healthy {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.18);
+}
+
+.system-status-line.warning {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.18);
+}
+
+.system-status-line.neutral {
+  color: #475569;
+  background: rgba(100, 116, 139, 0.1);
+  border-color: rgba(100, 116, 139, 0.16);
+}
+
+.summary-grid-item {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
+  gap: 6px;
+  padding: 14px;
   background: var(--glass-bg);
   border-radius: var(--radius-md);
 }
 
-.queue-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
+.summary-grid-label {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
-.queue-icon.pending { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
-.queue-icon.processing { background: rgba(59, 89, 152, 0.15); color: var(--primary-color); }
-.queue-icon.completed { background: rgba(16, 185, 129, 0.15); color: #10b981; }
-.queue-icon.failed { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
-
-.queue-info {
-  text-align: center;
-}
-
-.queue-value {
-  display: block;
+.summary-grid-value {
   font-size: 18px;
   font-weight: 700;
   color: var(--text-primary);
 }
 
-.queue-label {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.queue-progress {
-  padding-top: 12px;
-  border-top: 1px solid var(--glass-border);
-}
-
-.progress-header {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-.progress-bar {
-  height: 6px;
-  background: rgba(59, 89, 152, 0.1);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--primary-color), var(--primary-light));
-  border-radius: 3px;
-  transition: width 0.5s ease;
-}
-
-.prompt-updates-card {
-  padding: 20px;
-  flex: 1;
-}
-
-.view-all-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all var(--transition-normal);
-  font-family: inherit;
-}
-
-.view-all-btn:hover {
-  color: var(--primary-color);
-}
-
-.updates-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 .update-item {
-  display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 12px;
-  background: var(--glass-bg);
-  border-radius: var(--radius-md);
 }
 
-.update-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  flex-shrink: 0;
+.update-item.warning {
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  background: rgba(245, 158, 11, 0.08);
 }
 
-.update-icon.update { background: rgba(59, 89, 152, 0.15); color: var(--primary-color); }
-.update-icon.feature { background: rgba(16, 185, 129, 0.15); color: #10b981; }
-.update-icon.fix { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
-
-.update-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+.update-icon.healthy {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
 }
 
-.update-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
+.update-icon.warning {
+  background: rgba(245, 158, 11, 0.18);
+  color: #f59e0b;
 }
 
-.update-desc {
-  font-size: 12px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.update-subdesc {
+  margin-top: 4px;
 }
 
 .update-meta {
@@ -931,5 +1231,43 @@ export default {
 .update-time {
   font-size: 11px;
   color: var(--text-light);
+}
+
+@media (max-width: 1280px) {
+  .overview-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .main-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .right-section {
+    order: -1;
+  }
+}
+
+@media (max-width: 768px) {
+  .overview-cards,
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-card,
+  .api-item,
+  .update-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .api-metrics {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .chart-summary {
+    flex-direction: column;
+    gap: 12px;
+  }
 }
 </style>

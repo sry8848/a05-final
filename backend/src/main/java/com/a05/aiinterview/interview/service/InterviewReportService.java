@@ -1,17 +1,29 @@
 package com.a05.aiinterview.interview.service;
 
 import com.a05.aiinterview.interview.dto.InterviewReportDto;
+import com.a05.aiinterview.interview.entity.InterviewAttempt;
+import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.engine.ReportGenerationService;
 import com.a05.aiinterview.interview.entity.InterviewReport;
 import com.a05.aiinterview.interview.entity.InterviewSession;
+import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
+import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.interview.service.support.AttemptEvaluationReader;
+import com.a05.aiinterview.interview.service.support.InterviewOverallScoreSupport;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 面试报告应用服务。
@@ -24,7 +36,10 @@ public class InterviewReportService {
 
     private final InterviewSessionMapper interviewSessionMapper;
     private final InterviewReportMapper interviewReportMapper;
+    private final InterviewQuestionMapper interviewQuestionMapper;
+    private final InterviewAttemptMapper interviewAttemptMapper;
     private final ReportGenerationService reportGenerationService;
+    private final InterviewSessionStatusService interviewSessionStatusService;
 
     /**
      * 手动结束面试并触发异步报告生成。
@@ -87,13 +102,70 @@ public class InterviewReportService {
         }
 
         InterviewReport report = interviewReportMapper.selectBySessionId(sessionId);
-        if (report == null) {
-            // 报告尚未生成，返回占位响应
-            log.info("报告尚未就绪，返回 generating 状态, sessionId={}", sessionId);
+        String effectiveStatus = interviewSessionStatusService.resolveAndSync(session);
+        if (InterviewSessionStatusService.STATUS_ABORTED.equals(effectiveStatus)) {
+            log.info("报告查询命中 failed 状态, sessionId={}", sessionId);
+            return InterviewReportDto.failed(sessionId);
+        }
+        if (report == null || !InterviewSessionStatusService.STATUS_COMPLETED.equals(effectiveStatus)) {
+            log.info("报告尚未就绪，返回 generating 状态, sessionId={}, effectiveStatus={}", sessionId, effectiveStatus);
             return InterviewReportDto.generating(sessionId);
         }
 
         log.info("报告已就绪, sessionId={}, overallScore={}", sessionId, report.getOverallScore());
-        return InterviewReportDto.fromEntity(report);
+        InterviewReportDto dto = InterviewReportDto.fromEntity(report);
+        dto.setOverallScore(InterviewOverallScoreSupport.resolveOverallScore(report));
+        dto.setMode(session.getMode());
+        dto.setPositionCode(session.getPositionCode());
+        if (!"professional".equalsIgnoreCase(session.getMode())) {
+            dto.setComprehensiveRadarScores(null);
+        }
+        dto.setQuestions(buildQuestionSummaries(sessionId));
+        return dto;
+    }
+
+    private List<InterviewReportDto.QuestionSummaryDto> buildQuestionSummaries(Long sessionId) {
+        List<InterviewQuestion> questions = interviewQuestionMapper.selectList(
+                new LambdaQueryWrapper<InterviewQuestion>()
+                        .eq(InterviewQuestion::getSessionId, sessionId)
+                        .orderByAsc(InterviewQuestion::getQuestionNo)
+        );
+        if (questions.isEmpty()) {
+            return List.of();
+        }
+
+        List<InterviewAttempt> attempts = interviewAttemptMapper.selectBySessionId(sessionId);
+        Map<Long, List<InterviewAttempt>> attemptsByQuestion = attempts == null
+                ? Collections.emptyMap()
+                : attempts.stream().collect(Collectors.groupingBy(InterviewAttempt::getQuestionId));
+
+        return questions.stream()
+                .map(question -> buildQuestionSummary(question, attemptsByQuestion.get(question.getId())))
+                .toList();
+    }
+
+    private InterviewReportDto.QuestionSummaryDto buildQuestionSummary(
+            InterviewQuestion question,
+            List<InterviewAttempt> attemptsForQuestion) {
+        InterviewReportDto.QuestionSummaryDto summaryDto = new InterviewReportDto.QuestionSummaryDto();
+        summaryDto.setQuestionId(question.getId());
+        summaryDto.setQuestionNo(question.getQuestionNo());
+        summaryDto.setQuestionStem(question.getStem());
+
+        String status = "pending";
+        BigDecimal score = null;
+        String commentary = null;
+        var latestFinalAttempt = AttemptEvaluationReader.selectLatestFinalAttempt(attemptsForQuestion);
+        if (latestFinalAttempt.isPresent()) {
+            InterviewAttempt attempt = latestFinalAttempt.get();
+            status = "[skip]".equals(attempt.getAnswerText()) ? "skipped" : "answered";
+            score = AttemptEvaluationReader.readScore(attempt.getDetailEvaluationJson());
+            commentary = AttemptEvaluationReader.readCommentary(attempt.getDetailEvaluationJson());
+        }
+
+        summaryDto.setStatus(status);
+        summaryDto.setScore(score);
+        summaryDto.setCommentary(commentary);
+        return summaryDto;
     }
 }

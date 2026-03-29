@@ -87,9 +87,6 @@ public class LearningRecommendationDto {
         @Schema(description = "Domain name", example = "Java 并发")
         private String domainName;
 
-        @Schema(description = "Difficulty", example = "L2")
-        private String difficulty;
-
         @Schema(description = "Estimated minutes", example = "30")
         private Integer estimatedMinutes;
 

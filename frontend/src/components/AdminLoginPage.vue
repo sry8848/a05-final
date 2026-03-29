@@ -47,23 +47,6 @@
           </div>
         </div>
 
-        <div class="form-group">
-          <label>验证码</label>
-          <div class="input-wrapper captcha-input">
-            <i class="fas fa-shield-alt"></i>
-            <input 
-              v-model="loginForm.captcha" 
-              type="text" 
-              class="glass-input" 
-              placeholder="请输入验证码"
-              maxlength="4"
-            >
-            <div class="captcha-box" @click="refreshCaptcha">
-              <span class="captcha-text">{{ captchaText }}</span>
-            </div>
-          </div>
-        </div>
-
         <div class="form-options">
           <label class="remember-me">
             <input type="checkbox" v-model="rememberMe">
@@ -71,9 +54,9 @@
           </label>
         </div>
 
-        <button type="submit" class="btn btn-primary btn-large login-btn">
+        <button type="submit" class="btn btn-primary btn-large login-btn" :disabled="loading">
           <i class="fas fa-sign-in-alt"></i>
-          登录
+          {{ loading ? '登录中...' : '登录' }}
         </button>
       </form>
 
@@ -88,7 +71,8 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive } from 'vue'
+import { loginAdmin } from '@/api/auth'
 
 export default {
   name: 'AdminLoginPage',
@@ -96,59 +80,39 @@ export default {
   setup(props, { emit }) {
     const showPassword = ref(false)
     const rememberMe = ref(false)
-    const captchaText = ref('')
+    const loading = ref(false)
 
     const loginForm = reactive({
       username: '',
-      password: '',
-      captcha: ''
+      password: ''
     })
 
-    const generateCaptcha = () => {
-      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-      let result = ''
-      for (let i = 0; i < 4; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length))
-      }
-      captchaText.value = result
-    }
-
-    const refreshCaptcha = () => {
-      generateCaptcha()
-    }
-
-    const handleAdminLogin = () => {
+    const handleAdminLogin = async () => {
       if (!loginForm.username || !loginForm.password) {
         alert('请填写完整的登录信息')
         return
       }
-      if (!loginForm.captcha) {
-        alert('请输入验证码')
-        return
+
+      loading.value = true
+      try {
+        const data = await loginAdmin(loginForm.username, loginForm.password)
+        emit('loginSuccess', data)
+      } catch (e) {
+        alert(e.message || '管理端登录失败')
+      } finally {
+        loading.value = false
       }
-      if (loginForm.captcha.toUpperCase() !== captchaText.value) {
-        alert('验证码错误')
-        generateCaptcha()
-        return
-      }
-      console.log('管理端登录:', loginForm)
-      emit('loginSuccess', { isAdmin: true, username: loginForm.username })
     }
 
     const goToUserLogin = () => {
       emit('goToUserLogin')
     }
 
-    onMounted(() => {
-      generateCaptcha()
-    })
-
     return {
       showPassword,
       rememberMe,
-      captchaText,
+      loading,
       loginForm,
-      refreshCaptcha,
       handleAdminLogin,
       goToUserLogin
     }

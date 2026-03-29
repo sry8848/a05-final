@@ -37,13 +37,13 @@ public class ReportGenerationInput {
     private String sessionTitle;
 
     /**
-     * 主考纲（JSON），包含知识域目标深度和题型规划。
+     * 主考纲（JSON），包含规划推理、知识域与项目/实习条目。
      * 供 AI 对照"规划 vs 实际"给出有针对性的评价。
      */
     private Map<String, Object> syllabusJson;
 
     /**
-     * 最终状态账本（JSON），包含各域覆盖深度、saturated 状态等。
+     * 最终状态账本（JSON），包含各域覆盖、当前焦点与饱和状态等。
      * 是 AI 判断候选人整体掌握情况的关键信号。
      */
     private Map<String, Object> stateLedgerJson;
@@ -69,8 +69,6 @@ public class ReportGenerationInput {
         private String domainCode;
         /** 知识域中文名 */
         private String domainName;
-        /** 题目目标深度 */
-        private String targetDepth;
         /** 题目正文 */
         private String stem;
         /** 候选人回答（未回答时为 null） */

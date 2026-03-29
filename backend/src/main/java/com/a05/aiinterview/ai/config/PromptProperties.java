@@ -16,12 +16,13 @@ import java.util.Map;
 @ConfigurationProperties(prefix = "ai.prompt.version")
 public class PromptProperties {
 
-    private String planner = "v1";
-    private String questionGeneration = "v1";
-    private String questionGenerationStream = "v1";
-    private String evaluationDecision = "v1";
+    private String planner = "v2";
+    private String questionGenerationStream = "v2";
+    private String evaluationDecision = "v2";
     private String reportGeneration = "v1";
-    private String introRewrite = "v1";
+    private String introRewrite = "v2";
+    private String questionDetailEvaluation = "v1";
+    private String questionConsult = "v1";
 
     public String resolveVersion(String promptCode) {
         return resolveVersion(PromptCode.fromCode(promptCode));
@@ -30,11 +31,12 @@ public class PromptProperties {
     public String resolveVersion(PromptCode promptCode) {
         return switch (promptCode) {
             case PLANNER -> planner;
-            case QUESTION_GENERATION -> questionGeneration;
             case QUESTION_GENERATION_STREAM -> questionGenerationStream;
             case EVALUATION_DECISION -> evaluationDecision;
             case REPORT_GENERATION -> reportGeneration;
             case INTRO_REWRITE -> introRewrite;
+            case QUESTION_DETAIL_EVALUATION -> questionDetailEvaluation;
+            case QUESTION_CONSULT -> questionConsult;
         };
     }
 

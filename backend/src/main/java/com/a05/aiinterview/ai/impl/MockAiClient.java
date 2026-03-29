@@ -2,8 +2,20 @@ package com.a05.aiinterview.ai.impl;
 
 import com.a05.aiinterview.ai.AiClient;
 import com.a05.aiinterview.ai.config.PromptProperties;
-import com.a05.aiinterview.ai.dto.*;
-import com.a05.aiinterview.common.enums.DomainStatus;
+import com.a05.aiinterview.ai.contract.StrategyCatalog;
+import com.a05.aiinterview.ai.contract.StrategyCode;
+import com.a05.aiinterview.ai.dto.AiCallResult;
+import com.a05.aiinterview.ai.dto.EvaluationDecisionInput;
+import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
+import com.a05.aiinterview.ai.dto.IntroRewriteInput;
+import com.a05.aiinterview.ai.dto.PlannerInput;
+import com.a05.aiinterview.ai.dto.PlannerOutput;
+import com.a05.aiinterview.ai.dto.QuestionConsultInput;
+import com.a05.aiinterview.ai.dto.QuestionDetailEvaluationInput;
+import com.a05.aiinterview.ai.dto.QuestionDetailEvaluationOutput;
+import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
+import com.a05.aiinterview.ai.dto.ReportGenerationInput;
+import com.a05.aiinterview.ai.dto.ReportGenerationOutput;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -14,16 +26,10 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 
 /**
  * AI 客户端 Mock 实现。
- * 当配置 {@code ai.openai.mock-enabled=true}（默认）时激活，返回硬编码的固定结果。
- * 用途：在没有 API Key 的情况下联调前端，验证接口协议和数据流转。
- *
- * <p>所有方法返回 {@link AiCallResult}，Token 计数均填 0，latencyMs 为实际耗时（无网络）。
- * 切换到真实 AI：将环境变量 {@code AI_MOCK_ENABLED=false} 即可注入 {@link OpenAiClient}。
+ * 仅用于本地未接入真实 AI 时的最小可运行兜底。
  */
 @Slf4j
 @Component
@@ -33,175 +39,187 @@ public class MockAiClient implements AiClient {
 
     private final PromptProperties promptProperties;
 
-    // ───────────────────────────── Planner ──────────────────────────────────
-
     @Override
     public AiCallResult<PlannerOutput> callPlanner(PlannerInput input) {
-        log.info("[MockAI] callPlanner, positionCode={}, experienceLevel={}",
-                input.getPositionCode(), input.getExperienceLevel());
         long startMs = System.currentTimeMillis();
-
-        PlannerOutput output = new PlannerOutput();
-        output.setTitle(input.getPositionName() + " 模拟面试");
-        output.setQuestionMixPlan(Map.of(
-                "INTRO", 1, "PROJECT_DEEP_DIVE", 2, "SCENARIO", 2,
-                "PRINCIPLE", 3, "BEHAVIORAL", 1));
-        output.setFocusAreas(List.of("系统设计", "并发编程"));
-
-        // 根据传入的 domains 生成对应的考察计划（最多取前 5 个）
-        if (input.getDomains() != null && !input.getDomains().isEmpty()) {
-            output.setDomains(input.getDomains().stream()
-                    .limit(5)
-                    .map(d -> {
-                        PlannerOutput.DomainPlan plan = new PlannerOutput.DomainPlan();
-                        plan.setDomainId(d.getDomainId());
-                        plan.setDomainCode(d.getDomainCode());
-                        plan.setDomainName(d.getDomainName());
-                        plan.setTargetDepth("L3");
-                        plan.setPriority("medium");
-                        plan.setFocusPoints(List.of());
-                        return plan;
-                    })
-                    .toList());
-        } else {
-            output.setDomains(List.of());
-        }
-        output.setProjects(List.of());
-
-        log.info("[MockAI] callPlanner 完成，共规划 {} 个知识域", output.getDomains().size());
+        PlannerOutput output = PlannerOutput.builder()
+                .planningReasoning("根据岗位要求、简历项目与候选人背景生成基础考纲。")
+                .domains(input.getDomains() == null ? List.of() : input.getDomains().stream()
+                        .limit(5)
+                        .map(domain -> PlannerOutput.DomainPlan.builder()
+                                .domainCode(domain.getDomainCode())
+                                .domainName(domain.getDomainName())
+                                .focusPoints(List.of())
+                                .build())
+                        .toList())
+                .experienceItems(List.of())
+                .build();
         return mockResult(output, startMs, "planner");
     }
 
-    // ────────────────────────── QuestionGeneration ──────────────────────────
-
-    @Override
-    public AiCallResult<QuestionGenerationOutput> callQuestionGeneration(QuestionGenerationInput input) {
-        log.info("[MockAI] callQuestionGeneration, domainCode={}, questionType={}",
-                input.getNextDomainCode(), input.getNextQuestionType());
-        long startMs = System.currentTimeMillis();
-
-        QuestionGenerationOutput output = new QuestionGenerationOutput();
-        String stem = buildMockStem(input.getNextDomainName(), input.getNextQuestionType());
-        output.setStem(stem);
-        output.setTargetSkill(input.getNextDomainName() + " 核心概念");
-        output.setExpectedPoints(List.of(
-                "能说出基本原理",
-                "能结合项目经验举例",
-                "能分析常见问题及解决思路"));
-        output.setDifficulty("medium");
-        output.setTargetDepth(input.getTargetDepth() != null ? input.getTargetDepth() : "L3");
-
-        log.info("[MockAI] callQuestionGeneration 完成，stem 长度={}", stem.length());
-        return mockResult(output, startMs, "question_generation");
-    }
-
-    /**
-     * 流式出题：将 Mock 题目文本按字符逐个发出，模拟打字机效果（间隔 30ms）。
-     */
     @Override
     public Flux<String> callQuestionGenerationStream(QuestionGenerationInput input) {
-        log.info("[MockAI] callQuestionGenerationStream, domainCode={}", input.getNextDomainCode());
-        String stem = buildMockStem(input.getNextDomainName(), input.getNextQuestionType());
-        return Flux.fromArray(stem.split(""))
-                .delayElements(Duration.ofMillis(30));
+        String focus = input.getNextQuestionGoal() != null ? input.getNextQuestionGoal().getNextFocus() : "当前主题";
+        String questionType = input.getNextQuestionGoal() != null ? input.getNextQuestionGoal().getQuestionType() : "PRINCIPLE";
+        String stem = switch ((questionType == null ? "" : questionType).toUpperCase()) {
+            case "PROJECT_DEEP_DIVE" -> "结合你做过的真实项目，详细讲讲「" + focus + "」这块你当时是怎么设计和落地的？";
+            case "SCENARIO" -> "如果线上在「" + focus + "」这里出现异常，你会怎么判断、排查和处理？";
+            case "BEHAVIORAL" -> "请分享一次你围绕「" + focus + "」推进协作或解决分歧的真实经历。";
+            default -> "请你系统讲讲「" + focus + "」的原理、常见方案和使用边界。";
+        };
+        return Flux.fromArray(stem.split("")).delayElements(Duration.ofMillis(20));
     }
 
     @Override
     public AiCallResult<String> callIntroRewrite(IntroRewriteInput input) {
-        log.info("[MockAI] callIntroRewrite, positionCode={}, experienceLevel={}",
-                input.getPositionCode(), input.getExperienceLevel());
         long startMs = System.currentTimeMillis();
-
-        String rewritten = buildMockIntroRewrite(input);
+        String rewritten = input.getBasePrompt() == null || input.getBasePrompt().isBlank()
+                ? "请先做一个简短的自我介绍，重点讲讲你的技术背景和最近的项目经历。"
+                : input.getBasePrompt().trim();
         return mockResult(rewritten, startMs, "intro_rewrite");
     }
 
-    // ────────────────────────── EvaluationDecision ──────────────────────────
-
     @Override
     public AiCallResult<EvaluationDecisionOutput> callEvaluationDecision(EvaluationDecisionInput input) {
-        log.info("[MockAI] callEvaluationDecision, domainCode={}, questionType={}, targetDepth={}",
-                input.getCurrentDomainCode(), input.getCurrentQuestionType(), input.getCurrentTargetDepth());
         long startMs = System.currentTimeMillis();
-
-        String depthReached = input.getCurrentTargetDepth() != null ? input.getCurrentTargetDepth() : "L3";
-
-        EvaluationDecisionOutput.NextQuestionStrategy nextStrategy =
-                resolveNextStrategyFromLedger(input);
-        String signal = nextStrategy != null ? "NEXT_DOMAIN" : "END";
-
-        EvaluationDecisionOutput.LedgerPatch patch = EvaluationDecisionOutput.LedgerPatch.builder()
-                .domainCode(input.getCurrentDomainCode())
-                .domainId(input.getCurrentDomainId())
-                .currentDepth(depthReached)
-                .domainStatus(DomainStatus.COVERED)
-                .saturated(true)
-                .questionType(input.getCurrentQuestionType())
-                .build();
-
-        log.info("[MockAI] callEvaluationDecision 完成, signal={}, nextDomain={}",
-                signal, nextStrategy != null ? nextStrategy.getNextDomainCode() : "N/A");
-
+        String nextFocus = input.getCurrentQuestion() != null ? input.getCurrentQuestion().getCurrentFocus() : "当前主题";
+        String strategyCode = StrategyCode.S_ENTER_PROJECT.code();
+        EvaluationDecisionInput.ProjectAndInternshipItem firstProject = input.getProjectAndInternshipSummary() == null
+                || input.getProjectAndInternshipSummary().isEmpty()
+                ? null
+                : input.getProjectAndInternshipSummary().getFirst();
         EvaluationDecisionOutput output = EvaluationDecisionOutput.builder()
-                .domainCode(input.getCurrentDomainCode())
-                .depthReached(depthReached)
-                .saturated(true)
-                .signal(signal)
-                .patch(patch)
-                .nextStrategy(nextStrategy)
-                .reasoning("[Mock] 候选人回答达标，进入下一知识域。")
+                .decisionReason("当前继续提问仍有信息增益，因此进入项目主线继续建立真实工程画像。")
+                .interviewAction("CONTINUE")
+                .finalDecision(strategyCode)
+                .nextFocus(nextFocus)
+                .nextItemType(firstProject != null ? firstProject.getItemType() : "")
+                .nextItemName(firstProject != null ? firstProject.getItemName() : "")
+                .nextProjectPoint(firstProject != null && firstProject.getTechHooks() != null && !firstProject.getTechHooks().isEmpty()
+                        ? firstProject.getTechHooks().getFirst()
+                        : "")
+                .targetDomainCode("")
+                .newCoveredDomains(List.of())
+                .newCoveredPoints(List.of())
+                .retrievalPlans(List.of())
                 .build();
-
         return mockResult(output, startMs, "evaluation_decision");
     }
 
-    // ─────────────────────────── ReportGeneration ───────────────────────────
-
     @Override
     public AiCallResult<ReportGenerationOutput> callReportGeneration(ReportGenerationInput input) {
-        log.info("[MockAI] callReportGeneration, positionCode={}, qaCount={}",
-                input.getPositionCode(),
-                input.getQuestionAnswerPairs() != null ? input.getQuestionAnswerPairs().size() : 0);
         long startMs = System.currentTimeMillis();
-
         List<ReportGenerationOutput.SkillDomainScore> domainScores = buildMockDomainScores(input);
-        BigDecimal overallScore = domainScores.isEmpty()
-                ? BigDecimal.valueOf(72.0)
-                : domainScores.stream()
-                        .map(ReportGenerationOutput.SkillDomainScore::getScore)
-                        .reduce(BigDecimal.ZERO, BigDecimal::add)
-                        .divide(BigDecimal.valueOf(domainScores.size()), 1, java.math.RoundingMode.HALF_UP);
-
-        log.info("[MockAI] callReportGeneration 完成, overallScore={}, domains={}",
-                overallScore, domainScores.size());
-
+        List<ReportGenerationOutput.ComprehensiveRadarScore> radarScores = buildMockRadarScores();
         ReportGenerationOutput output = ReportGenerationOutput.builder()
-                .overallScore(overallScore)
-                .summary("候选人在本场面试中整体表现良好，基础知识掌握扎实，能够结合实际项目经验阐述技术方案。"
-                        + "在高并发场景的系统设计方面还有一定提升空间，建议重点加强分布式事务和缓存一致性相关知识的深度。")
-                .strengths(List.of(
-                        "基础知识掌握扎实，能准确描述核心原理",
-                        "表达逻辑清晰，能结合项目经验举例",
-                        "学习能力强，对新技术有一定了解"))
-                .weaknesses(List.of(
-                        "高并发与分布式场景的实践深度有限",
-                        "系统设计时缺乏对非功能性需求的考量",
-                        "部分知识点停留在概念层面，缺少源码级理解"))
-                .improvementSuggestions(List.of(
-                        "建议通过实际项目或开源贡献积累高并发处理经验",
-                        "重点学习分布式事务（Seata/TCC）和缓存一致性方案",
-                        "阅读 JUC 源码（AQS、ConcurrentHashMap 等）加深底层理解"))
+                .overallScore(BigDecimal.valueOf(75.0))
+                .summary("候选人整体表现稳定，基础知识和工程表达具备一定水准。")
+                .strengths(List.of("表达清晰", "基础知识较完整", "有一定工程经验"))
+                .weaknesses(List.of("复杂场景下的取舍不够深入", "部分回答仍偏概念化"))
+                .improvementSuggestions(List.of("补齐高并发和分布式场景经验", "加强问题排查与方案权衡训练"))
+                .comprehensiveRadarScores(radarScores)
                 .skillDomainScores(domainScores)
                 .build();
-
         return mockResult(output, startMs, "report_generation");
     }
 
-    // ──────────────────────────── 私有工具 ──────────────────────────────────
+    @Override
+    public AiCallResult<QuestionDetailEvaluationOutput> callQuestionDetailEvaluation(QuestionDetailEvaluationInput input) {
+        long startMs = System.currentTimeMillis();
+        QuestionDetailEvaluationOutput output = QuestionDetailEvaluationOutput.builder()
+                .score(BigDecimal.valueOf(75.0))
+                .commentary("回答覆盖了部分关键点，但还可以进一步补强细节和边界。")
+                .strengthPoints(List.of("主线表达清晰"))
+                .weakPoints(List.of("关键机制解释不够充分"))
+                .evaluatedDomains(List.of(QuestionDetailEvaluationOutput.EvaluatedDomain.builder()
+                        .domainCode(input.getDomainCode())
+                        .domainName(input.getDomainName())
+                        .score(BigDecimal.valueOf(75.0))
+                        .commentary("当前知识域掌握尚可。")
+                        .build()))
+                .highlightedSegments(List.of(QuestionDetailEvaluationOutput.HighlightedSegment.builder()
+                        .segment(input.getAnswerText())
+                        .label("strength")
+                        .comment("主线表达完整，但还可补更多细节。")
+                        .build()))
+                .highlightedAnnotations(List.of(QuestionDetailEvaluationOutput.HighlightedAnnotation.builder()
+                        .quote(input.getAnswerText())
+                        .label("strength")
+                        .comment("主线表达完整，但还可补更多细节。")
+                        .build()))
+                .idealAnswerOutline(List.of("先说明核心原理", "再结合场景说明方案取舍"))
+                .rewrittenAnswer(input.getAnswerText())
+                .build();
+        return mockResult(output, startMs, "question_detail_evaluation");
+    }
 
-    /**
-     * 构造 Mock 结果：promptTokens / responseTokens 填 0，latencyMs 取实际耗时。
-     */
+    @Override
+    public Flux<String> callQuestionConsultStream(QuestionConsultInput input) {
+        String weakestPoint = input.getWeakPoints() == null || input.getWeakPoints().isEmpty()
+                ? "关键点没有展开"
+                : input.getWeakPoints().getFirst();
+        String latestQuestion = input.getLatestUserQuestion() == null ? "" : input.getLatestUserQuestion();
+        String reply;
+        if (latestQuestion.contains("失分")) {
+            reply = "这题主要失分在「" + weakestPoint + "」。如果重答，先把核心定义讲准，再补一段场景里的边界和取舍。";
+        } else if (latestQuestion.contains("重答") || latestQuestion.contains("怎么答")) {
+            String outline = input.getIdealAnswerOutline() == null || input.getIdealAnswerOutline().isEmpty()
+                    ? "定义、主流程、边界、取舍"
+                    : String.join("、", input.getIdealAnswerOutline());
+            reply = "建议按「" + outline + "」来重答，重点把你原回答里没展开的「" + weakestPoint + "」补进去。";
+        } else {
+            reply = "如果继续围绕这题提升，优先补强「" + weakestPoint + "」，并把回答收敛到当前题目的证据和边界条件上。";
+        }
+        return Flux.fromArray(reply.split("")).delayElements(Duration.ofMillis(20));
+    }
+
+    private List<ReportGenerationOutput.SkillDomainScore> buildMockDomainScores(ReportGenerationInput input) {
+        if (input.getQuestionAnswerPairs() == null) {
+            return List.of();
+        }
+        List<ReportGenerationOutput.SkillDomainScore> scores = new ArrayList<>();
+        input.getQuestionAnswerPairs().stream()
+                .filter(pair -> pair.getDomainCode() != null && !pair.getDomainCode().isBlank())
+                .map(pair -> ReportGenerationOutput.SkillDomainScore.builder()
+                        .domainCode(pair.getDomainCode())
+                        .domainName(pair.getDomainName() != null ? pair.getDomainName() : pair.getDomainCode())
+                        .score(BigDecimal.valueOf(75.0))
+                        .commentary("候选人对该知识域有基本掌握。")
+                        .build())
+                .forEach(scores::add);
+        return scores;
+    }
+
+    private List<ReportGenerationOutput.ComprehensiveRadarScore> buildMockRadarScores() {
+        return List.of(
+                ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                        .dimensionKey("fundamentals")
+                        .dimensionName("基础原理掌握")
+                        .score(BigDecimal.valueOf(78.0))
+                        .build(),
+                ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                        .dimensionKey("engineering_practice")
+                        .dimensionName("工程实践与项目落地")
+                        .score(BigDecimal.valueOf(74.0))
+                        .build(),
+                ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                        .dimensionKey("scenario_tradeoff")
+                        .dimensionName("场景分析与方案取舍")
+                        .score(BigDecimal.valueOf(72.0))
+                        .build(),
+                ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                        .dimensionKey("debugging")
+                        .dimensionName("问题定位与排查思路")
+                        .score(BigDecimal.valueOf(70.0))
+                        .build(),
+                ReportGenerationOutput.ComprehensiveRadarScore.builder()
+                        .dimensionKey("communication")
+                        .dimensionName("沟通表达与结构化呈现")
+                        .score(BigDecimal.valueOf(76.0))
+                        .build()
+        );
+    }
+
     private <T> AiCallResult<T> mockResult(T output, long startMs, String promptCode) {
         return AiCallResult.<T>builder()
                 .output(output)
@@ -210,112 +228,9 @@ public class MockAiClient implements AiClient {
                 .promptTokens(0)
                 .responseTokens(0)
                 .latencyMs(System.currentTimeMillis() - startMs)
+                .systemPrompt(null)
+                .userPrompt(null)
+                .rawResponse(null)
                 .build();
-    }
-
-    /**
-     * 根据题型生成不同的 Mock 题目文本。
-     */
-    private String buildMockStem(String domainName, String questionType) {
-        String domain = domainName != null ? domainName : "技术";
-        if ("INTRO".equals(questionType)) {
-            return "请先做一个简单的自我介绍，重点介绍你的技术背景和最近参与的项目。";
-        }
-        if ("PROJECT_DEEP_DIVE".equals(questionType)) {
-            return "请介绍一个你负责过的技术难度较高的项目，重点说明你在其中解决了什么问题，以及具体的技术方案。";
-        }
-        if ("BEHAVIORAL".equals(questionType)) {
-            return "请描述一次你在团队中主导解决技术难题的经历，重点说明你是如何推动问题解决的。";
-        }
-        return "请详细介绍一下 " + domain + " 的核心原理，并结合你的项目经验说明实际应用场景和遇到过的挑战。";
-    }
-
-    private String buildMockIntroRewrite(IntroRewriteInput input) {
-        String base = input.getBasePrompt();
-        if (base == null || base.isBlank()) {
-            return "请先做一个简短的自我介绍，重点讲讲你的技术背景和最近的项目经历。";
-        }
-        return base.trim();
-    }
-
-    /**
-     * 从账本 domain_states 找第一个 UNASKED 域，并从 syllabusJson 补充完整信息。
-     */
-    private EvaluationDecisionOutput.NextQuestionStrategy resolveNextStrategyFromLedger(
-            EvaluationDecisionInput input) {
-        if (input.getStateLedger() == null) return null;
-
-        Object domainStatesObj = input.getStateLedger().get("domain_states");
-        if (!(domainStatesObj instanceof List<?> domainStates)) return null;
-
-        String nextDomainCode = null;
-        for (Object ds : domainStates) {
-            if (!(ds instanceof Map<?, ?> dsMap)) continue;
-            String code = (String) dsMap.get("domain_id");
-            String status = (String) dsMap.get("status");
-            if (code == null || Objects.equals(code, input.getCurrentDomainCode())) continue;
-            // 账本中状态字符串统一与枚举对比，支持大小写容错
-            if (status == null || DomainStatus.UNASKED.getValue().equalsIgnoreCase(status)) {
-                nextDomainCode = code;
-                break;
-            }
-        }
-        if (nextDomainCode == null) return null;
-
-        Long nextDomainId = null;
-        String nextDomainName = nextDomainCode;
-        String targetDepth = "L3";
-
-        if (input.getSyllabusJson() != null) {
-            Object domainsObj = input.getSyllabusJson().get("domains");
-            if (domainsObj instanceof List<?> domains) {
-                for (Object d : domains) {
-                    if (!(d instanceof Map<?, ?> dMap)) continue;
-                    if (Objects.equals(nextDomainCode, dMap.get("domainCode"))) {
-                        Object idObj = dMap.get("domainId");
-                        if (idObj instanceof Number num) nextDomainId = num.longValue();
-                        if (dMap.get("domainName") instanceof String name) nextDomainName = name;
-                        if (dMap.get("targetDepth") instanceof String td) targetDepth = td;
-                        break;
-                    }
-                }
-            }
-        }
-
-        return EvaluationDecisionOutput.NextQuestionStrategy.builder()
-                .nextDomainId(nextDomainId)
-                .nextDomainCode(nextDomainCode)
-                .nextDomainName(nextDomainName)
-                .questionType("PRINCIPLE")
-                .targetDepth(targetDepth)
-                .focusPoint(nextDomainName + " 核心原理")
-                .build();
-    }
-
-    /**
-     * 从 Q/A 列表中提取知识域，每域生成模拟评分（75 分）。
-     */
-    private List<ReportGenerationOutput.SkillDomainScore> buildMockDomainScores(
-            ReportGenerationInput input) {
-        if (input.getQuestionAnswerPairs() == null) return List.of();
-
-        List<ReportGenerationOutput.SkillDomainScore> scores = new ArrayList<>();
-        input.getQuestionAnswerPairs().stream()
-                .filter(pair -> pair.getDomainCode() != null && !pair.getDomainCode().isBlank()
-                        && !"intro".equalsIgnoreCase(pair.getDomainCode()))
-                .collect(java.util.stream.Collectors.toMap(
-                        ReportGenerationInput.QuestionAnswerPair::getDomainCode,
-                        p -> p,
-                        (a, b) -> a,
-                        java.util.LinkedHashMap::new))
-                .forEach((code, pair) -> scores.add(
-                        ReportGenerationOutput.SkillDomainScore.builder()
-                                .domainCode(code)
-                                .domainName(pair.getDomainName() != null ? pair.getDomainName() : code)
-                                .score(BigDecimal.valueOf(75.0))
-                                .achievedDepth(pair.getTargetDepth() != null ? pair.getTargetDepth() : "L3")
-                                .commentary("候选人对该知识域有基本掌握，核心概念理解正确，建议进一步加深实践深度。")
-                                .build()));
-        return scores;
     }
 }

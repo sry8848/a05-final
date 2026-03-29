@@ -10,7 +10,7 @@
 CREATE TABLE IF NOT EXISTS interview_preferences (
     id                          BIGINT       AUTO_INCREMENT PRIMARY KEY,
     user_id                     BIGINT       NOT NULL         COMMENT '用户 ID',
-    target_role                 VARCHAR(64)  NOT NULL         COMMENT '最近岗位枚举，如 JAVA_BACKEND',
+    position_code                 VARCHAR(64)  NOT NULL         COMMENT '最近岗位枚举，如 JAVA_BACKEND',
     experience_level            VARCHAR(32)  NOT NULL         COMMENT '最近工作年限枚举，如 SENIOR',
     mode                        VARCHAR(32)  NOT NULL         COMMENT '最近面试模式：practice / professional',
     focus_topics                VARCHAR(512) NULL             COMMENT '最近侧重点（自由文本）',
@@ -30,8 +30,7 @@ CREATE TABLE interview_sessions (
     user_id                 BIGINT       NOT NULL         COMMENT '用户 ID',
     resume_id               BIGINT       NULL             COMMENT '关联简历 ID',
     title                   VARCHAR(255) NOT NULL DEFAULT '' COMMENT '本场标题，如 Java 后端开发模拟面试',
-    target_role             VARCHAR(64)  NOT NULL         COMMENT '目标岗位枚举，如 JAVA_BACKEND',
-    position_domain_version INT          NOT NULL DEFAULT 1 COMMENT '本场采用的岗位知识域版本',
+    position_code             VARCHAR(64)  NOT NULL         COMMENT '目标岗位枚举，如 JAVA_BACKEND',
     experience_level        VARCHAR(32)  NOT NULL         COMMENT '工作年限枚举，如 SENIOR',
     mode                    VARCHAR(32)  NOT NULL         COMMENT '面试模式：practice / professional',
     job_description         LONGTEXT     NULL             COMMENT 'JD 文本',
@@ -41,7 +40,7 @@ CREATE TABLE interview_sessions (
     think_time_limit_seconds    INT      NULL             COMMENT '专业模式思考时间限制（秒）',
     answer_time_limit_seconds   INT      NULL             COMMENT '专业模式回答时间限制（秒）',
     first_question_json     JSON         NULL             COMMENT '第一题快照，status=in_progress 时由 GET /interviews/{id} 内嵌返回',
-    syllabus_json           JSON         NULL             COMMENT 'Planner 生成的主考纲（含题型配额、知识域目标深度、项目锚点）',
+    syllabus_json           JSON         NULL             COMMENT 'Planner 生成的主考纲（含规划推理、知识域与项目/实习条目）',
     state_ledger_json       JSON         NULL             COMMENT '状态账本（唯一过程状态表达，记录知识域覆盖、题型进度等）',
     status                  VARCHAR(32)  NOT NULL DEFAULT 'planning' COMMENT '会话状态：created/planning/in_progress/report_generating/completed/aborted',
     model_provider          VARCHAR(64)  NULL             COMMENT '模型供应商',
@@ -61,17 +60,15 @@ CREATE TABLE interview_sessions (
 CREATE TABLE IF NOT EXISTS session_skill_states (
     id              BIGINT      AUTO_INCREMENT PRIMARY KEY,
     session_id      BIGINT      NOT NULL         COMMENT '所属面试会话 ID',
-    domain_id       BIGINT      NOT NULL         COMMENT '关联 position_skill_domains.id',
+    domain_code     VARCHAR(64) NOT NULL         COMMENT '关联 position_skill_domains.domain_code',
     status          VARCHAR(32) NOT NULL DEFAULT 'uncovered' COMMENT '考察状态：uncovered/in_progress/covered/circuit_broken',
     tested_count    INT         NOT NULL DEFAULT 0 COMMENT '被考察题数',
-    target_depth    VARCHAR(16) NOT NULL DEFAULT 'L3' COMMENT '目标深度等级：L1~L5',
-    current_depth   VARCHAR(16) NULL             COMMENT '当前已达到的深度等级',
     saturated       TINYINT     NOT NULL DEFAULT 0 COMMENT '是否已问透（1=是，0=否）',
     evidence_refs   JSON        NULL             COMMENT '相关题目 ID 列表，如 [5001, 5003]',
     ai_notes        TEXT        NULL             COMMENT 'AI 对该知识域的定性备注',
     created_at      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_sss_session_domain (session_id, domain_id),
+    UNIQUE KEY uk_sss_session_domain (session_id, domain_code),
     INDEX idx_sss_session_id (session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试会话知识域考察状态表';
 
@@ -83,13 +80,11 @@ CREATE TABLE IF NOT EXISTS interview_questions (
     session_id              BIGINT       NOT NULL         COMMENT '所属面试会话 ID',
     question_no             INT          NOT NULL         COMMENT '题号（在本场面试中唯一，从 1 开始）',
     question_type           VARCHAR(64)  NOT NULL         COMMENT '题目类型：INTRO/PROJECT_DEEP_DIVE/SCENARIO/PRINCIPLE/BEHAVIORAL',
-    domain_id               BIGINT       NULL             COMMENT '主知识域 ID',
-    secondary_domain_ids    JSON         NULL             COMMENT '副知识域 ID 列表',
-    project_id              VARCHAR(64)  NULL             COMMENT '项目深挖题对应的项目锚点 ID',
+    domain_code             VARCHAR(64)  NULL             COMMENT '主知识域 code；仅 INTRO 允许使用 intro 例外值',
+    secondary_domain_codes  JSON         NULL             COMMENT '副知识域 code 列表',
     stem                    LONGTEXT     NOT NULL         COMMENT '题目正文',
-    target_skill            VARCHAR(128) NULL             COMMENT '核心考察点，如 缓存击穿',
+    focus_point             VARCHAR(128) NULL             COMMENT '当前题目焦点，如 缓存击穿',
     expected_points         JSON         NULL             COMMENT '理想回答要点列表',
-    target_depth            VARCHAR(16)  NULL             COMMENT '本题目标深度等级：L1~L5',
     status                  VARCHAR(32)  NOT NULL DEFAULT 'pending' COMMENT '题目状态：pending/asked/answered/skipped',
     hint_text               LONGTEXT     NULL             COMMENT '面试官提示文本（用户请求提示后写入）',
     generation_context_json JSON         NULL             COMMENT '生成题目时的决策上下文快照',
@@ -110,6 +105,8 @@ CREATE TABLE IF NOT EXISTS interview_attempts (
     answer_text         LONGTEXT     NULL             COMMENT '候选人回答文本（文字模式）或语音转写结果',
     is_final            TINYINT      NOT NULL DEFAULT 1 COMMENT '是否为最终版回答（1=是，0=否；文字模式默认 1）',
     evaluation_json     JSON         NULL             COMMENT '评估决策结果快照（signal/depthReached/nextStrategy 等）',
+    detail_evaluation_status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT '单题详细评估状态：pending/generating/ready/failed',
+    detail_evaluation_json JSON      NULL             COMMENT '单题详细评估结构化结果',
     created_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_ia_attempt_id (attempt_id),
     INDEX idx_ia_session_id (session_id),
@@ -117,13 +114,50 @@ CREATE TABLE IF NOT EXISTS interview_attempts (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='候选人回答尝试表（幂等键为 attempt_id）';
 
 -- ============================================================
--- 6. 面试报告表：面试结束后异步生成，每场会话一条记录
+-- 6. 单题重答表：围绕原题快照提交独立重答，不污染整场面试会话
+-- ============================================================
+CREATE TABLE IF NOT EXISTS question_redo_attempts (
+    id                  BIGINT       AUTO_INCREMENT PRIMARY KEY,
+    user_id             BIGINT       NOT NULL         COMMENT '用户 ID',
+    source_session_id   BIGINT       NOT NULL         COMMENT '原会话 ID',
+    source_question_id  BIGINT       NOT NULL         COMMENT '原题目 ID',
+    source_snapshot_json JSON        NULL             COMMENT '冻结原题快照',
+    answer_text         LONGTEXT     NULL             COMMENT '重答内容',
+    evaluation_status   VARCHAR(32)  NOT NULL DEFAULT 'pending' COMMENT '单题重答评估状态：pending/generating/ready/failed',
+    evaluation_json     JSON         NULL             COMMENT '单题重答评估结构化结果',
+    created_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_qra_user_source (user_id, source_session_id, source_question_id),
+    INDEX idx_qra_source_question (source_question_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='单题重答记录表';
+
+-- ============================================================
+-- 7. 单题追问消息表：围绕单题复盘的多轮问答消息
+-- ============================================================
+CREATE TABLE IF NOT EXISTS question_consult_messages (
+    id                  BIGINT       AUTO_INCREMENT PRIMARY KEY,
+    user_id             BIGINT       NOT NULL         COMMENT '用户 ID',
+    session_id          BIGINT       NOT NULL         COMMENT '会话 ID',
+    question_id         BIGINT       NOT NULL         COMMENT '题目 ID',
+    role                VARCHAR(16)  NOT NULL         COMMENT '角色：user/assistant',
+    status              VARCHAR(32)  NOT NULL         COMMENT '状态：ready/generating/failed/cancelled',
+    content             LONGTEXT     NULL             COMMENT '消息内容',
+    reply_to_message_id BIGINT       NULL             COMMENT 'assistant 对应的 user 消息 ID',
+    error_message       VARCHAR(512) NULL             COMMENT '失败或取消原因',
+    created_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_qcm_user_question (user_id, session_id, question_id),
+    INDEX idx_qcm_generating (user_id, session_id, question_id, role, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='单题追问消息表';
+
+-- ============================================================
+-- 8. 面试报告表：面试结束后异步生成，每场会话一条记录
 -- ============================================================
 CREATE TABLE IF NOT EXISTS interview_reports (
     id                          BIGINT         AUTO_INCREMENT PRIMARY KEY,
     session_id                  BIGINT         NOT NULL         COMMENT '对应面试会话 ID（全局唯一）',
     overall_score               DECIMAL(5,1)   NULL             COMMENT '综合得分 0~100，保留 1 位小数',
-    skill_domain_scores         JSON           NULL             COMMENT '逐知识域评分明细（domainCode/domainName/score/achievedDepth/commentary）',
+    skill_domain_scores         JSON           NULL             COMMENT '逐知识域评分明细（domainCode/domainName/score/commentary）',
     comprehensive_radar_scores  JSON           NULL             COMMENT '专业模式综合能力雷达数据（练习模式可为 null）',
     summary                     LONGTEXT       NULL             COMMENT '总结评语',
     strengths                   JSON           NULL             COMMENT '优势列表（JSON 数组）',
@@ -137,14 +171,14 @@ CREATE TABLE IF NOT EXISTS interview_reports (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试报告表（每场会话一条）';
 
 -- ============================================================
--- 7. AI 调用审计日志表：记录每次大模型调用的元数据
+-- 9. AI 调用审计日志表：记录每次大模型调用的元数据
 -- ============================================================
 CREATE TABLE IF NOT EXISTS ai_invocation_logs (
     id                      BIGINT       AUTO_INCREMENT PRIMARY KEY,
     session_id              BIGINT       NULL             COMMENT '面试会话 ID',
     question_id             BIGINT       NULL             COMMENT '题目 ID',
     user_id                 BIGINT       NULL             COMMENT '用户 ID',
-    prompt_code             VARCHAR(64)  NOT NULL         COMMENT 'Prompt 标识，如 planner / question_generation',
+    prompt_code             VARCHAR(64)  NOT NULL         COMMENT 'Prompt 标识，如 planner / question_generation_stream',
     prompt_version          VARCHAR(32)  NOT NULL DEFAULT 'v1' COMMENT 'Prompt 版本',
     model_provider          VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '模型供应商，如 openai / mock',
     model_name              VARCHAR(128) NOT NULL DEFAULT '' COMMENT '模型名称，如 gpt-4o-mini',

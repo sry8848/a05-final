@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.a05.aiinterview.interview.mapper.InterviewQuestionMapper">
+
+    <resultMap id="InterviewQuestionResultMap" type="com.a05.aiinterview.interview.entity.InterviewQuestion">
+        <id column="id" property="id"/>
+        <result column="session_id" property="sessionId"/>
+        <result column="question_no" property="questionNo"/>
+        <result column="question_type" property="questionType"/>
+        <result column="domain_code" property="domainCode"/>
+        <result column="secondary_domain_codes"
+                property="secondaryDomainCodes"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="stem" property="stem"/>
+        <result column="focus_point" property="focusPoint"/>
+        <result column="expected_points"
+                property="expectedPoints"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="status" property="status"/>
+        <result column="hint_text" property="hintText"/>
+        <result column="generation_context_json"
+                property="generationContextJson"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="selectUserFirstIntroQuestions" resultMap="InterviewQuestionResultMap">
+        SELECT q.*
+        FROM interview_questions q
+        INNER JOIN interview_sessions s ON s.id = q.session_id
+        WHERE s.user_id = #{userId}
+          AND q.question_no = 1
+          AND q.question_type = 'INTRO'
+        ORDER BY q.created_at DESC, q.id DESC
+        <if test="limit != null">
+            LIMIT #{limit}
+        </if>
+    </select>
+</mapper>

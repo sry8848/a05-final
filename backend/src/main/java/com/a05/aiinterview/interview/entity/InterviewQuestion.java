@@ -28,28 +28,22 @@ public class InterviewQuestion {
     /** 题目类型：INTRO / PROJECT_DEEP_DIVE / SCENARIO / PRINCIPLE / BEHAVIORAL */
     private String questionType;
 
-    /** 主知识域 ID（position_skill_domains.id） */
-    private Long domainId;
+    /** 主知识域 code */
+    private String domainCode;
 
-    /** 副知识域 ID 列表（JSON 数组），可为空 */
+    /** 副知识域 code 列表（JSON 数组），可为空 */
     @TableField(typeHandler = JacksonTypeHandler.class)
-    private List<Long> secondaryDomainIds;
-
-    /** 若为项目深挖题，对应考纲中的项目锚点 ID */
-    private String projectId;
+    private List<String> secondaryDomainCodes;
 
     /** 题目正文 */
     private String stem;
 
-    /** 核心考察点，如 "缓存击穿" */
-    private String targetSkill;
+    /** 当前题目焦点，如 "缓存击穿" */
+    private String focusPoint;
 
     /** 理想回答要点列表（JSON 数组），如 ["布隆过滤器原理", "误判率控制"] */
     @TableField(typeHandler = JacksonTypeHandler.class)
     private List<String> expectedPoints;
-
-    /** 本题目标深度等级：L1~L5 */
-    private String targetDepth;
 
     /** 题目状态：pending / asked / answered / skipped */
     private String status;

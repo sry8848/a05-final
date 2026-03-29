@@ -3,7 +3,7 @@ package com.a05.aiinterview.interview.mapper;
 import com.a05.aiinterview.interview.entity.InterviewReport;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
-import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Param;
 
 /**
  * 面试报告 Mapper。
@@ -17,6 +17,5 @@ public interface InterviewReportMapper extends BaseMapper<InterviewReport> {
      * @param sessionId 面试会话 ID
      * @return 报告实体，若未生成则返回 null
      */
-    @Select("SELECT * FROM interview_reports WHERE session_id = #{sessionId} LIMIT 1")
-    InterviewReport selectBySessionId(Long sessionId);
+    InterviewReport selectBySessionId(@Param("sessionId") Long sessionId);
 }

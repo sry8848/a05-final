@@ -42,8 +42,10 @@
               type="email" 
               class="glass-input" 
               placeholder="请输入邮箱"
+              @blur="validatePasswordEmail"
             >
           </div>
+          <span v-if="errors.passwordEmail" class="error-msg">{{ errors.passwordEmail }}</span>
         </div>
 
         <div v-if="loginMode === 'password'" class="form-group">
@@ -55,6 +57,7 @@
               :type="showPassword ? 'text' : 'password'" 
               class="glass-input" 
               placeholder="请输入密码"
+              @blur="validatePassword"
             >
             <i 
               :class="showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'" 
@@ -62,6 +65,7 @@
               @click="showPassword = !showPassword"
             ></i>
           </div>
+          <span v-if="errors.password" class="error-msg">{{ errors.password }}</span>
         </div>
 
         <template v-if="loginMode === 'code'">
@@ -74,8 +78,10 @@
                 type="email" 
                 class="glass-input" 
                 placeholder="请输入邮箱"
+                @blur="validateCodeEmail"
               >
             </div>
+            <span v-if="errors.codeEmail" class="error-msg">{{ errors.codeEmail }}</span>
           </div>
 
           <div class="form-group">
@@ -88,6 +94,7 @@
                 class="glass-input" 
                 placeholder="请输入验证码"
                 maxlength="6"
+                @blur="validateCode"
               >
               <button 
                 type="button" 
@@ -98,6 +105,7 @@
                 {{ sendingCode ? '发送中...' : countdown > 0 ? `${countdown}s` : '获取验证码' }}
               </button>
             </div>
+            <span v-if="errors.code" class="error-msg">{{ errors.code }}</span>
           </div>
         </template>
 
@@ -148,6 +156,8 @@
 <script>
 import { ref, reactive } from 'vue'
 import { sendEmailCode, loginByPassword, loginByEmailCode } from '@/api/auth'
+import { getEmailValidationError } from '@/utils/emailValidation'
+import { getPasswordValidationError, getCodeValidationError } from '@/utils/loginFieldValidation'
 
 export default {
   name: 'LoginPage',
@@ -170,15 +180,39 @@ export default {
       code: ''
     })
 
+    const errors = reactive({
+      passwordEmail: '',
+      password: '',
+      codeEmail: '',
+      code: ''
+    })
+
+    const validateEmailField = (value, key) => {
+      errors[key] = getEmailValidationError(value)
+      return !errors[key]
+    }
+
+    const validatePasswordEmail = () => validateEmailField(passwordForm.email, 'passwordEmail')
+
+    const validatePassword = () => {
+      errors.password = getPasswordValidationError(passwordForm.password)
+      return !errors.password
+    }
+
+    const validateCodeEmail = () => validateEmailField(codeForm.email, 'codeEmail')
+
+    const validateCode = () => {
+      errors.code = getCodeValidationError(codeForm.code)
+      return !errors.code
+    }
+
     const handleLogin = async () => {
       if (loginMode.value === 'password') {
-        if (!passwordForm.email || !passwordForm.password) {
-          alert('请填写完整的登录信息')
+        if (!validatePasswordEmail() || !validatePassword()) {
           return
         }
       } else {
-        if (!codeForm.email || !codeForm.code) {
-          alert('请填写完整的登录信息')
+        if (!validateCodeEmail() || !validateCode()) {
           return
         }
       }
@@ -186,18 +220,9 @@ export default {
       try {
         let data
         if (loginMode.value === 'password') {
-          data = await loginByPassword(passwordForm.email, passwordForm.password)
+          data = await loginByPassword(passwordForm.email.trim(), passwordForm.password)
         } else {
-          data = await loginByEmailCode(codeForm.email, codeForm.code)
-        }
-        if (data && data.token) {
-          localStorage.setItem('aiInterviewToken', data.token)
-          if (data.nickname) {
-            const settings = JSON.parse(localStorage.getItem('aiInterviewSettings') || '{}')
-            settings.user = { name: data.nickname }
-            settings.isLoggedIn = true
-            localStorage.setItem('aiInterviewSettings', JSON.stringify(settings))
-          }
+          data = await loginByEmailCode(codeForm.email.trim(), codeForm.code.trim())
         }
         emit('loginSuccess', data)
       } catch (e) {
@@ -208,25 +233,17 @@ export default {
     }
 
     const sendCode = async () => {
-      if (!codeForm.email) {
-        alert('请先输入邮箱')
-        return
-      }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(codeForm.email)) {
-        alert('请输入有效的邮箱地址')
+      if (!validateCodeEmail()) {
         return
       }
       sendingCode.value = true
       try {
-        const data = await sendEmailCode(codeForm.email, 'login')
+        await sendEmailCode(codeForm.email.trim(), 'login')
         countdown.value = 60
         const timer = setInterval(() => {
           countdown.value--
           if (countdown.value <= 0) clearInterval(timer)
         }, 1000)
-        if (data && data.devCode) {
-          alert('开发环境验证码：' + data.devCode)
-        }
       } catch (e) {
         alert(e.message || '发送验证码失败')
       } finally {
@@ -255,6 +272,11 @@ export default {
       sendingCode,
       passwordForm,
       codeForm,
+      errors,
+      validatePasswordEmail,
+      validatePassword,
+      validateCodeEmail,
+      validateCode,
       handleLogin,
       sendCode,
       socialLogin,
@@ -359,6 +381,11 @@ export default {
   font-size: 14px;
   font-weight: 500;
   color: var(--text-primary);
+}
+
+.error-msg {
+  font-size: 12px;
+  color: var(--danger-color);
 }
 
 .input-wrapper {

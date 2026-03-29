@@ -1,0 +1,88 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ai_interview
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+      TZ: Asia/Shanghai
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+  db-init:
+    image: mysql:8.0
+    profiles: ["tools"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+    volumes:
+      - ./backend/src/main/resources/db:/sql:ro
+    entrypoint:
+      - sh
+      - -lc
+      - >
+        mysql -hmysql -uroot -p"$$MYSQL_ROOT_PASSWORD" < /sql/01-create-database.sql &&
+        mysql -hmysql -uroot -p"$$MYSQL_ROOT_PASSWORD" ai_interview < /sql/schema-auth.sql &&
+        mysql -hmysql -uroot -p"$$MYSQL_ROOT_PASSWORD" ai_interview < /sql/schema-resume.sql &&
+        mysql -hmysql -uroot -p"$$MYSQL_ROOT_PASSWORD" ai_interview < /sql/schema-position.sql &&
+        mysql -hmysql -uroot -p"$$MYSQL_ROOT_PASSWORD" ai_interview < /sql/schema-question-bank.sql &&
+        mysql -hmysql -uroot -p"$$MYSQL_ROOT_PASSWORD" ai_interview < /sql/schema-interview-v2.sql
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:
+  qdrant-data:

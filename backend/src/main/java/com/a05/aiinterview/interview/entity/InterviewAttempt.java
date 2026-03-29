@@ -45,11 +45,25 @@ public class InterviewAttempt {
 
     /**
      * 评估决策结果快照（JSON）。
-     * 包含 signal、depthReached、saturated、nextStrategy 等字段，
+     * 当前以 decision、answerVerdict、targetFocus、nextQuestionGoal、
+     * nextDomain*、questionType、focusPoint、domainOutcome 等字段为主，
      * 由 callEvaluationDecision 返回后序列化存储，供报告生成和审计使用。
      */
     @TableField(typeHandler = JacksonTypeHandler.class)
     private Map<String, Object> evaluationJson;
+
+    /**
+     * 单题详细评估状态：
+     * pending / generating / ready / failed。
+     */
+    private String detailEvaluationStatus;
+
+    /**
+     * 单题详细评估结构化结果。
+     * 仅存储 QuestionDetailEvaluationOutput 对应业务字段，不混入调试元信息。
+     */
+    @TableField(typeHandler = JacksonTypeHandler.class)
+    private Map<String, Object> detailEvaluationJson;
 
     private LocalDateTime createdAt;
 }

@@ -3,10 +3,10 @@
  * code=0 成功，非 0 报 Error(message)。
  */
 
-const BASE = '/api/v1'
+import { buildApiUrl } from './base.js'
 
 async function request(path, options = {}) {
-  const url = BASE + path
+  const url = buildApiUrl(path)
   const headers = {
     'Content-Type': 'application/json',
     Authorization: getAuthHeader(),
@@ -25,7 +25,7 @@ async function request(path, options = {}) {
 
 /** 上传文件：不设置 Content-Type，由浏览器设置 multipart/form-data */
 async function uploadRequest(path, formData) {
-  const url = BASE + path
+  const url = buildApiUrl(path)
   const res = await fetch(url, {
     method: 'POST',
     headers: { Authorization: getAuthHeader() },
@@ -44,11 +44,11 @@ async function uploadRequest(path, formData) {
  * @param {number} status - HTTP 状态码
  * @param {string} rawMessage - 服务端或浏览器返回的原始文案
  */
-function toResumeUploadMessage(status, rawMessage) {
-  if (status === 413) return '上传文件过大，请选择不超过 20MB 的 PDF 或 DOCX 文件'
+export function toResumeUploadMessage(status, rawMessage) {
+  if (status === 413) return '上传文件过大，请选择不超过 20MB 的 PDF、DOCX 或 MD 文件'
   const lower = (rawMessage || '').toLowerCase()
   if (/maximum.*size|size.*exceeded|exceeded.*size|file.*too large|payload too large/.test(lower)) {
-    return '上传文件过大，请选择不超过 20MB 的 PDF 或 DOCX 文件'
+    return '上传文件过大，请选择不超过 20MB 的 PDF、DOCX 或 MD 文件'
   }
   return rawMessage || '上传失败'
 }
@@ -68,7 +68,7 @@ export function getResumes() {
 
 /**
  * 上传简历并发起解析
- * @param {File} file - PDF 或 DOCX
+ * @param {File} file - PDF、DOCX 或 MD
  * @returns {Promise<{ resumeId: number, parseStatus: string }>}
  */
 export function uploadResume(file) {
@@ -124,6 +124,29 @@ export function createInterviewSession(payload) {
   })
 }
 
+/** Get interview history list */
+export function getInterviewHistory(params = {}) {
+  const query = new URLSearchParams()
+  const append = (key, value) => {
+    if (value == null) return
+    const text = String(value).trim()
+    if (!text) return
+    query.set(key, text)
+  }
+
+  append('page', params.page)
+  append('pageSize', params.pageSize)
+  append('status', params.status)
+  append('targetRole', params.targetRole)
+  append('dateFrom', params.dateFrom)
+  append('dateTo', params.dateTo)
+  append('sortBy', params.sortBy)
+  append('sortOrder', params.sortOrder)
+
+  const suffix = query.toString() ? `?${query}` : ''
+  return request('/interviews' + suffix, { method: 'GET' })
+}
+
 /** Get interview session detail */
 export function getInterviewSessionDetail(sessionId) {
   return request('/interviews/' + sessionId, { method: 'GET' })
@@ -147,9 +170,138 @@ export function getInterviewReport(sessionId) {
   return request('/interviews/' + sessionId + '/report', { method: 'GET' })
 }
 
+/** Delete interview session */
+export function deleteInterviewSession(sessionId) {
+  return request('/interviews/' + sessionId, { method: 'DELETE' })
+}
+
+/** Get interview question detail */
+export function getInterviewQuestionDetail(sessionId, questionId) {
+  return request('/interviews/' + sessionId + '/questions/' + questionId, { method: 'GET' })
+}
+
+/** Create a question redo attempt */
+export function createQuestionRedoAttempt(sessionId, questionId, payload) {
+  return request('/interviews/' + sessionId + '/questions/' + questionId + '/redo-attempts', {
+    method: 'POST',
+    body: payload
+  })
+}
+
+/** Get latest question redo attempt */
+export function getLatestQuestionRedoAttempt(sessionId, questionId) {
+  return request('/interviews/' + sessionId + '/questions/' + questionId + '/redo-attempts/latest', {
+    method: 'GET'
+  })
+}
+
+/** Get question consult messages */
+export function getQuestionConsultMessages(sessionId, questionId) {
+  return request('/interviews/' + sessionId + '/questions/' + questionId + '/ai-consult/messages', {
+    method: 'GET'
+  })
+}
+
+/** Create question consult messages */
+export function createQuestionConsultMessage(sessionId, questionId, payload) {
+  return request('/interviews/' + sessionId + '/questions/' + questionId + '/ai-consult/messages', {
+    method: 'POST',
+    body: payload
+  })
+}
+
 /** Get learning recommendations for interview report */
 export function getLearningRecommendations(sessionId) {
   return request('/interviews/' + sessionId + '/report/learning-recommendations', { method: 'GET' })
+}
+
+/** Get current user profile */
+export function getProfile() {
+  return request('/profile', { method: 'GET' })
+}
+
+/** Update current user profile */
+export function updateProfile(payload) {
+  return request('/profile', {
+    method: 'PUT',
+    body: payload
+  })
+}
+
+/** Upload profile avatar */
+export function uploadProfileAvatar(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return uploadRequest('/profile/avatar', formData)
+}
+
+/** Get profile statistics */
+export function getProfileStatistics(positionCode) {
+  const query = positionCode ? `?positionCode=${encodeURIComponent(positionCode)}` : ''
+  return request('/profile/statistics' + query, { method: 'GET' })
+}
+
+/** Get skill overview */
+export function getProfileSkillOverview(positionCode) {
+  const query = positionCode ? `?positionCode=${encodeURIComponent(positionCode)}` : ''
+  return request('/profile/skill-overview' + query, { method: 'GET' })
+}
+
+/** Create question bank item */
+export function createQuestionBankItem(payload) {
+  return request('/question-bank', {
+    method: 'POST',
+    body: payload
+  })
+}
+
+/** List question bank items */
+export function getQuestionBank(params = {}) {
+  const query = new URLSearchParams()
+  const append = (key, value) => {
+    if (value == null) return
+    const text = String(value).trim()
+    if (!text) return
+    query.set(key, text)
+  }
+
+  append('page', params.page)
+  append('pageSize', params.pageSize)
+  append('tag', params.tag)
+  append('minScore', params.minScore)
+  append('maxScore', params.maxScore)
+  append('sortBy', params.sortBy)
+  append('sortOrder', params.sortOrder)
+
+  const suffix = query.toString() ? `?${query}` : ''
+  return request('/question-bank' + suffix, { method: 'GET' })
+}
+
+/** Delete question bank item */
+export function deleteQuestionBankItem(itemId) {
+  return request('/question-bank/' + itemId, { method: 'DELETE' })
+}
+
+/**
+ * Ping system endpoint for RTT measurement.
+ * Success criteria only depends on HTTP round-trip completion (response.ok),
+ * and does not depend on response body schema.
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<{ok: boolean, status: number}>}
+ */
+export async function getSystemPing(signal) {
+  const res = await fetch(buildApiUrl('/system/ping'), {
+    method: 'GET',
+    headers: {
+      Authorization: getAuthHeader()
+    },
+    cache: 'no-store',
+    signal
+  })
+  return {
+    ok: res.ok,
+    status: res.status
+  }
 }
 
 function parseSsePayload(raw) {
@@ -161,15 +313,40 @@ function parseSsePayload(raw) {
   }
 }
 
+function isAbortLikeError(err) {
+  if (!err) return false
+  if (err.name === 'AbortError') return true
+  return String(err.message || '').toLowerCase().includes('aborted')
+}
+
 /** Stream interview question via fetch-based SSE */
-export async function streamInterviewQuestion(sessionId, attemptId, handlers = {}, signal) {
-  const url = BASE + '/interviews/' + sessionId + '/questions/stream?attemptId=' + encodeURIComponent(attemptId)
+export async function streamInterviewQuestion(sessionId, attemptId, handlers = {}, signal, options = {}) {
+  const url = buildApiUrl('/interviews/' + sessionId + '/questions/stream')
+    + '?attemptId=' + encodeURIComponent(attemptId)
+  return streamSseByUrl(url, handlers, signal, options)
+}
+
+/** Stream question consult assistant message via fetch-based SSE */
+export async function streamQuestionConsultMessage(sessionId, questionId, assistantMessageId, handlers = {}, signal) {
+  const url = buildApiUrl(
+    '/interviews/' + sessionId + '/questions/' + questionId
+    + '/ai-consult/messages/' + assistantMessageId + '/stream'
+  )
+  return streamSseByUrl(url, handlers, signal)
+}
+
+async function streamSseByUrl(url, handlers = {}, signal, options = {}) {
+  const headers = {
+    Accept: 'text/event-stream',
+    Authorization: getAuthHeader()
+  }
+  if (options.lastEventId != null && String(options.lastEventId).trim() !== '') {
+    headers['Last-Event-ID'] = String(options.lastEventId)
+  }
+
   const resp = await fetch(url, {
     method: 'GET',
-    headers: {
-      Accept: 'text/event-stream',
-      Authorization: getAuthHeader()
-    },
+    headers,
     signal
   })
 
@@ -186,13 +363,20 @@ export async function streamInterviewQuestion(sessionId, attemptId, handlers = {
   let eventName = 'message'
   let eventId = ''
   let dataLines = []
+  let terminalEvent = null
+  let shouldStopReading = false
+  let latestEventId = options.lastEventId ? String(options.lastEventId) : ''
 
   const dispatch = async () => {
     if (!dataLines.length) return
+    if (eventId) {
+      latestEventId = eventId
+    }
     const payload = parseSsePayload(dataLines.join('\n'))
     const map = {
       start: handlers.onStart,
       delta: handlers.onDelta,
+      tts_ready: handlers.onTtsReady,
       done: handlers.onDone,
       error: handlers.onError
     }
@@ -200,10 +384,16 @@ export async function streamInterviewQuestion(sessionId, attemptId, handlers = {
     if (fn) {
       await fn(payload, eventName, eventId)
     }
+    if (eventName === 'done' || eventName === 'error') {
+      terminalEvent = eventName
+    }
   }
 
   try {
     while (true) {
+      if (shouldStopReading) {
+        break
+      }
       const { value, done } = await reader.read()
       if (done) {
         await dispatch()
@@ -218,6 +408,10 @@ export async function streamInterviewQuestion(sessionId, attemptId, handlers = {
 
         if (!line) {
           await dispatch()
+          if (terminalEvent) {
+            shouldStopReading = true
+            break
+          }
           eventName = 'message'
           eventId = ''
           dataLines = []
@@ -237,7 +431,19 @@ export async function streamInterviewQuestion(sessionId, attemptId, handlers = {
         lineEnd = buffer.indexOf('\n')
       }
     }
+  } catch (err) {
+    if (isAbortLikeError(err) || signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+    throw err
   } finally {
-    reader.releaseLock()
+    try {
+      reader.releaseLock()
+    } catch (_) {}
+  }
+
+  return {
+    terminalEvent,
+    lastEventId: latestEventId
   }
 }

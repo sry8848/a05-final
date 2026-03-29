@@ -27,6 +27,15 @@
     --glass-bg: rgba(255, 255, 255, 0.25);
     --glass-border: rgba(255, 255, 255, 0.4);
     --glass-shadow: rgba(31, 38, 135, 0.15);
+
+    /* 弹窗面板：保持亮色，不跟随页面玻璃卡片一起变暗 */
+    --modal-surface-bg: rgba(255, 255, 255, 0.96);
+    --modal-surface-border: rgba(226, 232, 240, 0.92);
+    --modal-surface-shadow: 0 32px 80px rgba(15, 23, 42, 0.22);
+    --modal-text-primary: #111827;
+    --modal-text-secondary: #4b5563;
+    --modal-input-bg: rgba(248, 250, 252, 0.96);
+    --modal-section-bg: rgba(241, 245, 249, 0.92);
     
     /* 阴影 */
     --shadow-light: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
@@ -55,6 +64,13 @@
     --glass-border: rgba(255, 255, 255, 0.1);
     --text-primary: #f3f4f6;
     --text-secondary: #9ca3af;
+    --modal-surface-bg: rgba(255, 255, 255, 0.94);
+    --modal-surface-border: rgba(226, 232, 240, 0.82);
+    --modal-surface-shadow: 0 32px 80px rgba(0, 0, 0, 0.45);
+    --modal-text-primary: #111827;
+    --modal-text-secondary: #4b5563;
+    --modal-input-bg: rgba(248, 250, 252, 0.94);
+    --modal-section-bg: rgba(241, 245, 249, 0.9);
 }
 
 /* ==================== 基础样式重置 ==================== */
@@ -155,6 +171,13 @@ body {
 .glass-card:hover {
     box-shadow: var(--shadow-medium);
     transform: translateY(-2px);
+}
+
+.modal-panel {
+    background: var(--modal-surface-bg);
+    border: 1px solid var(--modal-surface-border);
+    box-shadow: var(--modal-surface-shadow);
+    color: var(--modal-text-primary);
 }
 
 /* 内层玻璃卡片 */
@@ -1198,12 +1221,13 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 20px 24px;
-    border-bottom: 1px solid var(--glass-border);
+    border-bottom: 1px solid var(--modal-surface-border);
 }
 
 .modal-header h3 {
     font-size: 18px;
     font-weight: 600;
+    color: var(--modal-text-primary);
 }
 
 .close-btn {
@@ -1216,7 +1240,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--text-secondary);
+    color: var(--modal-text-secondary);
     transition: all var(--transition-normal);
 }
 
@@ -1234,7 +1258,7 @@ body {
     justify-content: flex-end;
     gap: 12px;
     padding: 16px 24px;
-    border-top: 1px solid var(--glass-border);
+    border-top: 1px solid var(--modal-surface-border);
 }
 
 /* 结果分数圆环 */

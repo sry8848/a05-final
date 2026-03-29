@@ -1,5 +1,5 @@
 -- 鉴权相关表（与 docs/db-schema.md 一致）
--- 执行前请先创建库：CREATE DATABASE IF NOT EXISTS aiinterview DEFAULT CHARSET utf8mb4;
+-- 执行前请先创建库：CREATE DATABASE IF NOT EXISTS ai_interview DEFAULT CHARSET utf8mb4;
 
 CREATE TABLE IF NOT EXISTS users (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

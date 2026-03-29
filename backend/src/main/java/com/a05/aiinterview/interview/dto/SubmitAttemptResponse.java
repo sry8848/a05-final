@@ -20,24 +20,16 @@ public class SubmitAttemptResponse {
     @Schema(description = "本次提交的幂等键，与请求中 attemptId 一致", example = "550e8400-e29b-41d4-a716-446655440000")
     private String attemptId;
 
-    /**
-     * 评估决策信号。
-     * <ul>
-     *   <li>{@code NEXT_DOMAIN} - 进入下一个知识域</li>
-     *   <li>{@code DEEPEN} - 继续追问当前知识域</li>
-     *   <li>{@code END} - 面试结束，nextQuestion 为 null</li>
-     * </ul>
-     */
-    @Schema(description = "评估决策信号：NEXT_DOMAIN / DEEPEN / END", example = "NEXT_DOMAIN")
-    private String evaluationSignal;
+    @Schema(description = "下一步决策：continue / wrapup", example = "continue")
+    private String decision;
 
     /**
      * SSE 流式出题标识符。
-     * signal != END 时与 attemptId 相同，前端使用该值调用
+     * decision != wrapup 时与 attemptId 相同，前端使用该值调用
      * {@code GET /interviews/{sessionId}/questions/stream?attemptId={streamAttemptId}}
-     * 以获取实时题目流；signal=END 时为 null。
+     * 以获取实时题目流；decision=wrapup 时为 null。
      */
-    @Schema(description = "流式出题标识符，用于调用 SSE 端点（signal=END 时为 null）",
+    @Schema(description = "流式出题标识符，用于调用 SSE 端点（decision=wrapup 时为 null）",
             example = "550e8400-e29b-41d4-a716-446655440000")
     private String streamAttemptId;
 

@@ -44,7 +44,7 @@ public class InterviewPreferenceService {
      * @param pref   偏好数据（userId 字段可为空，方法内部会赋值）
      */
     public void saveOrUpdate(Long userId, InterviewPreference pref) {
-        log.info("保存面试偏好, userId={}, targetRole={}, mode={}", userId, pref.getTargetRole(), pref.getMode());
+        log.info("保存面试偏好, userId={}, positionCode={}, mode={}", userId, pref.getPositionCode(), pref.getMode());
 
         pref.setUserId(userId);
         pref.setUpdatedAt(LocalDateTime.now());

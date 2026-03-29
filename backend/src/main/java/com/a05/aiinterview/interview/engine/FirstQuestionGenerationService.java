@@ -11,8 +11,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
+import com.a05.aiinterview.interview.service.support.InterviewDomainDisplaySupport;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -32,8 +35,7 @@ public class FirstQuestionGenerationService {
     private static final ObjectMapper AUDIT_OBJECT_MAPPER = new ObjectMapper();
     private static final String INTRO_DOMAIN_CODE = "intro";
     private static final String INTRO_QUESTION_TYPE = "INTRO";
-    private static final String INTRO_TARGET_DEPTH = "L1";
-    private static final String INTRO_TARGET_SKILL = "沟通表达与项目概述";
+    private static final String INTRO_FOCUS_POINT = "沟通表达与项目概述";
     private static final String INTRO_REWRITE_PROMPT_CODE = "intro_rewrite";
     private static final int INTRO_REWRITE_MAX_LEN = 180;
     private static final int RESPONSE_PREVIEW_MAX_LEN = 120;
@@ -54,6 +56,7 @@ public class FirstQuestionGenerationService {
      */
     public InterviewQuestion generateAndSave(InterviewSession session, PlannerOutput plannerOutput) {
         log.info("开始生成首题（固定 INTRO）, sessionId={}", session.getId());
+        String interviewerArchetype = InterviewerArchetypeSupport.resolveFromLedger(session.getStateLedgerJson());
 
         IntroQuestionStrategyService.IntroQuestionSelection selection =
                 introQuestionStrategyService.selectIntroForUser(session.getUserId());
@@ -76,9 +79,10 @@ public class FirstQuestionGenerationService {
                     .interviewId(session.getId())
                     .questionId(null)
                     .variantId(selection.getVariantId())
-                    .positionCode(session.getTargetRole())
+                    .positionCode(session.getPositionCode())
                     .experienceLevel(session.getExperienceLevel())
                     .mode(session.getMode())
+                    .interviewerArchetype(interviewerArchetype)
                     .basePrompt(basePrompt)
                     .recentPrompts(selection.getRecentPrompts())
                     .avoidPhrases(selection.getAvoidPhrases())
@@ -95,6 +99,10 @@ public class FirstQuestionGenerationService {
                         ? "blank_output"
                         : "too_long_output";
                 rewriteErrorMessage = "intro_rewrite invalid output: " + fallbackReason;
+                log.info("========== 兜底题提示 ==========");
+                log.info("【首题改写失败】AI 改写输出无效，回退到底稿题目");
+                log.info("原因: {}", fallbackReason);
+                log.info("=================================");
                 log.warn("INTRO 改写无效，回退到底稿, sessionId={}, reason={}", session.getId(), fallbackReason);
             } else {
                 rewritten = true;
@@ -105,6 +113,10 @@ public class FirstQuestionGenerationService {
             aiResultStatus = "fallback";
             fallbackReason = "exception";
             rewriteErrorMessage = e.getMessage();
+            log.info("========== 兜底题提示 ==========");
+            log.info("【首题改写异常】AI 改写过程发生异常，回退到底稿题目");
+            log.info("异常信息: {}", e.getMessage());
+            log.info("=================================");
             log.warn("INTRO 改写失败，回退到底稿, sessionId={}", session.getId(), e);
         } finally {
             recordIntroRewriteLiteAudit(session, selection.getVariantId(), rewriteSuccess,
@@ -120,9 +132,25 @@ public class FirstQuestionGenerationService {
                 aiResultStatus,
                 fallbackReason,
                 rewritePromptCode,
-                rewritePromptVersion
+                rewritePromptVersion,
+                interviewerArchetype
         );
-        interviewQuestionMapper.insert(question);
+        try {
+            interviewQuestionMapper.insert(question);
+        } catch (DuplicateKeyException ex) {
+            // 并发重入同一 session 初始化时，question_no=1 可能已被其他线程插入，回读已存在首题复用。
+            InterviewQuestion existing = interviewQuestionMapper.selectOne(
+                    new LambdaQueryWrapper<InterviewQuestion>()
+                            .eq(InterviewQuestion::getSessionId, session.getId())
+                            .eq(InterviewQuestion::getQuestionNo, 1)
+                            .last("LIMIT 1")
+            );
+            if (existing == null) {
+                throw ex;
+            }
+            question = existing;
+            log.warn("首题已存在，复用已有记录, sessionId={}, questionId={}", session.getId(), existing.getId());
+        }
 
         log.info("首题生成并保存成功, sessionId={}, questionId={}, rewritten={}",
                 session.getId(), question.getId(), rewritten);
@@ -137,22 +165,23 @@ public class FirstQuestionGenerationService {
                                                  String aiResultStatus,
                                                  String fallbackReason,
                                                  String rewritePromptCode,
-                                                 String rewritePromptVersion) {
+                                                 String rewritePromptVersion,
+                                                 String interviewerArchetype) {
         InterviewQuestion question = new InterviewQuestion();
         question.setSessionId(sessionId);
         question.setQuestionNo(questionNo);
         question.setQuestionType(INTRO_QUESTION_TYPE);
-        question.setDomainId(null);
+        question.setDomainCode(INTRO_DOMAIN_CODE);
         question.setStem(safePrompt(stem));
-        question.setTargetSkill(INTRO_TARGET_SKILL);
+        question.setFocusPoint(INTRO_FOCUS_POINT);
         question.setExpectedPoints(INTRO_EXPECTED_POINTS);
-        question.setTargetDepth(INTRO_TARGET_DEPTH);
         question.setStatus("asked");
 
         Map<String, Object> ctx = new LinkedHashMap<>();
         ctx.put("domainCode", INTRO_DOMAIN_CODE);
+        ctx.put("domainName", InterviewDomainDisplaySupport.resolveSpecialDomainName(INTRO_DOMAIN_CODE));
         ctx.put("questionType", INTRO_QUESTION_TYPE);
-        ctx.put("targetDepth", INTRO_TARGET_DEPTH);
+        ctx.put("focusPoint", INTRO_FOCUS_POINT);
         ctx.put("variantId", selection.getVariantId());
         ctx.put("basePromptText", selection.getBasePrompt());
         ctx.put("rewritten", rewritten);
@@ -161,6 +190,7 @@ public class FirstQuestionGenerationService {
         ctx.put("historyAvoidCount", selection.getHistoryAvoidCount());
         ctx.put("rewritePromptCode", rewritePromptCode);
         ctx.put("rewritePromptVersion", rewritePromptVersion);
+        ctx.put("interviewerArchetype", interviewerArchetype);
         question.setGenerationContextJson(ctx);
 
         question.setCreatedAt(LocalDateTime.now());

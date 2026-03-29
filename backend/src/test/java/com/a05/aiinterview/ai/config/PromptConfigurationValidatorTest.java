@@ -39,7 +39,7 @@ class PromptConfigurationValidatorTest {
                     assertThat(context.getStartupFailure())
                             .hasMessageContaining("intro_rewrite")
                             .hasMessageContaining("configured=v999")
-                            .hasMessageContaining("template=v1");
+                            .hasMessageContaining("template=v2");
                 });
     }
 

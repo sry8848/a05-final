@@ -1,7 +1,6 @@
 package com.a05.aiinterview.ai.contract;
 
 import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
-import com.a05.aiinterview.common.enums.DomainStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -9,17 +8,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * EvaluationDecision AI 输出 DTO 契约测试。
- *
- * <p>覆盖三条路径：
- * <ol>
- *   <li>正常输出 → 解析成功，{@code signal} 非空、{@code patch} 可应用、
- *       signal != END 时 {@code nextStrategy} 非空</li>
- *   <li>缺少必填字段 → 兜底默认值填入（signal 降级为 NEXT_DOMAIN、patch 填最小对象）</li>
- *   <li>字段类型漂移 → 异常捕获 + 降级逻辑触发（强制 END 信号）</li>
- * </ol>
- */
 @DisplayName("EvaluationDecision 契约测试")
 class EvaluationDecisionContractTest {
 
@@ -30,230 +18,208 @@ class EvaluationDecisionContractTest {
         validator = new AiOutputContractValidator(new ObjectMapper());
     }
 
-    // ─────────────────────── 路径1：正常输出 ────────────────────────────────
-
     @Test
-    @DisplayName("正常 NEXT_DOMAIN 信号 JSON → signal/patch/nextStrategy 均完整")
-    void normalOutput_nextDomain_shouldParseSuccessfully() {
+    @DisplayName("合法 CONTINUE 输出应保留新契约字段")
+    void continueOutput_shouldKeepNewSchemaFields() {
         String json = """
                 {
-                  "domainCode": "jvm",
-                  "depthReached": "L3",
-                  "saturated": true,
-                  "signal": "NEXT_DOMAIN",
-                  "patch": {
-                    "domainCode": "jvm",
-                    "domainId": 1,
-                    "currentDepth": "L3",
-                    "domainStatus": "COVERED",
-                    "saturated": true,
-                    "questionType": "PRINCIPLE"
-                  },
-                  "nextStrategy": {
-                    "nextDomainId": 2,
-                    "nextDomainCode": "concurrency",
-                    "nextDomainName": "并发编程",
-                    "questionType": "PRINCIPLE",
-                    "targetDepth": "L3",
-                    "focusPoint": "AQS 原理"
-                  },
-                  "reasoning": "JVM 知识域已充分覆盖，移入并发编程。"
+                  "decisionReason": "上一题回答具备继续追问的信息增益，因此进入项目链路验证真实工程深度。",
+                  "interviewAction": "CONTINUE",
+                  "finalDecision": "S_ENTER_PROJECT",
+                  "nextFocus": "Seata AT 事务边界落地",
+                  "targetDomainCode": "",
+                  "newCoveredDomains": [
+                    {
+                      "domainCode": "spring",
+                      "domainName": "Spring 框架"
+                    }
+                  ],
+                  "newCoveredPoints": [
+                    "Seata AT 模式下全局事务与本地事务的协同边界"
+                  ],
+                  "retrievalPlans": [
+                    {
+                      "goal": "补充 Seata AT 边界细节",
+                      "displayQuery": "Seata AT 边界",
+                      "queryText": "Seata AT 模式 本地事务边界 分支事务注册",
+                      "keywordHints": ["Seata", "AT", "分支事务注册"],
+                      "difficultyHint": "L4",
+                      "mustHaveClues": ["事务边界", "分支事务注册"],
+                      "avoidClues": ["通用微服务定义"]
+                    }
+                  ]
                 }
                 """;
 
         EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
 
-        assertThat(output).isNotNull();
-        assertThat(output.getSignal()).isEqualTo("NEXT_DOMAIN");
-        assertThat(output.getPatch()).isNotNull();
-        assertThat(output.getPatch().getDomainCode()).isEqualTo("jvm");
-        assertThat(output.getNextStrategy()).isNotNull();
-        assertThat(output.getNextStrategy().getNextDomainCode()).isEqualTo("concurrency");
+        assertThat(output.getInterviewAction()).isEqualTo("CONTINUE");
+        assertThat(output.getFinalDecision()).isEqualTo("S_ENTER_PROJECT");
+        assertThat(output.getNextFocus()).isEqualTo("Seata AT 事务边界落地");
+        assertThat(output.getTargetDomainCode()).isEmpty();
+        assertThat(output.getNextItemType()).isEmpty();
+        assertThat(output.getNextItemName()).isEmpty();
+        assertThat(output.getNextProjectPoint()).isEmpty();
+        assertThat(output.getNewCoveredDomains()).hasSize(1);
+        assertThat(output.getNewCoveredDomains().getFirst().getDomainCode()).isEqualTo("spring");
+        assertThat(output.getNewCoveredDomains().getFirst().getDomainName()).isEqualTo("Spring 框架");
+        assertThat(output.getNewCoveredPoints()).containsExactly("Seata AT 模式下全局事务与本地事务的协同边界");
+        assertThat(output.getRetrievalPlans()).hasSize(1);
+        assertThat(output.getRetrievalPlans().getFirst().getGoal()).isEqualTo("补充 Seata AT 边界细节");
+        assertThat(output.getRetrievalPlans().getFirst().getDisplayQuery()).isEqualTo("Seata AT 边界");
+        assertThat(output.getRetrievalPlans().getFirst().getQueryText()).contains("分支事务注册");
+        assertThat(output.getRetrievalPlans().getFirst().getKeywordHints()).containsExactly("Seata", "AT", "分支事务注册");
+        assertThat(output.getRetrievalPlans().getFirst().getDifficultyHint()).isEqualTo("L4");
+        assertThat(output.getRetrievalPlans().getFirst().getMustHaveClues()).containsExactly("事务边界", "分支事务注册");
+        assertThat(output.getRetrievalPlans().getFirst().getAvoidClues()).containsExactly("通用微服务定义");
     }
 
     @Test
-    @DisplayName("正常 END 信号 JSON → signal=END，nextStrategy 允许为 null")
-    void normalOutput_end_shouldAllowNullNextStrategy() {
+    @DisplayName("合法 WRAPUP 输出应清空下一题规划字段")
+    void wrapupOutput_shouldClearNextPlanFields() {
         String json = """
                 {
-                  "domainCode": "mysql",
-                  "depthReached": "L2",
-                  "saturated": false,
-                  "signal": "END",
-                  "patch": {
-                    "domainCode": "mysql",
-                    "domainId": 3,
-                    "currentDepth": "L2",
-                    "domainStatus": "COVERED",
-                    "saturated": false,
-                    "questionType": "SCENARIO"
-                  },
-                  "reasoning": "所有知识域均已覆盖，面试结束。"
+                  "decisionReason": "本场面试已经形成足够能力画像，可以结束。",
+                  "interviewAction": "WRAPUP",
+                  "finalDecision": "S_WRAPUP",
+                  "nextFocus": "不应保留",
+                  "targetDomainCode": "mysql",
+                  "newCoveredDomains": [],
+                  "newCoveredPoints": [],
+                  "retrievalPlans": [
+                    {
+                      "goal": "无效",
+                      "displayQuery": "无效",
+                      "queryText": "无效",
+                      "keywordHints": [],
+                      "difficultyHint": "",
+                      "mustHaveClues": [],
+                      "avoidClues": []
+                    }
+                  ]
                 }
                 """;
 
         EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
 
-        assertThat(output.getSignal()).isEqualTo("END");
-        // END 信号时 nextStrategy 为 null 是合法的
-        assertThat(output.getPatch()).isNotNull();
+        assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
+        assertThat(output.getFinalDecision()).isEqualTo("S_WRAPUP");
+        assertThat(output.getNextFocus()).isEmpty();
+        assertThat(output.getNextItemType()).isEmpty();
+        assertThat(output.getNextItemName()).isEmpty();
+        assertThat(output.getNextProjectPoint()).isEmpty();
+        assertThat(output.getTargetDomainCode()).isEmpty();
+        assertThat(output.getRetrievalPlans()).isEmpty();
     }
 
     @Test
-    @DisplayName("正常 DEEPEN 信号 JSON → nextStrategy 包含追问方向")
-    void normalOutput_deepen_shouldHaveNextStrategy() {
-        String json = """
+    @DisplayName("非法策略编码应降级为 WRAPUP")
+    void invalidStrategyCode_shouldFallbackToWrapup() {
+        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
                 {
-                  "signal": "DEEPEN",
-                  "patch": {
-                    "domainCode": "redis",
-                    "domainId": 4,
-                    "currentDepth": "L2",
-                    "domainStatus": "IN_PROGRESS",
-                    "saturated": false,
-                    "questionType": "PRINCIPLE"
-                  },
-                  "nextStrategy": {
-                    "nextDomainId": 4,
-                    "nextDomainCode": "redis",
-                    "nextDomainName": "Redis",
-                    "questionType": "SCENARIO",
-                    "targetDepth": "L3",
-                    "focusPoint": "缓存击穿场景处理"
-                  }
+                  "decisionReason": "测试非法策略编码。",
+                  "interviewAction": "CONTINUE",
+                  "finalDecision": "S_FAKE_CODE",
+                  "nextFocus": "缓存一致性",
+                  "targetDomainCode": "",
+                  "newCoveredDomains": [],
+                  "newCoveredPoints": [],
+                  "retrievalPlans": []
                 }
-                """;
+                """);
 
-        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
-
-        assertThat(output.getSignal()).isEqualTo("DEEPEN");
-        assertThat(output.getNextStrategy().getFocusPoint()).contains("缓存击穿");
+        assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
+        assertThat(output.getFinalDecision()).isEqualTo("S_WRAPUP");
     }
 
-    // ─────────────────────── 路径2：缺少必填字段 ─────────────────────────────
-
     @Test
-    @DisplayName("signal 为 null → 兜底为 NEXT_DOMAIN，不抛出异常")
-    void missingSignal_shouldFallbackToNextDomain() {
-        String json = """
+    @DisplayName("切换知识域缺少 targetDomainCode 应降级为 WRAPUP")
+    void switchDomainWithoutTargetDomain_shouldFallbackToWrapup() {
+        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
                 {
-                  "patch": {
-                    "domainCode": "jvm",
-                    "domainStatus": "IN_PROGRESS"
-                  },
-                  "nextStrategy": {
-                    "nextDomainCode": "concurrency",
-                    "nextDomainId": 2
-                  }
+                  "decisionReason": "当前域已经形成判断，应切换知识域。",
+                  "interviewAction": "CONTINUE",
+                  "finalDecision": "S_SWITCH_DOMAIN",
+                  "nextFocus": "分布式锁误删防御",
+                  "targetDomainCode": "",
+                  "newCoveredDomains": [],
+                  "newCoveredPoints": [],
+                  "retrievalPlans": []
                 }
-                """;
+                """);
 
-        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
-
-        assertThat(output.getSignal()).isNotNull().isNotBlank();
+        assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
+        assertThat(output.getFinalDecision()).isEqualTo("S_WRAPUP");
     }
 
     @Test
-    @DisplayName("patch 为 null → 填入最小 patch 兜底，不抛出异常")
-    void missingPatch_shouldFallbackToMinimalPatch() {
-        String json = """
+    @DisplayName("进入理论题缺少 targetDomainCode 应降级为 WRAPUP")
+    void enterPrincipleWithoutTargetDomain_shouldFallbackToWrapup() {
+        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
                 {
-                  "signal": "NEXT_DOMAIN",
-                  "domainCode": "jvm",
-                  "nextStrategy": {
-                    "nextDomainId": 2,
-                    "nextDomainCode": "concurrency"
-                  }
+                  "decisionReason": "项目真实性已初步判断，转入理论题补齐知识掌握。",
+                  "interviewAction": "CONTINUE",
+                  "finalDecision": "S_ENTER_PRINCIPLE",
+                  "nextFocus": "AQS 独占锁 state 语义",
+                  "targetDomainCode": "",
+                  "newCoveredDomains": [],
+                  "newCoveredPoints": [],
+                  "retrievalPlans": []
                 }
-                """;
+                """);
 
-        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
-
-        assertThat(output.getPatch()).isNotNull();
+        assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
+        assertThat(output.getFinalDecision()).isEqualTo("S_WRAPUP");
     }
 
     @Test
-    @DisplayName("signal=NEXT_DOMAIN 但 nextStrategy 为 null → 降级为 END 信号")
-    void missingNextStrategyForNextDomain_shouldDowngradeToEnd() {
-        String json = """
+    @DisplayName("newCoveredDomains 缺少合法编码应降级为 WRAPUP")
+    void newCoveredDomains_shouldUseDomainCode() {
+        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
                 {
-                  "signal": "NEXT_DOMAIN",
-                  "patch": {
-                    "domainCode": "jvm",
-                    "domainStatus": "COVERED"
-                  }
+                  "decisionReason": "当前 Redis 题已形成有效判断。",
+                  "interviewAction": "CONTINUE",
+                  "finalDecision": "S_P_VERIFY",
+                  "nextFocus": "缓存穿透过滤策略",
+                  "targetDomainCode": "",
+                  "newCoveredDomains": [
+                    {
+                      "domainName": "Redis 缓存"
+                    }
+                  ],
+                  "newCoveredPoints": [
+                    "缓存穿透基础方案"
+                  ],
+                  "retrievalPlans": []
                 }
-                """;
+                """);
 
-        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
-
-        assertThat(output.getSignal()).isEqualTo("END");
+        assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
+        assertThat(output.getFinalDecision()).isEqualTo("S_WRAPUP");
     }
 
     @Test
-    @DisplayName("完全空 JSON 对象 → 所有必填字段均兜底，signal 非空")
-    void emptyJsonObject_shouldFallbackAllRequiredFields() {
-        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("{}");
-
-        assertThat(output.getSignal()).isNotNull().isNotBlank();
-        assertThat(output.getPatch()).isNotNull();
-    }
-
-    // ─────────────────────── 路径3：字段类型漂移 ─────────────────────────────
-
-    @Test
-    @DisplayName("patch 为数组而非对象（类型漂移）→ 捕获异常，返回 END 降级对象")
-    void typeDrift_patchAsArray_shouldReturnFallback() {
-        String json = """
+    @DisplayName("project fields should survive legal continue output")
+    void projectFields_shouldSurviveLegalContinueOutput() {
+        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
                 {
-                  "signal": "NEXT_DOMAIN",
-                  "patch": ["wrong", "array"],
-                  "nextStrategy": {}
+                  "decisionReason": "当前应继续进入项目主线核实真实工程深度。",
+                  "interviewAction": "CONTINUE",
+                  "finalDecision": "S_ENTER_PROJECT",
+                  "nextFocus": "延迟消息与并发控制",
+                  "nextItemType": "PROJECT",
+                  "nextItemName": "Chabst",
+                  "nextProjectPoint": "RabbitMQ 延迟消息处理超时订单",
+                  "targetDomainCode": "",
+                  "newCoveredDomains": [],
+                  "newCoveredPoints": [],
+                  "retrievalPlans": []
                 }
-                """;
+                """);
 
-        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
-
-        assertThat(output).isNotNull();
-        assertThat(output.getSignal()).isNotNull();
-    }
-
-    @Test
-    @DisplayName("saturated 为字符串而非布尔值（类型漂移）→ 捕获异常，返回降级对象")
-    void typeDrift_saturatedAsString_shouldReturnFallback() {
-        String json = """
-                {
-                  "signal": "END",
-                  "saturated": "yes",
-                  "patch": { "domainCode": "jvm" }
-                }
-                """;
-
-        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
-
-        assertThat(output).isNotNull();
-        assertThat(output.getSignal()).isNotNull();
-    }
-
-    @Test
-    @DisplayName("非法 JSON 格式 → 捕获解析异常，返回强制 END 降级对象")
-    void invalidJson_shouldReturnFallbackWithEndSignal() {
-        String json = "{invalid}";
-
-        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
-
-        assertThat(output).isNotNull();
-        assertThat(output.getSignal()).isEqualTo("END");
-    }
-
-    // ─────────────────────── 直接调用 validate() ────────────────────────────
-
-    @Test
-    @DisplayName("validate(null) → 返回 END 降级对象，不抛出 NullPointerException")
-    void validateNull_shouldReturnFallbackWithEndSignal() {
-        EvaluationDecisionOutput output = validator.validateEvaluationDecision(null);
-
-        assertThat(output).isNotNull();
-        assertThat(output.getSignal()).isEqualTo("END");
+        assertThat(output.getInterviewAction()).isEqualTo("CONTINUE");
+        assertThat(output.getNextItemType()).isEqualTo("PROJECT");
+        assertThat(output.getNextItemName()).isEqualTo("Chabst");
+        assertThat(output.getNextProjectPoint()).isEqualTo("RabbitMQ 延迟消息处理超时订单");
     }
 }

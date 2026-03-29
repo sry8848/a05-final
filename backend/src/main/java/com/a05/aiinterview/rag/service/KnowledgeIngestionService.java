@@ -13,16 +13,14 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 知识文档入库服务。
  *
- * <p>负责将原始知识文档切片、标注 metadata，并批量写入 Qdrant VectorStore。
+ * <p>负责将单库题目卡片拼接为 retrieval_text、标注 metadata，并批量写入 Qdrant VectorStore。
  * 向量化（Embedding）由 Spring AI 的 {@link VectorStore#add} 内部调用 EmbeddingModel 完成，
  * 业务层无需感知 Embedding 细节。
- *
- * <p>切片策略：按空行（段落）分割，合并至约 {@code CHUNK_SIZE} 字符为一个片段，
- * 保证语义完整性的同时控制每片大小适合向量化。
  *
  * <p>仅当 {@code rag.enabled=true} 时激活，避免在未接入 Qdrant 时注入失败。
  */
@@ -32,8 +30,7 @@ import java.util.Map;
 @ConditionalOnProperty(name = "rag.enabled", havingValue = "true")
 public class KnowledgeIngestionService {
 
-    /** 每个文档片段的目标字符数（约 300~500 字，平衡语义完整与向量精度） */
-    private static final int CHUNK_SIZE = 400;
+    private static final int MAX_EMBEDDING_BATCH_SIZE = 10;
 
     private final VectorStore vectorStore;
     private final RagProperties ragProperties;
@@ -41,8 +38,8 @@ public class KnowledgeIngestionService {
     /**
      * 批量入库知识文档列表。
      *
-     * @param documents 待入库的知识文档列表，每个文档可包含多个段落
-     * @return 实际写入 Qdrant 的文档片段总数
+     * @param documents 待入库的题目卡片列表
+     * @return 实际写入 Qdrant 的文档总数
      */
     public int ingest(List<KnowledgeDocument> documents) {
         if (documents == null || documents.isEmpty()) {
@@ -54,83 +51,57 @@ public class KnowledgeIngestionService {
         List<Document> springAiDocs = new ArrayList<>();
 
         for (KnowledgeDocument doc : documents) {
-            List<String> chunks = splitIntoChunks(doc.getContent(), CHUNK_SIZE);
-            Map<String, Object> metadata = buildMetadata(doc);
-            for (String chunk : chunks) {
-                springAiDocs.add(new Document(chunk, metadata));
-            }
+            springAiDocs.add(new Document(stablePointId(doc), doc.toRetrievalText(), buildMetadata(doc)));
         }
 
-        vectorStore.add(springAiDocs);
-        log.info("知识入库完成, 原始文档数={}, 切片数={}", documents.size(), springAiDocs.size());
+        for (int start = 0; start < springAiDocs.size(); start += MAX_EMBEDDING_BATCH_SIZE) {
+            int end = Math.min(start + MAX_EMBEDDING_BATCH_SIZE, springAiDocs.size());
+            vectorStore.add(springAiDocs.subList(start, end));
+        }
+        log.info("知识入库完成, 原始文档数={}, 写入条数={}", documents.size(), springAiDocs.size());
         return springAiDocs.size();
     }
 
     /**
-     * 将单份文档内容按段落边界切片，合并到约 chunkSize 字符。
-     * 若整个文档小于 chunkSize，则整体作为一片。
-     *
-     * @param text      原始文档正文
-     * @param chunkSize 目标片段字符数
-     * @return 切片后的文本片段列表
-     */
-    private List<String> splitIntoChunks(String text, int chunkSize) {
-        List<String> chunks = new ArrayList<>();
-        if (text == null || text.isBlank()) {
-            return chunks;
-        }
-
-        // 按连续空行（段落）分割
-        String[] paragraphs = text.split("\\n{2,}");
-        StringBuilder current = new StringBuilder();
-
-        for (String para : paragraphs) {
-            String trimmed = para.trim();
-            if (trimmed.isEmpty()) continue;
-
-            // 当前缓冲已达到目标大小时，先将已积累内容作为一片
-            if (current.length() > 0 && current.length() + trimmed.length() > chunkSize) {
-                chunks.add(current.toString().trim());
-                current = new StringBuilder();
-            }
-            current.append(trimmed).append("\n\n");
-        }
-
-        if (!current.isEmpty()) {
-            chunks.add(current.toString().trim());
-        }
-
-        // 兜底：若段落无法切分则整体作为一片
-        if (chunks.isEmpty()) {
-            chunks.add(text.trim());
-        }
-        return chunks;
-    }
-
-    /**
      * 将 KnowledgeDocument 的字段映射为 Qdrant metadata 键值对。
-     * metadata 字段是检索过滤的核心依据，命名规范须与 RagRetrievalServiceImpl 中的过滤表达式一致。
+     * metadata 字段是检索过滤和后续重排的核心依据。
      *
      * @param doc 知识文档
      * @return 可直接传入 Spring AI Document 的 metadata Map
      */
     private Map<String, Object> buildMetadata(KnowledgeDocument doc) {
         Map<String, Object> meta = new LinkedHashMap<>();
-        meta.put("knowledge_type", nullSafe(doc.getKnowledgeType()));
+        meta.put("question_id", nullSafe(doc.getId()));
+        meta.put("question_text", nullSafe(doc.getQuestionText()));
+        meta.put("intent_concept", nullSafe(doc.getIntentConcept()));
+        meta.put("reference_context", nullSafe(doc.getReferenceContext()));
+        meta.put("scoring_key_points", List.copyOf(safeList(doc.getScoringKeyPoints())));
+        meta.put("scoring_pitfalls", List.copyOf(safeList(doc.getScoringPitfalls())));
         meta.put("domain_code", nullSafe(doc.getDomainCode()));
-        meta.put("position_code", nullSafe(doc.getPositionCode()));
+        meta.put("question_type", nullSafe(doc.getQuestionType()));
         meta.put("difficulty", nullSafe(doc.getDifficulty()));
+        meta.put("keywords", List.copyOf(safeList(doc.getKeywords())));
         meta.put("source", nullSafe(doc.getSource()));
-        if (doc.getQuestionType() != null) {
-            meta.put("question_type", doc.getQuestionType());
-        }
-        if (doc.getVersion() != null) {
-            meta.put("version", doc.getVersion());
-        }
+        meta.put("active", doc.isActive());
+        meta.put("version", nullSafe(doc.getVersion()));
+        meta.put("follow_up_ids", List.copyOf(safeList(doc.getFollowUpIds())));
         return meta;
+    }
+
+    private List<String> safeList(List<String> values) {
+        if (values == null) {
+            return List.of();
+        }
+        return values.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .toList();
     }
 
     private String nullSafe(String val) {
         return val != null ? val : "";
+    }
+
+    private String stablePointId(KnowledgeDocument doc) {
+        return UUID.nameUUIDFromBytes(nullSafe(doc.getId()).getBytes()).toString();
     }
 }

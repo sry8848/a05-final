@@ -11,8 +11,10 @@ import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.interview.service.InterviewSessionStatusService;
+import com.a05.aiinterview.interview.service.support.InterviewDomainDisplaySupport;
+import com.a05.aiinterview.interview.service.support.InterviewOverallScoreSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -27,7 +29,7 @@ import java.util.stream.Collectors;
  *
  * <p>触发时机：
  * <ol>
- *   <li>{@code AnswerSubmitService}检测到评估信号为 {@code END} 时自动调用</li>
+ *   <li>{@code AnswerSubmitService}检测到评估决策为 {@code wrapup} 时自动调用</li>
  *   <li>{@code InterviewController}的{@code POST /interviews/{sessionId}/finish} 手动触发</li>
  * </ol>
  *
@@ -54,10 +56,11 @@ public class ReportGenerationService {
     private final InterviewQuestionMapper interviewQuestionMapper;
     private final InterviewAttemptMapper interviewAttemptMapper;
     private final InterviewReportMapper interviewReportMapper;
+    private final InterviewSessionStatusService interviewSessionStatusService;
 
     /**
      * 异步生成面试报告。
-     * 由 AnswerSubmitService在 signal=END 时调用，或由 finish 接口手动触发。
+     * 由 AnswerSubmitService 在 decision=wrapup 时调用，或由 finish 接口手动触发。
      *
      * @param sessionId 面试会话 ID
      */
@@ -72,8 +75,8 @@ public class ReportGenerationService {
         }
 
         if (interviewReportMapper.selectBySessionId(sessionId) != null) {
-            log.info("报告已存在，跳过重复生成，直接更新状态, sessionId={}", sessionId);
-            ensureCompleted(sessionId);
+            log.info("报告已存在，跳过重复生成，转为同步状态, sessionId={}", sessionId);
+            interviewSessionStatusService.resolveAndSync(sessionId);
             return;
         }
 
@@ -92,7 +95,7 @@ public class ReportGenerationService {
                     .interviewId(session.getId())
                     .questionId(null)
                     .variantId(null)
-                    .positionCode(session.getTargetRole())
+                    .positionCode(session.getPositionCode())
                     .experienceLevel(session.getExperienceLevel())
                     .mode(session.getMode())
                     .sessionTitle(session.getTitle())
@@ -114,22 +117,18 @@ public class ReportGenerationService {
             InterviewReport report = buildReport(sessionId, output);
             interviewReportMapper.insert(report);
 
-            // 更新会话状态为 completed
-            interviewSessionMapper.update(null, new LambdaUpdateWrapper<InterviewSession>()
-                    .eq(InterviewSession::getId, sessionId)
-                    .set(InterviewSession::getStatus, "completed")
-                    .set(InterviewSession::getUpdatedAt, LocalDateTime.now()));
+            interviewSessionStatusService.resolveAndSync(sessionId);
 
-            log.info("报告生成完成, sessionId={}, overallScore={}, status=completed",
+            log.info("报告生成完成, sessionId={}, overallScore={}",
                     sessionId, report.getOverallScore());
 
         } catch (Exception e) {
             log.error("报告生成异常, sessionId={}", sessionId, e);
-            // 调用失败时保持状态为 report_generating，或改为 aborted 并通知用户重试
-            interviewSessionMapper.update(null, new LambdaUpdateWrapper<InterviewSession>()
-                    .eq(InterviewSession::getId, sessionId)
-                    .set(InterviewSession::getStatus, "report_generating")
-                    .set(InterviewSession::getUpdatedAt, LocalDateTime.now()));
+            InterviewSession update = new InterviewSession();
+            update.setId(sessionId);
+            update.setStatus("aborted");
+            update.setUpdatedAt(LocalDateTime.now());
+            interviewSessionMapper.updateById(update);
         }
     }
 
@@ -180,14 +179,13 @@ public class ReportGenerationService {
 
         return questions.stream().map(q -> {
             String domainCode = extractDomainCode(q);
-            String domainName = domainNameMap.getOrDefault(domainCode, domainCode);
+            String domainName = resolveDomainName(q, domainCode, domainNameMap);
             return ReportGenerationInput.QuestionAnswerPair.builder()
                     .questionId(q.getId())
                     .questionNo(q.getQuestionNo())
                     .questionType(q.getQuestionType())
                     .domainCode(domainCode)
                     .domainName(domainName)
-                    .targetDepth(q.getTargetDepth())
                     .stem(q.getStem())
                     .answerText(answerMap.get(q.getId()))
                     .expectedPoints(q.getExpectedPoints())
@@ -208,42 +206,68 @@ public class ReportGenerationService {
                         m.put("domainCode", s.getDomainCode());
                         m.put("domainName", s.getDomainName());
                         m.put("score", s.getScore());
-                        m.put("achievedDepth", s.getAchievedDepth());
                         m.put("commentary", s.getCommentary());
                         return m;
                     })
                     .collect(Collectors.toList());
         }
+        Map<String, Object> radarScoreMap = InterviewOverallScoreSupport.toRadarScoreMap(
+                output.getComprehensiveRadarScores()
+        );
 
         InterviewReport report = new InterviewReport();
         report.setSessionId(sessionId);
-        report.setOverallScore(output.getOverallScore());
+        report.setOverallScore(InterviewOverallScoreSupport.resolveOverallScore(output));
         report.setSummary(output.getSummary());
         report.setStrengths(output.getStrengths());
         report.setWeaknesses(output.getWeaknesses());
         report.setImprovementSuggestions(output.getImprovementSuggestions());
         report.setSkillDomainScores(domainScoreMaps);
+        report.setComprehensiveRadarScores(radarScoreMap);
         report.setCreatedAt(LocalDateTime.now());
         report.setUpdatedAt(LocalDateTime.now());
         return report;
     }
 
     /**
-     * 从题目的 generationContextJson 中取 domainCode，兜底返回 "intro"。
+     * 从题目快照中提取 domainCode；仅 INTRO 允许使用 intro 例外值。
      */
     private String extractDomainCode(InterviewQuestion q) {
-        if (q.getGenerationContextJson() == null) return "intro";
-        Object code = q.getGenerationContextJson().get("domainCode");
-        return (code instanceof String s && !s.isBlank()) ? s : "intro";
+        if (q == null) {
+            return "";
+        }
+        if (q.getGenerationContextJson() != null) {
+            Object code = q.getGenerationContextJson().get("domainCode");
+            if (code instanceof String s && !s.isBlank()) {
+                return s;
+            }
+        }
+        if (q.getDomainCode() != null && !q.getDomainCode().isBlank()) {
+            return q.getDomainCode();
+        }
+        return "INTRO".equalsIgnoreCase(q.getQuestionType()) ? "intro" : "";
     }
 
-    /** 确保会话状态为 completed（若已存在报告则补充更新状态）。 */
-    private void ensureCompleted(Long sessionId) {
-        interviewSessionMapper.update(null, new LambdaUpdateWrapper<InterviewSession>()
-                .eq(InterviewSession::getId, sessionId)
-                .ne(InterviewSession::getStatus, "completed")
-                .set(InterviewSession::getStatus, "completed")
-                .set(InterviewSession::getUpdatedAt, LocalDateTime.now()));
+    private String resolveDomainName(InterviewQuestion question,
+                                     String domainCode,
+                                     Map<String, String> domainNameMap) {
+        if (question != null && question.getGenerationContextJson() != null) {
+            Object rawDomainName = question.getGenerationContextJson().get("domainName");
+            if (rawDomainName instanceof String s && !s.isBlank()) {
+                return s;
+            }
+        }
+        if (domainCode != null && !domainCode.isBlank()) {
+            String syllabusDomainName = domainNameMap.get(domainCode);
+            if (syllabusDomainName != null && !syllabusDomainName.isBlank()) {
+                return syllabusDomainName;
+            }
+            String specialDomainName = InterviewDomainDisplaySupport.resolveSpecialDomainName(domainCode);
+            if (!specialDomainName.isBlank()) {
+                return specialDomainName;
+            }
+        }
+        return InterviewDomainDisplaySupport.resolveQuestionTypeLabel(
+                question == null ? null : question.getQuestionType());
     }
-
 }

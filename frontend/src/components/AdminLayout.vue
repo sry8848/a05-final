@@ -56,7 +56,7 @@
     </aside>
 
     <div class="profile-modal-overlay" v-if="showProfileModal" @click="showProfileModal = false">
-      <div class="profile-modal glass-card" @click.stop>
+      <div class="profile-modal modal-panel" @click.stop>
         <div class="modal-header">
           <h3>
             <i class="fas fa-user-cog"></i>
@@ -202,28 +202,39 @@
         <div class="header-right">
           <div class="header-stats">
             <div class="stat-item">
-              <i class="fas fa-users"></i>
-              <span>在线用户: {{ onlineUsers }}</span>
+              <i class="fas fa-user-tie"></i>
+              <span>当前管理员: {{ currentAdminName }}</span>
             </div>
             <div class="stat-item">
-              <i class="fas fa-server"></i>
-              <span>系统状态: 正常</span>
+              <i class="fas fa-clock"></i>
+              <span>最近刷新: {{ lastDashboardRefreshLabel }}</span>
             </div>
           </div>
           <div class="header-actions">
             <button class="action-btn" @click="toggleDarkMode">
               <i :class="isDarkMode ? 'fas fa-sun' : 'fas fa-moon'"></i>
             </button>
-            <button class="action-btn">
-              <i class="fas fa-bell"></i>
-              <span class="badge">3</span>
+            <button
+              v-if="currentPage === 'dashboard'"
+              class="action-btn refresh-btn"
+              :disabled="dashboardRefreshMeta.loading"
+              @click="refreshDashboard"
+            >
+              <i :class="dashboardRefreshMeta.loading ? 'fas fa-spinner fa-spin' : 'fas fa-sync-alt'"></i>
+              <span>{{ dashboardRefreshMeta.loading ? '刷新中' : '刷新' }}</span>
             </button>
           </div>
         </div>
       </header>
 
       <div class="admin-page-content">
-        <AdminDashboard v-if="currentPage === 'dashboard'" />
+        <AdminDashboard
+          v-if="currentPage === 'dashboard'"
+          :refreshNonce="dashboardRefreshNonce"
+          :currentAdminName="currentAdminName"
+          @refresh-meta="handleDashboardRefreshMeta"
+          @auth-expired="handleAuthExpired"
+        />
         <PromptLab v-else-if="currentPage === 'prompt'" />
         <ModelRouting v-else-if="currentPage === 'model'" />
         <RagManagement v-else-if="currentPage === 'rag'" />
@@ -235,13 +246,40 @@
 </template>
 
 <script>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import AdminDashboard from './AdminDashboard.vue'
 import PromptLab from './PromptLab.vue'
 import ModelRouting from './ModelRouting.vue'
 import RagManagement from './RagManagement.vue'
 import SystemMonitor from './SystemMonitor.vue'
 import DataAnalysis from './DataAnalysis.vue'
+
+function formatRefreshTime(value) {
+  if (!value) {
+    return '未刷新'
+  }
+
+  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
+  if (match) {
+    return `${match[1]} ${match[2]}`
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return '未刷新'
+  }
+
+  return date
+    .toLocaleString('zh-CN', {
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+    .replace(/\//g, '-')
+}
 
 export default {
   name: 'AdminLayout',
@@ -266,7 +304,11 @@ export default {
   emits: ['logout', 'toggleDarkMode'],
   setup(props, { emit }) {
     const currentPage = ref('dashboard')
-    const onlineUsers = ref(128)
+    const dashboardRefreshNonce = ref(0)
+    const dashboardRefreshMeta = ref({
+      lastRefreshedAt: null,
+      loading: false
+    })
     const showProfileModal = ref(false)
 
     const profileForm = ref({
@@ -307,6 +349,12 @@ export default {
       return item ? item.icon : 'fas fa-tachometer-alt'
     })
 
+    const currentAdminName = computed(() => props.user?.name || '管理员')
+
+    const lastDashboardRefreshLabel = computed(() => (
+      formatRefreshTime(dashboardRefreshMeta.value.lastRefreshedAt)
+    ))
+
     const navigateTo = (page) => {
       currentPage.value = page
     }
@@ -319,21 +367,46 @@ export default {
       emit('toggleDarkMode')
     }
 
+    const refreshDashboard = () => {
+      dashboardRefreshNonce.value += 1
+    }
+
+    const handleDashboardRefreshMeta = (meta) => {
+      dashboardRefreshMeta.value = {
+        ...dashboardRefreshMeta.value,
+        ...meta
+      }
+    }
+
+    const handleAuthExpired = () => {
+      emit('logout')
+    }
+
     const saveProfile = () => {
       console.log('Saving profile:', profileForm.value)
       console.log('Password change:', passwordForm.value)
       showProfileModal.value = false
     }
 
+    watch(() => props.user?.name, (name) => {
+      profileForm.value.username = name || 'admin'
+    }, { immediate: true })
+
     return {
       currentPage,
-      onlineUsers,
+      currentAdminName,
+      dashboardRefreshMeta,
+      dashboardRefreshNonce,
+      handleAuthExpired,
+      handleDashboardRefreshMeta,
       mainNavItems,
       systemNavItems,
       currentPageTitle,
       currentPageIcon,
+      lastDashboardRefreshLabel,
       navigateTo,
       handleLogout,
+      refreshDashboard,
       toggleDarkMode,
       showProfileModal,
       profileForm,
@@ -597,19 +670,20 @@ export default {
   color: var(--primary-color);
 }
 
-.action-btn .badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  width: 18px;
-  height: 18px;
-  background: #ef4444;
-  border-radius: 50%;
-  font-size: 10px;
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.action-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.refresh-btn {
+  width: auto;
+  padding: 0 14px;
+  gap: 8px;
+}
+
+.refresh-btn span {
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .admin-page-content {
@@ -638,13 +712,6 @@ export default {
   overflow-y: auto;
   border-radius: var(--radius-lg);
   padding: 0;
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-}
-
-:root.dark .profile-modal,
-.dark .profile-modal {
-  background: rgba(26, 26, 46, 0.98);
 }
 
 .modal-header {
@@ -652,7 +719,7 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 20px 24px;
-  border-bottom: 1px solid rgba(59, 89, 152, 0.2);
+  border-bottom: 1px solid var(--modal-surface-border);
 }
 
 .modal-header h3 {
@@ -661,13 +728,8 @@ export default {
   gap: 10px;
   font-size: 16px;
   font-weight: 600;
-  color: #1a1a2e;
+  color: var(--modal-text-primary);
   margin: 0;
-}
-
-:root.dark .modal-header h3,
-.dark .modal-header h3 {
-  color: #ffffff;
 }
 
 .modal-header h3 i {
@@ -682,14 +744,9 @@ export default {
   justify-content: center;
   border: none;
   background: transparent;
-  color: #4b5563;
+  color: var(--modal-text-secondary);
   cursor: pointer;
   border-radius: var(--radius-sm);
-}
-
-:root.dark .close-btn,
-.dark .close-btn {
-  color: #9ca3af;
 }
 
 .close-btn:hover {
@@ -737,12 +794,6 @@ export default {
   font-family: inherit;
 }
 
-:root.dark .change-avatar-btn,
-.dark .change-avatar-btn {
-  background: rgba(59, 89, 152, 0.2);
-  color: #8b9dc3;
-}
-
 .change-avatar-btn:hover {
   border-color: var(--primary-color);
   color: var(--primary-color);
@@ -767,12 +818,7 @@ export default {
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: #374151;
-}
-
-:root.dark .form-label,
-.dark .form-label {
-  color: #e5e7eb;
+  color: var(--modal-text-secondary);
 }
 
 .form-label i {
@@ -782,31 +828,19 @@ export default {
 
 .form-input {
   padding: 10px 14px;
-  background: rgba(59, 89, 152, 0.08);
-  border: 1px solid rgba(59, 89, 152, 0.2);
+  background: var(--modal-input-bg);
+  border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: var(--radius-sm);
   font-size: 14px;
-  color: #1f2937;
+  color: var(--modal-text-primary);
   font-family: inherit;
   transition: all 0.2s ease;
-}
-
-:root.dark .form-input,
-.dark .form-input {
-  background: rgba(59, 89, 152, 0.15);
-  border-color: rgba(59, 89, 152, 0.3);
-  color: #f3f4f6;
 }
 
 .form-input:focus {
   outline: none;
   border-color: var(--primary-color);
-  background: rgba(59, 89, 152, 0.12);
-}
-
-:root.dark .form-input:focus,
-.dark .form-input:focus {
-  background: rgba(59, 89, 152, 0.2);
+  background: #ffffff;
 }
 
 .form-input::placeholder {
@@ -815,14 +849,9 @@ export default {
 
 .password-section {
   padding: 20px;
-  background: rgba(59, 89, 152, 0.08);
+  background: var(--modal-section-bg);
   border-radius: var(--radius-md);
   margin-bottom: 24px;
-}
-
-:root.dark .password-section,
-.dark .password-section {
-  background: rgba(59, 89, 152, 0.15);
 }
 
 .section-title {
@@ -831,13 +860,8 @@ export default {
   gap: 8px;
   font-size: 14px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--modal-text-primary);
   margin-bottom: 16px;
-}
-
-:root.dark .section-title,
-.dark .section-title {
-  color: #f3f4f6;
 }
 
 .section-title i {
@@ -854,13 +878,8 @@ export default {
 
 .permissions-section {
   padding: 20px;
-  background: rgba(59, 89, 152, 0.08);
+  background: var(--modal-section-bg);
   border-radius: var(--radius-md);
-}
-
-:root.dark .permissions-section,
-.dark .permissions-section {
-  background: rgba(59, 89, 152, 0.15);
 }
 
 .permissions-list {
@@ -874,12 +893,7 @@ export default {
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: #374151;
-}
-
-:root.dark .permission-item,
-.dark .permission-item {
-  color: #d1d5db;
+  color: var(--modal-text-secondary);
 }
 
 .permission-item i {
@@ -892,7 +906,7 @@ export default {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 24px;
-  border-top: 1px solid rgba(59, 89, 152, 0.2);
+  border-top: 1px solid var(--modal-surface-border);
 }
 
 .cancel-btn {
@@ -901,26 +915,14 @@ export default {
   border: 1px solid rgba(59, 89, 152, 0.3);
   border-radius: var(--radius-sm);
   font-size: 14px;
-  color: #4b5563;
+  color: var(--modal-text-secondary);
   cursor: pointer;
   font-family: inherit;
 }
 
-:root.dark .cancel-btn,
-.dark .cancel-btn {
-  color: #9ca3af;
-  border-color: rgba(59, 89, 152, 0.4);
-}
-
 .cancel-btn:hover {
   border-color: #4b5563;
-  color: #1f2937;
-}
-
-:root.dark .cancel-btn:hover,
-.dark .cancel-btn:hover {
-  border-color: #9ca3af;
-  color: #f3f4f6;
+  color: var(--modal-text-primary);
 }
 
 .save-btn {

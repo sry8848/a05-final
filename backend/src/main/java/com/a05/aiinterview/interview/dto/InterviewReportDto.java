@@ -1,5 +1,6 @@
 package com.a05.aiinterview.interview.dto;
 
+import com.a05.aiinterview.common.dto.RadarDimensionScoreDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -23,6 +24,12 @@ public class InterviewReportDto {
     @Schema(description = "面试会话 ID", example = "2001")
     private Long sessionId;
 
+    @Schema(description = "岗位编码", example = "JAVA_BACKEND")
+    private String positionCode;
+
+    @Schema(description = "面试模式", example = "professional")
+    private String mode;
+
     @Schema(description = "报告生成状态：generating / ready", example = "ready")
     private String reportStatus;
 
@@ -44,8 +51,14 @@ public class InterviewReportDto {
     @Schema(description = "推荐练习知识点列表（可为 null）")
     private List<String> recommendedTopics;
 
+    @Schema(description = "综合能力雷达，仅专业模式返回")
+    private List<RadarDimensionScoreDto> comprehensiveRadarScores;
+
     @Schema(description = "逐知识域评分明细")
     private List<SkillDomainScoreDto> skillDomainScores;
+
+    @Schema(description = "题目轻量摘要列表")
+    private List<QuestionSummaryDto> questions;
 
     @Schema(description = "报告生成时间")
     private LocalDateTime createdAt;
@@ -68,10 +81,35 @@ public class InterviewReportDto {
         @Schema(description = "该知识域得分（0~100）", example = "80.0")
         private BigDecimal score;
 
-        @Schema(description = "实际达到的深度等级", example = "L3")
-        private String achievedDepth;
-
         @Schema(description = "AI 定性点评")
+        private String commentary;
+    }
+
+    // ────────────────────────────────────────────
+
+    /**
+     * 报告页题目轻量摘要 DTO。
+     */
+    @Data
+    @Schema(description = "题目轻量摘要")
+    public static class QuestionSummaryDto {
+
+        @Schema(description = "题目 ID", example = "9001")
+        private Long questionId;
+
+        @Schema(description = "题号", example = "1")
+        private Integer questionNo;
+
+        @Schema(description = "题干")
+        private String questionStem;
+
+        @Schema(description = "作答状态：answered / skipped / pending", example = "answered")
+        private String status;
+
+        @Schema(description = "单题分数（可为空）", example = "82.5")
+        private BigDecimal score;
+
+        @Schema(description = "单题点评（可为空）")
         private String commentary;
     }
 
@@ -96,6 +134,26 @@ public class InterviewReportDto {
         dto.setImprovementSuggestions(report.getImprovementSuggestions());
         dto.setRecommendedTopics(report.getRecommendedTopics());
         dto.setCreatedAt(report.getCreatedAt());
+        if (report.getComprehensiveRadarScores() != null) {
+            Object dimensionsObj = report.getComprehensiveRadarScores().get("dimensions");
+            if (dimensionsObj instanceof List<?> dimensions) {
+                List<RadarDimensionScoreDto> radarScores = dimensions.stream()
+                        .filter(Map.class::isInstance)
+                        .map(Map.class::cast)
+                        .map(m -> {
+                            RadarDimensionScoreDto scoreDto = new RadarDimensionScoreDto();
+                            scoreDto.setDimensionKey((String) m.get("dimensionKey"));
+                            scoreDto.setDimensionName((String) m.get("dimensionName"));
+                            Object score = m.get("score");
+                            if (score instanceof Number n) {
+                                scoreDto.setScore(BigDecimal.valueOf(n.doubleValue()));
+                            }
+                            return scoreDto;
+                        })
+                        .toList();
+                dto.setComprehensiveRadarScores(radarScores);
+            }
+        }
 
         // 将 List<Map<String, Object>> 反序列化为 SkillDomainScoreDto 列表
         if (report.getSkillDomainScores() != null) {
@@ -108,7 +166,6 @@ public class InterviewReportDto {
                         if (score instanceof Number n) {
                             s.setScore(BigDecimal.valueOf(n.doubleValue()));
                         }
-                        s.setAchievedDepth((String) m.get("achievedDepth"));
                         s.setCommentary((String) m.get("commentary"));
                         return s;
                     })
@@ -128,6 +185,13 @@ public class InterviewReportDto {
         InterviewReportDto dto = new InterviewReportDto();
         dto.setSessionId(sessionId);
         dto.setReportStatus("generating");
+        return dto;
+    }
+
+    public static InterviewReportDto failed(Long sessionId) {
+        InterviewReportDto dto = new InterviewReportDto();
+        dto.setSessionId(sessionId);
+        dto.setReportStatus("failed");
         return dto;
     }
 }

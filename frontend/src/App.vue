@@ -36,9 +36,18 @@
       <QuestionDetailPage
         v-if="showQuestionDetail"
         :detail="selectedQuestionDetail"
+        :loading="questionDetailLoading"
         @back="handleCloseQuestionDetail"
         @collect="handleCollectQuestion"
         @navigateQuestion="handleNavigateQuestionDetail"
+      />
+      <InterviewReportGeneratingPage
+        v-else-if="showReportGeneratingPage"
+        :status="reportGeneratingStatus"
+        :jobName="reportGeneratingJobName"
+        @goHistory="handleGeneratingGoHistory"
+        @refreshStatus="handleGeneratingRefreshStatus"
+        @restart="handleGeneratingRestart"
       />
       <InterviewResultPage 
         v-else-if="showResultPage"
@@ -55,18 +64,12 @@
         v-else-if="showScoreTrendPage"
         @goBack="showScoreTrendPage = false"
       />
-      <InterviewDetailPage 
-        v-else-if="showInterviewDetail"
-        :recordId="selectedRecordId"
-        @goBack="showInterviewDetail = false"
-        @retry="handleRetryInterview"
-        @showQuestionDetail="handleShowQuestionDetailFromRecord"
-      />
       <div v-else class="main-container" :class="{ 'interview-fullscreen': isInterviewRunning }">
         <Sidebar 
           v-show="!isInterviewRunning"
           :currentPage="currentPage" 
           :user="user"
+          :historyHasUnread="historyHasUnread"
           @navigate="navigateTo"
           @logout="handleLogout"
         />
@@ -85,7 +88,11 @@
             @interviewStart="isInterviewRunning = true"
             @interviewEnd="handleInterviewEnd"
           />
-          <HistoryPage v-else-if="currentPage === 'history'" @goToQuestionBank="openQuestionBank" @showInterviewDetail="handleShowInterviewDetail" />
+          <HistoryPage
+            v-else-if="currentPage === 'history'"
+            @goToQuestionBank="openQuestionBank"
+            @showInterviewDetail="handleShowInterviewDetail"
+          />
           <QuestionBankPage
             v-else-if="currentPage === 'questionBank'"
             @showDetail="handleShowQuestionDetailFromBank"
@@ -125,11 +132,39 @@ import QuestionBankPage from './components/QuestionBankPage.vue'
 import GrowthCenterPage from './components/GrowthCenterPage.vue'
 import RadarChartPage from './components/RadarChartPage.vue'
 import ScoreTrendPage from './components/ScoreTrendPage.vue'
-import InterviewDetailPage from './components/InterviewDetailPage.vue'
 import QuestionDetailPage from './components/QuestionDetailPage.vue'
+import InterviewReportGeneratingPage from './components/InterviewReportGeneratingPage.vue'
 import AdminLoginPage from './components/AdminLoginPage.vue'
 import AdminLayout from './components/AdminLayout.vue'
 import ResumesPage from './components/ResumesPage.vue'
+import {
+  getCurrentAdmin,
+  getCurrentUser,
+  logoutAdmin,
+  logoutUser
+} from './api/auth'
+import { createQuestionBankItem, getInterviewQuestionDetail, getInterviewReport } from './api/resume'
+import {
+  applyReadyReportToInterviewRecord,
+  normalizeStoredInterviewRecord,
+  normalizeDisplayReportStatus,
+  upsertReadyInterviewRecord
+} from './utils/growthHistoryState'
+import {
+  resolveLogoutViewState,
+  resolveUserLoginViewState
+} from './utils/authViewState'
+import { normalizeHighlightedAnnotations } from './utils/questionDetailAnnotationRender'
+import {
+  ADMIN_TOKEN_KEY,
+  USER_TOKEN_KEY,
+  clearPersistedAuthSession,
+  persistAdminSession,
+  persistUserSession,
+  restoreAuthSession
+} from './utils/authSession'
+import { mergeInterviewResultWithReport as mergeResultWithReport } from './utils/interviewResultState'
+import { withQuestionRedoState } from './utils/questionRedoState'
 
 export default {
   name: 'App',
@@ -147,8 +182,8 @@ export default {
     GrowthCenterPage,
     RadarChartPage,
     ScoreTrendPage,
-    InterviewDetailPage,
     QuestionDetailPage,
+    InterviewReportGeneratingPage,
     AdminLoginPage,
     AdminLayout
   },
@@ -162,17 +197,32 @@ export default {
     const isInterviewRunning = ref(false)
     const interviewPage = ref(null)
     const showResultPage = ref(false)
+    const showReportGeneratingPage = ref(false)
+    const reportGeneratingStatus = ref('generating')
+    const reportGeneratingJobName = ref('本场面试')
+    const pendingGeneratingResult = ref(null)
+    const pendingGeneratingSessionId = ref(null)
+    const resultEntrySource = ref('live')
+    const historyHasUnread = ref(false)
     const interviewResult = ref(null)
     const showRadarPage = ref(false)
     const showScoreTrendPage = ref(false)
-    const showInterviewDetail = ref(false)
     const showQuestionDetail = ref(false)
-    const selectedRecordId = ref(null)
+    const questionDetailLoading = ref(false)
     const selectedQuestionDetail = ref(null)
     const questionDetailContext = ref(null)
+    const questionDetailRequestSeq = ref(0)
+    const INTERVIEW_RECORDS_KEY = 'interviewRecords'
+    const INTERVIEW_RECORDS_UPDATED_EVENT = 'interview-records-updated'
+    const HISTORY_UNREAD_DOT_KEY = 'historyUnreadDot'
+    const REPORT_POLL_INTERVAL_MS = 3000
+    const pollingSessionLocks = new Set()
+    let reportPollingTimer = null
     
     const user = reactive({
       name: '面试者',
+      email: '',
+      avatarUrl: '',
       level: 'Lv.1 初级工程师',
       totalInterviews: 12,
       avgScore: 85,
@@ -194,6 +244,181 @@ export default {
       }
       return icons[notification.type] || icons.info
     })
+
+    const emitInterviewRecordsUpdated = () => {
+      if (typeof window === 'undefined') return
+      window.dispatchEvent(new CustomEvent(INTERVIEW_RECORDS_UPDATED_EVENT))
+    }
+
+    const normalizeStoredRecord = (record) => normalizeStoredInterviewRecord(record)
+
+    const readInterviewRecords = () => {
+      try {
+        const raw = localStorage.getItem(INTERVIEW_RECORDS_KEY)
+        const parsed = raw ? JSON.parse(raw) : []
+        if (!Array.isArray(parsed)) return []
+        const normalized = parsed.map(normalizeStoredRecord)
+        if (JSON.stringify(normalized) !== JSON.stringify(parsed)) {
+          localStorage.setItem(INTERVIEW_RECORDS_KEY, JSON.stringify(normalized))
+        }
+        return normalized
+      } catch (error) {
+        return []
+      }
+    }
+
+    const writeInterviewRecords = (records) => {
+      localStorage.setItem(INTERVIEW_RECORDS_KEY, JSON.stringify(records))
+      emitInterviewRecordsUpdated()
+    }
+
+    const normalizeReportStatus = (value) => normalizeDisplayReportStatus(value)
+
+    const setHistoryUnreadFlag = (value) => {
+      const normalized = !!value
+      historyHasUnread.value = normalized
+      localStorage.setItem(HISTORY_UNREAD_DOT_KEY, normalized ? '1' : '0')
+    }
+
+    const clearHistoryUnreadFlag = () => {
+      setHistoryUnreadFlag(false)
+    }
+
+    const normalizeQuestionNo = (value) => {
+      const numeric = Number(value)
+      if (!Number.isInteger(numeric) || numeric <= 0) return null
+      return numeric
+    }
+
+    const normalizeQuestionStatus = (value) => {
+      const normalized = String(value || '').trim().toLowerCase()
+      if (['answered', 'skipped', 'pending'].includes(normalized)) {
+        return normalized
+      }
+      return 'pending'
+    }
+
+    const normalizeNullableScore = (value) => {
+      if (value == null || value === '') return null
+      const numeric = Number(value)
+      if (!Number.isFinite(numeric)) return null
+      return numeric
+    }
+
+    const deriveLocalAnswerStatus = (item) => {
+      if (hasOwn(item, 'status')) {
+        return normalizeQuestionStatus(item.status)
+      }
+      const answerText = String(item?.answer ?? item?.userAnswer ?? '')
+      if (!answerText) return 'pending'
+      if (answerText === '[跳过]' || answerText === '[skip]') return 'skipped'
+      return 'answered'
+    }
+
+    const applyReadyReportToRecord = (record, report) =>
+      applyReadyReportToInterviewRecord(record, report)
+
+    const applyFailedReportToRecord = (record) => {
+      const updated = { ...record }
+      updated.reportStatus = 'failed'
+      updated.reportFailedAt = new Date().toISOString()
+      updated.report = null
+      updated.syncStatus = 'report_failed'
+      return updated
+    }
+
+    const finalizeGeneratingResult = (report) => {
+      const records = upsertReadyInterviewRecord(
+        readInterviewRecords(),
+        pendingGeneratingResult.value,
+        report
+      )
+      writeInterviewRecords(records.slice(0, 50))
+      interviewResult.value = mergeResultWithReport(pendingGeneratingResult.value || {}, report || {})
+      showReportGeneratingPage.value = false
+      reportGeneratingStatus.value = 'generating'
+      pendingGeneratingResult.value = null
+      pendingGeneratingSessionId.value = null
+      showResultPage.value = true
+      showNotification('面试报告已生成', 'success')
+    }
+
+    const pollGeneratingReports = async () => {
+      if (!isLoggedIn.value || isAdmin.value) return
+
+      const records = readInterviewRecords()
+      if (!records.length) return
+
+      let changed = false
+      let shouldSetHistoryUnread = false
+      let reportForGeneratingPage = null
+
+      for (let index = 0; index < records.length; index += 1) {
+        const record = records[index]
+        const status = normalizeReportStatus(record?.reportStatus)
+        if (status !== 'generating') continue
+
+        const sessionId = normalizeSessionId(record?.sessionId)
+        if (!sessionId) continue
+
+        if (pollingSessionLocks.has(sessionId)) continue
+        pollingSessionLocks.add(sessionId)
+        try {
+          const report = await getInterviewReport(sessionId)
+          if (report?.reportStatus === 'ready') {
+            records[index] = applyReadyReportToRecord(record, report)
+            changed = true
+            const isCurrentGeneratingSession =
+              showReportGeneratingPage.value
+              && normalizeSessionId(pendingGeneratingSessionId.value) === sessionId
+            if (currentPage.value !== 'history' && !isCurrentGeneratingSession) {
+              shouldSetHistoryUnread = true
+            }
+            if (showReportGeneratingPage.value && normalizeSessionId(pendingGeneratingSessionId.value) === sessionId) {
+              reportForGeneratingPage = report
+            }
+          } else if (report?.reportStatus === 'failed') {
+            records[index] = applyFailedReportToRecord(record)
+            changed = true
+            if (currentPage.value !== 'history') {
+              shouldSetHistoryUnread = true
+            }
+            if (showReportGeneratingPage.value && normalizeSessionId(pendingGeneratingSessionId.value) === sessionId) {
+              reportGeneratingStatus.value = 'failed'
+            }
+          }
+        } catch (error) {
+          console.warn('[App] poll report failed', { sessionId, error })
+        } finally {
+          pollingSessionLocks.delete(sessionId)
+        }
+      }
+
+      if (changed) {
+        writeInterviewRecords(records)
+      }
+      if (shouldSetHistoryUnread && currentPage.value !== 'history') {
+        setHistoryUnreadFlag(true)
+      }
+      if (reportForGeneratingPage && showReportGeneratingPage.value) {
+        finalizeGeneratingResult(reportForGeneratingPage)
+      }
+    }
+
+    const startReportPolling = () => {
+      if (reportPollingTimer) return
+      reportPollingTimer = setInterval(() => {
+        pollGeneratingReports().catch((error) => {
+          console.warn('[App] report polling failed', error)
+        })
+      }, REPORT_POLL_INTERVAL_MS)
+    }
+
+    const stopReportPolling = () => {
+      if (!reportPollingTimer) return
+      clearInterval(reportPollingTimer)
+      reportPollingTimer = null
+    }
 
     const mapModeLabel = (mode) => {
       if (mode === 'practice') return '练习模式'
@@ -225,71 +450,6 @@ export default {
       return index === 0 ? '开场题' : '综合题'
     }
 
-    const inferTargetDepth = (score = 0, questionIndex = 0) => {
-      if (score >= 85) return 'L4'
-      if (score >= 70) return 'L3'
-      if (questionIndex >= 3) return 'L3'
-      return 'L2'
-    }
-
-    const buildHighlightedSegments = (answerText = '', keywords = [], score = 0) => {
-      if (!answerText || answerText === '[跳过]') return []
-
-      const normalized = answerText.trim()
-      const lowerText = normalized.toLowerCase()
-      const matches = keywords
-        .map((keyword) => {
-          const start = lowerText.indexOf(String(keyword).toLowerCase())
-          return start >= 0 ? { keyword, start, end: start + keyword.length } : null
-        })
-        .filter(Boolean)
-        .sort((a, b) => a.start - b.start)
-        .filter((match, index, array) => {
-          if (index === 0) return true
-          return match.start >= array[index - 1].end
-        })
-
-      if (matches.length === 0) {
-        return [
-          {
-            text: normalized,
-            type: score >= 60 ? 'normal' : 'weakness',
-            note: score >= 60 ? '' : '可以补充更多关键概念和业务细节。'
-          }
-        ]
-      }
-
-      const segments = []
-      let cursor = 0
-
-      matches.forEach((match) => {
-        if (match.start > cursor) {
-          segments.push({
-            text: normalized.slice(cursor, match.start),
-            type: 'normal'
-          })
-        }
-
-        segments.push({
-          text: normalized.slice(match.start, match.end),
-          type: 'strength',
-          note: `命中了关键词「${match.keyword}」`
-        })
-
-        cursor = match.end
-      })
-
-      if (cursor < normalized.length) {
-        segments.push({
-          text: normalized.slice(cursor),
-          type: score < 60 ? 'weakness' : 'normal',
-          note: score < 60 ? '这一段还可以补充推导过程或案例。' : ''
-        })
-      }
-
-      return segments
-    }
-
     const buildAnswerOutline = (questionText = '', keywords = []) => {
       const focusKeyword = keywords[0] || '核心原理'
       return [
@@ -305,52 +465,145 @@ export default {
       return `如果我重新回答这题，我会先明确题目考察的是${domainName}，再围绕${keyPhrase}分点展开。随后我会结合真实项目说明这些知识点在业务中的使用方式、收益和边界，最后补充常见误区与优化思路，让回答既有原理也有实践。`
     }
 
-    const buildCommentary = (answer, domainName) => {
-      if (answer.score >= 85) return `你对${domainName}的核心知识掌握较好，回答结构完整，已经具备较强复盘价值。`
-      if (answer.score >= 70) return `你已经覆盖了${domainName}的主要内容，但还可以继续补充原理深度和项目细节。`
-      if (answer.score >= 60) return `回答方向基本正确，但在${domainName}上的表达还不够充分，建议加强结构化输出。`
-      return `当前回答没有充分体现${domainName}的关键考点，建议优先补强核心概念、流程和应用场景。`
+    const hasFormalQuestionEvaluation = (value) => {
+      if (!value || typeof value !== 'object') return false
+      if (normalizeNullableScore(value.score) != null) return true
+      const commentary = String(value.commentary ?? value.analysis ?? '').trim()
+      if (commentary) return true
+      return ['strengthPoints', 'weakPoints', 'evaluatedDomains', 'highlightedSegments', 'highlightedAnnotations'].some((key) => (
+        Array.isArray(value[key]) && value[key].length > 0
+      ))
     }
 
-    const buildStrengthPoints = (answer, keywords = []) => {
-      const points = []
-      if (answer.score >= 80) points.push('回答整体结构清晰，具备较好的复盘基础。')
-      if (answer.answer && answer.answer !== '[跳过]' && answer.answer.length >= 40) {
-        points.push('回答信息量较足，没有停留在一句话式作答。')
-      }
-      if (keywords.length > 0) {
-        points.push(`命中了关键词：${keywords.slice(0, 2).join('、')}。`)
-      }
-      return points.slice(0, 3)
+    const normalizeStringArray = (value) => {
+      if (!Array.isArray(value)) return []
+      return value
+        .map((item) => String(item ?? '').trim())
+        .filter(Boolean)
     }
 
-    const buildWeakPoints = (answer, keywords = []) => {
-      const points = []
-      if (!answer.answer || answer.answer === '[跳过]') {
-        points.push('本题未作答，建议优先补齐基础答题框架。')
+    const normalizeSessionId = (value) => {
+      if (value == null) return null
+      const normalized = String(value).trim()
+      return normalized ? normalized : null
+    }
+
+    const normalizeQuestionId = (value) => {
+      if (value == null) return null
+      const normalized = String(value).trim()
+      return normalized ? normalized : null
+    }
+
+    const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key)
+
+    const normalizeEvaluationStatus = (value) => {
+      if (value == null) return 'pending'
+      const normalized = String(value).trim().toLowerCase()
+      if (['pending', 'generating', 'ready', 'failed'].includes(normalized)) {
+        return normalized
       }
-      if (answer.score < 80) {
-        const missingKeywords = keywords.filter((keyword) => !String(answer.answer || '').toLowerCase().includes(String(keyword).toLowerCase()))
-        if (missingKeywords.length > 0) {
-          points.push(`可继续补充：${missingKeywords.slice(0, 2).join('、')}。`)
+      return 'pending'
+    }
+
+    const mapBackendHighlightedSegments = (segments = []) => {
+      if (!Array.isArray(segments)) return []
+      return segments
+        .map((item) => {
+          if (!item || typeof item !== 'object') return null
+          const segment = String(item.segment ?? '').trim()
+          if (!segment) return null
+          const labelRaw = String(item.label ?? '').trim().toLowerCase()
+          const label = labelRaw === 'weakness' ? 'weakness' : 'strength'
+          const comment = String(item.comment ?? '').trim()
+          return { segment, label, comment }
+        })
+        .filter(Boolean)
+    }
+
+    const mapBackendHighlightedAnnotations = (annotations = []) => normalizeHighlightedAnnotations(annotations)
+
+    const mergeQuestionDetailFromBackend = (fallbackDetail, backendDetail) => {
+      const merged = { ...(fallbackDetail || {}) }
+      const source = (backendDetail && typeof backendDetail === 'object') ? backendDetail : null
+      if (!source) {
+        return withQuestionRedoState(merged, { requested: Boolean(merged.redoRequested) })
+      }
+
+      // 核心字段以后端为准（包括 null），避免本地同名字段回写覆盖。
+      if (hasOwn(source, 'questionId')) merged.questionId = normalizeQuestionId(source.questionId)
+      if (hasOwn(source, 'questionNo')) merged.questionNumber = normalizeQuestionNo(source.questionNo)
+      if (hasOwn(source, 'questionStem')) merged.questionStem = source.questionStem
+      if (hasOwn(source, 'domainName')) merged.domainName = source.domainName
+      if (hasOwn(source, 'questionType')) merged.questionType = source.questionType
+      if (hasOwn(source, 'userAnswer')) merged.userAnswer = source.userAnswer
+      if (hasOwn(source, 'answerStatus')) {
+        merged.answerStatus = source.answerStatus == null ? null : normalizeQuestionStatus(source.answerStatus)
+      }
+      if (hasOwn(source, 'evaluationStatus')) {
+        merged.evaluationStatus = normalizeEvaluationStatus(source.evaluationStatus)
+      }
+      if (hasOwn(source, 'score')) merged.score = source.score
+      if (hasOwn(source, 'commentary')) merged.commentary = source.commentary
+      if (hasOwn(source, 'rewrittenAnswer')) merged.rewrittenAnswer = source.rewrittenAnswer
+
+      // 非核心字段：仅在后端给出时更新；缺失时保留本地派生值。
+      if (hasOwn(source, 'strengthPoints')) merged.strengthPoints = source.strengthPoints
+      if (hasOwn(source, 'weakPoints')) merged.weakPoints = source.weakPoints
+      if (hasOwn(source, 'evaluatedDomains')) merged.evaluatedDomains = source.evaluatedDomains
+      if (hasOwn(source, 'idealAnswerOutline')) merged.idealAnswerOutline = source.idealAnswerOutline
+      if (hasOwn(source, 'highlightedSegments')) {
+        merged.highlightedSegments = mapBackendHighlightedSegments(source.highlightedSegments)
+      }
+      if (hasOwn(source, 'highlightedAnnotations')) {
+        merged.highlightedAnnotations = mapBackendHighlightedAnnotations(source.highlightedAnnotations)
+      }
+      if (hasOwn(source, 'backfillFromLocalAllowed')) {
+        merged.backfillFromLocalAllowed = source.backfillFromLocalAllowed
+      }
+
+      return withQuestionRedoState(merged, { requested: Boolean(merged.redoRequested) })
+    }
+
+    const hydrateQuestionDetailFromBackend = async (baseDetail) => {
+      if (!baseDetail) return
+      if (!baseDetail.sessionId || !baseDetail.questionId) return
+
+      const requestSeq = ++questionDetailRequestSeq.value
+      questionDetailLoading.value = true
+      try {
+        const backendDetail = await getInterviewQuestionDetail(baseDetail.sessionId, baseDetail.questionId)
+        if (requestSeq !== questionDetailRequestSeq.value) return
+        selectedQuestionDetail.value = mergeQuestionDetailFromBackend(baseDetail, backendDetail)
+      } catch (error) {
+        if (requestSeq !== questionDetailRequestSeq.value) return
+        console.warn('加载后端单题详情失败，回退本地详情：', error)
+      } finally {
+        if (requestSeq === questionDetailRequestSeq.value) {
+          questionDetailLoading.value = false
         }
       }
-      if (answer.score < 60) {
-        points.push('建议加强答题结构，先定义概念，再讲原理，最后结合场景。')
-      }
-      return points.slice(0, 3)
+    }
+
+    const openQuestionDetail = async (detail, context) => {
+      selectedQuestionDetail.value = detail
+      questionDetailContext.value = context
+      showQuestionDetail.value = true
+      await hydrateQuestionDetailFromBackend(detail)
     }
 
     const isQuestionCollected = (recordId, questionId) => {
       try {
         const bank = JSON.parse(localStorage.getItem('questionBank') || '[]')
-        return bank.some((item) => item.recordId === recordId && item.questionId === questionId)
+        return bank.some((item) => {
+          const itemQuestionKey = item.localQuestionKey || item.questionId || item.id
+          return item.recordId === recordId && itemQuestionKey === questionId
+        })
       } catch (error) {
         return false
       }
     }
 
-    const buildQuestionDetailViewModel = ({ source, record, result, questionIndex }) => {
+    const buildQuestionDetailViewModel = ({ source, record, result, questionIndex, sessionId = null, questionId = null }) => {
       const questionList = record?.answers || result?.answers || []
       const answer = questionList[questionIndex]
       if (!answer) return null
@@ -358,74 +611,167 @@ export default {
       const recordId = record?.id || `result-${questionIndex}`
       const jobName = record?.job || result?.jobName || '模拟面试'
       const modeLabel = mapModeLabel(record?.mode || result?.interviewMode)
-      const domainName = inferDomainName(answer.question, answer.keywords || [], jobName)
-      const weakPoints = buildWeakPoints(answer, answer.keywords || [])
+      const questionStem = answer.questionStem || answer.question || ''
+      const answerText = answer.userAnswer ?? answer.answer ?? ''
+      const answerScore = hasOwn(answer, 'score') ? normalizeNullableScore(answer.score) : null
+      const domainName = inferDomainName(questionStem, answer.keywords || [], jobName)
+      const resolvedSessionId = normalizeSessionId(sessionId)
+        || normalizeSessionId(result?.sessionId)
+        || normalizeSessionId(result?.report?.sessionId)
+        || normalizeSessionId(record?.sessionId)
+      const explicitQuestionId = normalizeQuestionId(questionId) || normalizeQuestionId(answer.questionId)
+      const localQuestionKey = explicitQuestionId || `${recordId}-${questionIndex}`
+      const isLocalFallback = !resolvedSessionId || !explicitQuestionId
+      const answerStatus = deriveLocalAnswerStatus(answer)
+      const hasFormalEvaluation = hasFormalQuestionEvaluation(answer)
 
-      return {
+      return withQuestionRedoState({
         source,
         recordId,
-        sessionId: record?.id || result?.sessionId || recordId,
-        questionId: answer.questionId || `${recordId}-${questionIndex}`,
+        sessionId: resolvedSessionId,
+        questionId: explicitQuestionId,
+        localQuestionKey,
+        isLocalFallback,
         questionIndex,
-        questionNumber: questionIndex + 1,
+        questionNumber: normalizeQuestionNo(answer.questionNo) || questionIndex + 1,
         totalQuestions: questionList.length,
-        questionStem: answer.question,
+        questionStem,
         domainName,
-        questionType: inferQuestionType(answer.question, questionIndex),
-        targetDepth: inferTargetDepth(answer.score, questionIndex),
-        answerStatus: !answer.answer || answer.answer === '[跳过]' ? 'skipped' : 'answered',
-        userAnswer: answer.answer,
-        highlightedSegments: buildHighlightedSegments(answer.answer, answer.keywords || [], answer.score),
-        score: answer.score || 0,
-        commentary: buildCommentary(answer, domainName),
-        strengthPoints: buildStrengthPoints(answer, answer.keywords || []),
-        weakPoints,
-        evaluatedDomains: [
-          {
-            domainName,
-            score: answer.score || 0,
-            note: weakPoints[0] || '本题主要考察基础理解和表达完整度。'
-          }
-        ],
-        idealAnswerOutline: buildAnswerOutline(answer.question, answer.keywords || []),
-        rewrittenAnswer: buildRewrittenAnswer(answer.question, answer.keywords || [], domainName),
-        isCollected: isQuestionCollected(recordId, answer.questionId || `${recordId}-${questionIndex}`),
+        questionType: answer.questionType || inferQuestionType(questionStem, questionIndex),
+        answerStatus,
+        evaluationStatus: hasFormalEvaluation ? 'ready' : 'pending',
+        userAnswer: answerText,
+        highlightedAnnotations: hasFormalEvaluation ? mapBackendHighlightedAnnotations(answer.highlightedAnnotations) : [],
+        highlightedSegments: hasFormalEvaluation ? mapBackendHighlightedSegments(answer.highlightedSegments) : [],
+        score: hasFormalEvaluation ? answerScore : null,
+        commentary: String(answer.commentary ?? '').trim() || null,
+        strengthPoints: normalizeStringArray(answer.strengthPoints),
+        weakPoints: normalizeStringArray(answer.weakPoints),
+        evaluatedDomains: Array.isArray(answer.evaluatedDomains) ? answer.evaluatedDomains : [],
+        idealAnswerOutline: buildAnswerOutline(questionStem, answer.keywords || []),
+        rewrittenAnswer: hasOwn(answer, 'rewrittenAnswer')
+          ? answer.rewrittenAnswer
+          : buildRewrittenAnswer(questionStem, answer.keywords || [], domainName),
+        isCollected: isQuestionCollected(recordId, localQuestionKey),
         keywords: answer.keywords || [],
         jobName,
         modeLabel,
         interviewDate: record?.date || new Date().toLocaleString('zh-CN'),
         hasPrev: questionIndex > 0,
-        hasNext: questionIndex < questionList.length - 1
-      }
+        hasNext: questionIndex < questionList.length - 1,
+        backfillFromLocalAllowed: true
+      })
     }
 
     const handleLoginSuccess = (userData) => {
-      if (userData && userData.nickname) {
-        user.name = userData.nickname
+      const nextViewState = resolveUserLoginViewState({
+        isLoggedIn: isLoggedIn.value,
+        isAdmin: isAdmin.value,
+        showAdminLogin: showAdminLogin.value,
+        showRegister: showRegister.value
+      })
+      if (!userData?.token) {
+        showNotification('登录返回缺少令牌，请重试', 'error')
+        return
       }
-      isLoggedIn.value = true
-      showRegister.value = false
-      showNotification('登录成功，欢迎回来！', 'success')
+      persistUserSession(localStorage, userData)
+      getCurrentUser(userData.token)
+        .then((currentUser) => {
+          persistUserSession(localStorage, {
+            token: userData.token,
+            nickname: currentUser?.nickname || userData.nickname || '',
+            email: currentUser?.email || ''
+          })
+          user.name = currentUser?.nickname || userData.nickname || user.name
+          user.email = currentUser?.email || ''
+          isLoggedIn.value = nextViewState.isLoggedIn
+          isAdmin.value = nextViewState.isAdmin
+          showAdminLogin.value = nextViewState.showAdminLogin
+          showRegister.value = nextViewState.showRegister
+          showNotification('登录成功，欢迎回来！', 'success')
+        })
+        .catch((error) => {
+          clearPersistedAuthSession(localStorage)
+          user.name = '面试者'
+          user.email = ''
+          showNotification(error?.message || '获取当前用户信息失败，请重试', 'error')
+        })
     }
 
     const handleRegisterSuccess = (userData) => {
+      const nextViewState = resolveLogoutViewState({
+        isLoggedIn: isLoggedIn.value,
+        isAdmin: isAdmin.value,
+        showAdminLogin: showAdminLogin.value,
+        currentPage: currentPage.value
+      })
       user.name = userData.username
-      isLoggedIn.value = true
+      user.email = userData.email || ''
+      isLoggedIn.value = nextViewState.isLoggedIn
+      isAdmin.value = nextViewState.isAdmin
+      showAdminLogin.value = nextViewState.showAdminLogin
+      currentPage.value = nextViewState.currentPage
       showRegister.value = false
-      showNotification('注册成功，欢迎加入！', 'success')
+      showNotification('注册成功，请登录后继续', 'success')
     }
 
-    const handleLogout = () => {
-      isLoggedIn.value = false
-      currentPage.value = 'growth'
+    const handleLogout = async () => {
+      const nextViewState = resolveLogoutViewState({
+        isLoggedIn: isLoggedIn.value,
+        isAdmin: isAdmin.value,
+        showAdminLogin: showAdminLogin.value,
+        currentPage: currentPage.value
+      })
+      const adminToken = localStorage.getItem(ADMIN_TOKEN_KEY)
+      const userToken = localStorage.getItem(USER_TOKEN_KEY)
+      try {
+        if (isAdmin.value && adminToken) {
+          await logoutAdmin(adminToken)
+        } else if (!isAdmin.value && userToken) {
+          await logoutUser(userToken)
+        }
+      } catch (error) {
+        console.warn('[App] logout request failed', error)
+      }
+      clearPersistedAuthSession(localStorage)
+      isLoggedIn.value = nextViewState.isLoggedIn
+      isAdmin.value = nextViewState.isAdmin
+      showAdminLogin.value = nextViewState.showAdminLogin
+      showRegister.value = false
+      currentPage.value = nextViewState.currentPage
+      user.name = '面试者'
+      user.email = ''
       isInterviewRunning.value = false
+      showReportGeneratingPage.value = false
+      pendingGeneratingResult.value = null
+      pendingGeneratingSessionId.value = null
+      reportGeneratingStatus.value = 'generating'
+      resultEntrySource.value = 'live'
+      clearHistoryUnreadFlag()
       showNotification('已退出登录', 'info')
     }
 
     const handleInterviewEnd = (resultData) => {
       isInterviewRunning.value = false
       if (resultData) {
+        const reportStatus = normalizeReportStatus(resultData.reportStatus)
+        if (reportStatus === 'generating' && normalizeSessionId(resultData.sessionId)) {
+          showResultPage.value = false
+          interviewResult.value = null
+          pendingGeneratingResult.value = { ...resultData }
+          pendingGeneratingSessionId.value = normalizeSessionId(resultData.sessionId)
+          reportGeneratingStatus.value = 'generating'
+          reportGeneratingJobName.value = resultData.jobName || '本场面试'
+          resultEntrySource.value = 'live'
+          showReportGeneratingPage.value = true
+          return
+        }
+
+        showReportGeneratingPage.value = false
+        pendingGeneratingResult.value = null
+        pendingGeneratingSessionId.value = null
         interviewResult.value = resultData
+        resultEntrySource.value = 'live'
         showResultPage.value = true
       } else {
         currentPage.value = 'growth'
@@ -449,10 +795,14 @@ export default {
     }
 
     const handleAdminLoginSuccess = (userData) => {
+      if (userData?.token) {
+        persistAdminSession(localStorage, userData)
+      }
       isLoggedIn.value = true
       isAdmin.value = true
       showAdminLogin.value = false
-      user.name = userData.username || '管理员'
+      showRegister.value = false
+      user.name = userData.displayName || userData.username || '管理员'
       showNotification('管理端登录成功！', 'success')
     }
 
@@ -464,6 +814,9 @@ export default {
         isInterviewRunning.value = false
       }
       currentPage.value = page
+      if (page === 'history') {
+        clearHistoryUnreadFlag()
+      }
     }
 
     const openQuestionBank = () => {
@@ -516,33 +869,36 @@ export default {
 
     const buildQuestionDetailFromBankItem = (item, index = 0, list = []) => {
       if (!item) return null
+      const resolvedSessionId = normalizeSessionId(item.sessionId)
+      const explicitQuestionId = normalizeQuestionId(item.questionId)
+      const localQuestionKey = normalizeQuestionId(item.localQuestionKey) || explicitQuestionId || normalizeQuestionId(item.id) || `question-bank-${index}`
+      const isLocalFallback = !resolvedSessionId || !explicitQuestionId
+      const bankScore = normalizeNullableScore(item.score)
+      const hasFormalEvaluation = hasFormalQuestionEvaluation(item)
 
       const detail = {
         source: 'questionBank',
-        recordId: item.recordId || item.sessionId || 'question-bank',
-        sessionId: item.sessionId || item.recordId || 'question-bank',
-        questionId: item.questionId || item.id,
+        recordId: item.recordId || 'question-bank',
+        sessionId: resolvedSessionId,
+        questionId: explicitQuestionId,
+        localQuestionKey,
+        isLocalFallback,
         questionIndex: index,
         questionNumber: index + 1,
         totalQuestions: list.length || 1,
         questionStem: item.questionStem || item.question || '未命名题目',
         domainName: item.domainName || inferDomainName(item.questionStem || item.question, item.keywords || [], item.jobName || item.job || ''),
         questionType: item.questionType || inferQuestionType(item.questionStem || item.question, index),
-        targetDepth: item.targetDepth || 'L2',
         answerStatus: !(item.userAnswer || item.answer) ? 'skipped' : 'answered',
+        evaluationStatus: hasFormalEvaluation ? 'ready' : 'pending',
         userAnswer: item.userAnswer || item.answer || '',
-        highlightedSegments: buildHighlightedSegments(item.userAnswer || item.answer || '', item.keywords || [], item.score || 0),
-        score: item.score || 0,
-        commentary: item.analysis || buildCommentary({ score: item.score || 0, answer: item.userAnswer || item.answer || '' }, item.domainName || '通用技术能力'),
-        strengthPoints: buildStrengthPoints({ score: item.score || 0, answer: item.userAnswer || item.answer || '' }, item.keywords || []),
-        weakPoints: buildWeakPoints({ score: item.score || 0, answer: item.userAnswer || item.answer || '' }, item.keywords || []),
-        evaluatedDomains: [
-          {
-            domainName: item.domainName || inferDomainName(item.questionStem || item.question, item.keywords || [], item.jobName || item.job || ''),
-            score: item.score || 0,
-            note: item.analysis || '建议围绕核心概念、原理和实际场景继续补强。'
-          }
-        ],
+        highlightedAnnotations: hasFormalEvaluation ? mapBackendHighlightedAnnotations(item.highlightedAnnotations) : [],
+        highlightedSegments: hasFormalEvaluation ? mapBackendHighlightedSegments(item.highlightedSegments) : [],
+        score: hasFormalEvaluation ? bankScore : null,
+        commentary: String(item.analysis ?? item.commentary ?? '').trim() || null,
+        strengthPoints: normalizeStringArray(item.strengthPoints),
+        weakPoints: normalizeStringArray(item.weakPoints),
+        evaluatedDomains: Array.isArray(item.evaluatedDomains) ? item.evaluatedDomains : [],
         idealAnswerOutline: item.idealAnswerOutline || buildAnswerOutline(item.questionStem || item.question || '', item.keywords || []),
         rewrittenAnswer: item.rewrittenAnswer || item.standardAnswer || buildRewrittenAnswer(item.questionStem || item.question || '', item.keywords || [], item.domainName || '通用技术能力'),
         isCollected: true,
@@ -552,38 +908,39 @@ export default {
         interviewDate: item.createdAt || item.date || new Date().toLocaleString('zh-CN'),
         hasPrev: index > 0,
         hasNext: index < list.length - 1,
-        backLabel: '返回问答库'
+        backLabel: '返回问答库',
+        backfillFromLocalAllowed: true
       }
 
-      return detail
+      return withQuestionRedoState(detail)
     }
 
     const handleShowQuestionDetailFromBank = (bankItem) => {
       const bank = readQuestionBank()
       const index = bank.findIndex((item) => item.id === bankItem.id)
-      selectedQuestionDetail.value = buildQuestionDetailFromBankItem(bankItem, index >= 0 ? index : 0, bank)
-      questionDetailContext.value = {
+      const context = {
         source: 'questionBank',
         itemId: bankItem.id,
         questionIndex: index >= 0 ? index : 0
       }
-      showQuestionDetail.value = true
+      const detail = buildQuestionDetailFromBankItem(bankItem, index >= 0 ? index : 0, bank)
+      openQuestionDetail(detail, context)
     }
 
     const handleRedoQuestionFromBank = (bankItem) => {
-      currentPage.value = 'interview'
-      setTimeout(() => {
-        if (!interviewPage.value?.startSingleQuestionInterview) return
-        interviewPage.value.startSingleQuestionInterview({
-          id: bankItem.questionId || bankItem.id,
-          question: bankItem.questionStem || bankItem.question,
-          keywords: bankItem.keywords || [],
-          jobType: bankItem.jobType || mapJobType(bankItem.jobName || bankItem.job || ''),
-          jobName: bankItem.jobName || bankItem.job || '前端开发工程师',
-          domainName: bankItem.domainName || inferDomainName(bankItem.questionStem || bankItem.question, bankItem.keywords || [], bankItem.jobName || bankItem.job || ''),
-          sourceItemId: bankItem.id
-        })
-      }, 100)
+      const bank = readQuestionBank()
+      const index = bank.findIndex((item) => item.id === bankItem.id)
+      const context = {
+        source: 'questionBank',
+        itemId: bankItem.id,
+        questionIndex: index >= 0 ? index : 0
+      }
+      const baseDetail = buildQuestionDetailFromBankItem(bankItem, index >= 0 ? index : 0, bank)
+      const detail = withQuestionRedoState(baseDetail, { requested: true })
+      if (!detail.canRedo) {
+        showNotification(detail.redoDisabledReason, 'info')
+      }
+      openQuestionDetail(detail, context)
     }
 
     const toggleDarkMode = () => {
@@ -614,14 +971,17 @@ export default {
       showNotification('设置已保存', 'success')
     }
 
-    const saveSettings = () => {
+    const saveSettings = (updatedUser) => {
+      if (updatedUser && typeof updatedUser === 'object') {
+        Object.assign(user, updatedUser)
+      }
       saveUserSettings()
     }
 
     const handleResultGoBack = () => {
       showResultPage.value = false
       interviewResult.value = null
-      currentPage.value = 'growth'
+      currentPage.value = resultEntrySource.value === 'history' ? 'history' : 'growth'
     }
 
     const handleResultRestart = () => {
@@ -630,43 +990,135 @@ export default {
       currentPage.value = 'interview'
     }
 
-    const handleShowQuestionDetailFromResult = ({ index = 0 } = {}) => {
-      selectedQuestionDetail.value = buildQuestionDetailViewModel({
+    const handleGeneratingGoHistory = () => {
+      showReportGeneratingPage.value = false
+      currentPage.value = 'history'
+      clearHistoryUnreadFlag()
+    }
+
+    const handleGeneratingRefreshStatus = async () => {
+      const sessionId = normalizeSessionId(pendingGeneratingSessionId.value)
+      if (!sessionId) return
+      try {
+        const report = await getInterviewReport(sessionId)
+        if (report?.reportStatus === 'ready') {
+          const records = upsertReadyInterviewRecord(readInterviewRecords(), pendingGeneratingResult.value, report)
+          writeInterviewRecords(records.slice(0, 50))
+          finalizeGeneratingResult(report)
+          return
+        }
+        reportGeneratingStatus.value = report?.reportStatus === 'failed' ? 'failed' : 'generating'
+      } catch (error) {
+        showNotification(error?.message || '重新拉取报告失败，请稍后重试', 'error')
+      }
+    }
+
+    const handleGeneratingRestart = () => {
+      showReportGeneratingPage.value = false
+      pendingGeneratingResult.value = null
+      pendingGeneratingSessionId.value = null
+      resultEntrySource.value = 'live'
+      currentPage.value = 'interview'
+    }
+
+    const handleShowQuestionDetailFromResult = ({ index = 0, questionId = null, sessionId = null } = {}) => {
+      const detail = buildQuestionDetailViewModel({
         source: 'result',
         result: interviewResult.value,
-        questionIndex: index
+        questionIndex: index,
+        questionId,
+        sessionId
       })
-      questionDetailContext.value = {
+      const context = {
         source: 'result',
         questionIndex: index
       }
-      showQuestionDetail.value = true
+      openQuestionDetail(detail, context)
     }
 
-    const handleShowInterviewDetail = (recordId) => {
-      selectedRecordId.value = recordId
-      showInterviewDetail.value = true
-    }
+    const handleShowInterviewDetail = async (recordOrItem) => {
+      if (!recordOrItem || typeof recordOrItem !== 'object') return
 
-    const handleShowQuestionDetailFromRecord = ({ recordId, questionIndex = 0 }) => {
-      const records = JSON.parse(localStorage.getItem('interviewRecords') || '[]')
-      const record = records.find((item) => item.id === recordId)
+      const sessionId = normalizeSessionId(recordOrItem.sessionId || recordOrItem.id)
+      if (!sessionId) return
 
-      selectedQuestionDetail.value = buildQuestionDetailViewModel({
-        source: 'record',
-        record,
-        questionIndex
-      })
-      questionDetailContext.value = {
-        source: 'record',
-        recordId,
-        questionIndex
+      const records = readInterviewRecords()
+      let record = records.find((item) => normalizeSessionId(item.sessionId) === sessionId)
+
+      if (!record) {
+        record = {
+          id: sessionId,
+          sessionId,
+          job: recordOrItem.job || recordOrItem.title || '模拟面试',
+          jobName: recordOrItem.job || recordOrItem.title || '模拟面试',
+          date: recordOrItem.date || new Date().toLocaleString('zh-CN'),
+          score: Number.isFinite(Number(recordOrItem.score)) ? Number(recordOrItem.score) : null,
+          duration: recordOrItem.duration || '--',
+          questions: Number(recordOrItem.questions) || 0,
+          correct: Number.isFinite(Number(recordOrItem.correct)) ? Number(recordOrItem.correct) : null,
+          answers: [],
+          mode: recordOrItem.mode || 'practice',
+          reportStatus: recordOrItem.reportStatus || 'generating'
+        }
+        records.unshift(record)
+        writeInterviewRecords(records.slice(0, 50))
       }
-      showQuestionDetail.value = true
+
+      const displayName = record.jobName || record.job || recordOrItem.job || '本场面试'
+      const status = normalizeReportStatus(recordOrItem.reportStatus || record.reportStatus)
+      if (status !== 'ready') {
+        showResultPage.value = false
+        interviewResult.value = null
+        pendingGeneratingResult.value = {
+          ...record,
+          jobName: displayName
+        }
+        pendingGeneratingSessionId.value = sessionId
+        reportGeneratingStatus.value = status
+        reportGeneratingJobName.value = displayName
+        resultEntrySource.value = 'history'
+        showReportGeneratingPage.value = true
+        return
+      }
+
+      try {
+        const report = await getInterviewReport(sessionId)
+        if (report?.reportStatus !== 'ready') {
+          pendingGeneratingResult.value = {
+            ...record,
+            jobName: displayName
+          }
+          pendingGeneratingSessionId.value = sessionId
+          reportGeneratingStatus.value = report?.reportStatus === 'failed' ? 'failed' : 'generating'
+          reportGeneratingJobName.value = displayName
+          resultEntrySource.value = 'history'
+          showReportGeneratingPage.value = true
+          return
+        }
+
+        const updatedRecords = upsertReadyInterviewRecord(readInterviewRecords(), {
+          ...record,
+          jobName: displayName,
+          interviewMode: record.mode || recordOrItem.mode || 'practice'
+        }, report)
+        writeInterviewRecords(updatedRecords.slice(0, 50))
+        interviewResult.value = mergeResultWithReport({
+          ...record,
+          jobName: displayName,
+          interviewMode: record.mode || recordOrItem.mode || 'practice'
+        }, report)
+        resultEntrySource.value = 'history'
+        showReportGeneratingPage.value = false
+        showResultPage.value = true
+      } catch (error) {
+        showNotification(error?.message || '加载面试报告失败，请稍后重试', 'error')
+      }
     }
 
     const handleCloseQuestionDetail = () => {
       showQuestionDetail.value = false
+      questionDetailLoading.value = false
+      questionDetailRequestSeq.value += 1
     }
 
     const handleNavigateQuestionDetail = (delta) => {
@@ -677,15 +1129,16 @@ export default {
 
       if (questionDetailContext.value.source === 'result') {
         if (!interviewResult.value?.answers?.[nextIndex]) return
-        questionDetailContext.value = {
+        const context = {
           ...questionDetailContext.value,
           questionIndex: nextIndex
         }
-        selectedQuestionDetail.value = buildQuestionDetailViewModel({
+        const detail = buildQuestionDetailViewModel({
           source: 'result',
           result: interviewResult.value,
           questionIndex: nextIndex
         })
+        openQuestionDetail(detail, context)
         return
       }
 
@@ -694,12 +1147,13 @@ export default {
         const nextItem = bank[nextIndex]
         if (!nextItem) return
 
-        questionDetailContext.value = {
+        const context = {
           ...questionDetailContext.value,
           itemId: nextItem.id,
           questionIndex: nextIndex
         }
-        selectedQuestionDetail.value = buildQuestionDetailFromBankItem(nextItem, nextIndex, bank)
+        const detail = buildQuestionDetailFromBankItem(nextItem, nextIndex, bank)
+        openQuestionDetail(detail, context)
         return
       }
 
@@ -707,71 +1161,77 @@ export default {
       const record = records.find((item) => item.id === questionDetailContext.value.recordId)
       if (!record?.answers?.[nextIndex]) return
 
-      questionDetailContext.value = {
+      const context = {
         ...questionDetailContext.value,
         questionIndex: nextIndex
       }
-      selectedQuestionDetail.value = buildQuestionDetailViewModel({
+      const detail = buildQuestionDetailViewModel({
         source: 'record',
         record,
         questionIndex: nextIndex
       })
+      openQuestionDetail(detail, context)
     }
 
-    const handleCollectQuestion = (detail) => {
+    const handleCollectQuestion = async (detail) => {
       if (!detail) return
+      if (!detail.sessionId || !detail.questionId) {
+        showNotification('当前题目缺少后端上下文，暂不支持收藏', 'info')
+        return
+      }
 
       const storageKey = 'questionBank'
       const savedItems = JSON.parse(localStorage.getItem(storageKey) || '[]')
-      const exists = savedItems.some((item) => item.recordId === detail.recordId && item.questionId === detail.questionId)
+      try {
+        const collected = await createQuestionBankItem({
+          sessionId: detail.sessionId,
+          questionId: detail.questionId,
+          tag: detail.domainName || null
+        })
 
-      if (exists) {
+        const localItem = {
+          id: collected?.id || `${detail.sessionId}-${detail.questionId}`,
+          recordId: detail.recordId || detail.sessionId,
+          sessionId: collected?.sessionId || detail.sessionId,
+          questionId: collected?.questionId || detail.questionId,
+          localQuestionKey: detail.localQuestionKey || detail.questionId,
+          questionStem: collected?.questionStem || detail.questionStem,
+          question: collected?.questionStem || detail.questionStem,
+          tag: collected?.tag || detail.domainName,
+          createdAt: collected?.createdAt || detail.interviewDate,
+          answer: collected?.answerSummary || '',
+          userAnswer: collected?.answerSummary || '',
+          score: collected?.score ?? null,
+          keywords: detail.keywords || [],
+          jobName: detail.jobName,
+          job: detail.jobName,
+          jobType: mapJobType(detail.jobName),
+          modeLabel: detail.modeLabel,
+          date: detail.interviewDate,
+          timestamp: new Date(collected?.createdAt || detail.interviewDate || Date.now()).getTime() || Date.now(),
+          rewrittenAnswer: detail.rewrittenAnswer,
+          standardAnswer: detail.rewrittenAnswer,
+          analysis: detail.commentary,
+          domainName: collected?.domainName || detail.domainName,
+          questionType: collected?.questionType || detail.questionType,
+          isLocalFallback: false
+        }
+
+        const index = savedItems.findIndex((item) => String(item.id) === String(localItem.id))
+        if (index >= 0) {
+          savedItems[index] = localItem
+        } else {
+          savedItems.unshift(localItem)
+        }
+        localStorage.setItem(storageKey, JSON.stringify(savedItems))
         selectedQuestionDetail.value = {
           ...detail,
           isCollected: true
         }
-        showNotification('该题已经在成长问答库中了', 'info')
-        return
+        showNotification('已收藏到成长问答库', 'success')
+      } catch (error) {
+        showNotification(error?.message || '收藏失败，请稍后重试', 'error')
       }
-
-      savedItems.unshift({
-        id: `${detail.recordId}-${detail.questionId}`,
-        recordId: detail.recordId,
-        sessionId: detail.sessionId,
-        questionId: detail.questionId,
-        questionStem: detail.questionStem,
-        question: detail.questionStem,
-        tag: detail.domainName,
-        createdAt: detail.interviewDate,
-        answer: detail.userAnswer || '',
-        userAnswer: detail.userAnswer || '',
-        score: detail.score,
-        keywords: detail.keywords || [],
-        jobName: detail.jobName,
-        job: detail.jobName,
-        jobType: mapJobType(detail.jobName),
-        modeLabel: detail.modeLabel,
-        date: detail.interviewDate,
-        timestamp: new Date(detail.interviewDate).getTime() || Date.now(),
-        rewrittenAnswer: detail.rewrittenAnswer,
-        standardAnswer: detail.rewrittenAnswer,
-        analysis: detail.commentary,
-        domainName: detail.domainName,
-        questionType: detail.questionType,
-        targetDepth: detail.targetDepth
-      })
-
-      localStorage.setItem(storageKey, JSON.stringify(savedItems))
-      selectedQuestionDetail.value = {
-        ...detail,
-        isCollected: true
-      }
-      showNotification('已收藏到成长问答库', 'success')
-    }
-
-    const handleRetryInterview = (record) => {
-      showInterviewDetail.value = false
-      currentPage.value = 'interview'
     }
 
     const loadUserSettings = () => {
@@ -780,8 +1240,9 @@ export default {
         try {
           const settings = JSON.parse(saved)
           isDarkMode.value = settings.isDarkMode || false
-          isLoggedIn.value = settings.isLoggedIn || false
-          Object.assign(user, settings.user)
+          if (settings.user) {
+            Object.assign(user, settings.user)
+          }
           
           if (isDarkMode.value) {
             document.documentElement.setAttribute('data-theme', 'dark')
@@ -790,6 +1251,33 @@ export default {
           console.warn('加载设置失败:', e)
         }
       }
+    }
+
+    const restoreStoredAuthSession = async () => {
+      try {
+        const restored = await restoreAuthSession({
+          storage: localStorage,
+          getCurrentAdmin,
+          getCurrentUser
+        })
+        isLoggedIn.value = restored.isLoggedIn
+        isAdmin.value = restored.isAdmin
+        if (restored.userName) {
+          user.name = restored.userName
+        }
+        user.email = restored.userEmail || ''
+      } catch (error) {
+        console.warn('[App] auth session restore failed', error)
+        clearPersistedAuthSession(localStorage)
+        isLoggedIn.value = false
+        isAdmin.value = false
+        user.name = '面试者'
+        user.email = ''
+      }
+    }
+
+    const loadHistoryUnreadFlag = () => {
+      historyHasUnread.value = localStorage.getItem(HISTORY_UNREAD_DOT_KEY) === '1'
     }
 
     const handleKeyboardShortcuts = (event) => {
@@ -807,10 +1295,19 @@ export default {
 
     onMounted(() => {
       loadUserSettings()
+      restoreStoredAuthSession().catch((error) => {
+        console.warn('[App] restoreStoredAuthSession failed', error)
+      })
+      loadHistoryUnreadFlag()
+      startReportPolling()
+      pollGeneratingReports().catch((error) => {
+        console.warn('[App] initial report polling failed', error)
+      })
       document.addEventListener('keydown', handleKeyboardShortcuts)
     })
 
     onUnmounted(() => {
+      stopReportPolling()
       document.removeEventListener('keydown', handleKeyboardShortcuts)
     })
 
@@ -827,12 +1324,15 @@ export default {
       notificationIcon,
       interviewPage,
       showResultPage,
+      showReportGeneratingPage,
+      reportGeneratingStatus,
+      reportGeneratingJobName,
+      historyHasUnread,
       interviewResult,
       showRadarPage,
       showScoreTrendPage,
-      showInterviewDetail,
       showQuestionDetail,
-      selectedRecordId,
+      questionDetailLoading,
       selectedQuestionDetail,
       handleLoginSuccess,
       handleRegisterSuccess,
@@ -853,13 +1353,14 @@ export default {
       saveSettings,
       handleResultGoBack,
       handleResultRestart,
+      handleGeneratingGoHistory,
+      handleGeneratingRefreshStatus,
+      handleGeneratingRestart,
       handleShowInterviewDetail,
-      handleShowQuestionDetailFromRecord,
       handleShowQuestionDetailFromResult,
       handleCloseQuestionDetail,
       handleNavigateQuestionDetail,
-      handleCollectQuestion,
-      handleRetryInterview
+      handleCollectQuestion
     }
   }
 }

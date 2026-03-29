@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.a05.aiinterview.admin.dashboard.query.AdminDashboardQueryMapper">
+
+    <resultMap id="DailyMetricRowResultMap" type="com.a05.aiinterview.admin.dashboard.query.DailyMetricRow">
+        <result column="metric_date" property="metricDate" javaType="java.time.LocalDate"/>
+        <result column="metric_value" property="metricValue"/>
+    </resultMap>
+
+    <resultMap id="ModelStatusRowResultMap" type="com.a05.aiinterview.admin.dashboard.query.ModelStatusRow">
+        <result column="model_provider" property="modelProvider"/>
+        <result column="model_name" property="modelName"/>
+        <result column="request_count" property="requestCount"/>
+        <result column="success_count" property="successCount"/>
+        <result column="error_count" property="errorCount"/>
+        <result column="avg_latency_ms" property="avgLatencyMs"/>
+    </resultMap>
+
+    <resultMap id="ModelLatencySampleRowResultMap" type="com.a05.aiinterview.admin.dashboard.query.ModelLatencySampleRow">
+        <result column="model_provider" property="modelProvider"/>
+        <result column="model_name" property="modelName"/>
+        <result column="latency_ms" property="latencyMs"/>
+    </resultMap>
+
+    <resultMap id="PromptUsageRowResultMap" type="com.a05.aiinterview.admin.dashboard.query.PromptUsageRow">
+        <result column="prompt_code" property="promptCode"/>
+        <result column="calls_last_24_hours" property="callsLast24Hours"/>
+        <result column="last_used_at" property="lastUsedAt"/>
+    </resultMap>
+
+    <select id="countTotalUsers" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM users
+    </select>
+
+    <select id="countNewUsersBetween" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM users
+        WHERE created_at &gt;= #{start}
+          AND created_at &lt; #{end}
+    </select>
+
+    <select id="countTotalInterviews" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM interview_sessions
+    </select>
+
+    <select id="countInterviewsBetween" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM interview_sessions
+        WHERE created_at &gt;= #{start}
+          AND created_at &lt; #{end}
+    </select>
+
+    <select id="countActiveInterviews" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM interview_sessions
+        WHERE status IN ('planning', 'in_progress', 'report_generating')
+    </select>
+
+    <select id="sumTokensBetween" resultType="java.lang.Long">
+        SELECT COALESCE(SUM(COALESCE(request_tokens, 0) + COALESCE(response_tokens, 0)), 0)
+        FROM ai_invocation_logs
+        WHERE created_at &gt;= #{start}
+          AND created_at &lt; #{end}
+    </select>
+
+    <select id="selectDailyNewUsers" resultMap="DailyMetricRowResultMap">
+        SELECT DATE(created_at) AS metric_date,
+               COUNT(1) AS metric_value
+        FROM users
+        WHERE created_at &gt;= #{start}
+          AND created_at &lt; #{end}
+        GROUP BY DATE(created_at)
+        ORDER BY DATE(created_at) ASC
+    </select>
+
+    <select id="selectDailyInterviews" resultMap="DailyMetricRowResultMap">
+        SELECT DATE(created_at) AS metric_date,
+               COUNT(1) AS metric_value
+        FROM interview_sessions
+        WHERE created_at &gt;= #{start}
+          AND created_at &lt; #{end}
+        GROUP BY DATE(created_at)
+        ORDER BY DATE(created_at) ASC
+    </select>
+
+    <select id="selectDailyTokens" resultMap="DailyMetricRowResultMap">
+        SELECT DATE(created_at) AS metric_date,
+               COALESCE(SUM(COALESCE(request_tokens, 0) + COALESCE(response_tokens, 0)), 0) AS metric_value
+        FROM ai_invocation_logs
+        WHERE created_at &gt;= #{start}
+          AND created_at &lt; #{end}
+        GROUP BY DATE(created_at)
+        ORDER BY DATE(created_at) ASC
+    </select>
+
+    <select id="selectModelStatuses" resultMap="ModelStatusRowResultMap">
+        SELECT normalized_model_provider AS model_provider,
+               normalized_model_name AS model_name,
+               COUNT(1) AS request_count,
+               SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS success_count,
+               SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS error_count,
+               CAST(ROUND(AVG(CASE WHEN latency_ms IS NOT NULL THEN latency_ms END), 0) AS SIGNED) AS avg_latency_ms
+        FROM (
+                 SELECT COALESCE(NULLIF(TRIM(model_provider), ''), 'unknown') AS normalized_model_provider,
+                        COALESCE(NULLIF(TRIM(model_name), ''), 'unknown') AS normalized_model_name,
+                        success,
+                        latency_ms
+                 FROM ai_invocation_logs
+                 WHERE created_at &gt;= #{start}
+                   AND created_at &lt; #{end}
+             ) recent_logs
+        GROUP BY normalized_model_provider, normalized_model_name
+        ORDER BY request_count DESC, normalized_model_provider ASC, normalized_model_name ASC
+    </select>
+
+    <select id="selectModelLatencySamples" resultMap="ModelLatencySampleRowResultMap">
+        SELECT normalized_model_provider AS model_provider,
+               normalized_model_name AS model_name,
+               latency_ms
+        FROM (
+                 SELECT COALESCE(NULLIF(TRIM(model_provider), ''), 'unknown') AS normalized_model_provider,
+                        COALESCE(NULLIF(TRIM(model_name), ''), 'unknown') AS normalized_model_name,
+                        latency_ms
+                 FROM ai_invocation_logs
+                 WHERE created_at &gt;= #{start}
+                   AND created_at &lt; #{end}
+                   AND latency_ms IS NOT NULL
+             ) recent_logs
+        ORDER BY normalized_model_provider ASC, normalized_model_name ASC, latency_ms ASC
+    </select>
+
+    <select id="selectPromptUsages" resultMap="PromptUsageRowResultMap">
+        SELECT prompt_code,
+               SUM(CASE
+                       WHEN created_at &gt;= #{recentStart} AND created_at &lt; #{end} THEN 1
+                       ELSE 0
+                   END) AS calls_last_24_hours,
+               MAX(created_at) AS last_used_at
+        FROM ai_invocation_logs
+        WHERE created_at &lt; #{end}
+        GROUP BY prompt_code
+        ORDER BY prompt_code ASC
+    </select>
+</mapper>

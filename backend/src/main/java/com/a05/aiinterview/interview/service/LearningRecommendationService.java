@@ -95,7 +95,6 @@ public class LearningRecommendationService {
             item.setTitle("补齐本场面试薄弱点");
             item.setReason("建议先从本场回答不完整的题目入手，逐题复盘并补强核心概念。");
             item.setResourceType("practice");
-            item.setDifficulty("L2");
             item.setEstimatedMinutes(30);
             item.setLink(buildSearchLink("技术面试 复盘 模板"));
             fallback.setItems(List.of(item));
@@ -121,7 +120,6 @@ public class LearningRecommendationService {
             item.setResourceType("practice");
             item.setDomainCode(domain.domainCode);
             item.setDomainName(domain.domainName);
-            item.setDifficulty(domain.score < 60 ? "L1" : "L2");
             item.setEstimatedMinutes(20 + (i * 10));
             item.setLink(buildSearchLink(domain.domainName + " 面试 高频题"));
             items.add(item);
@@ -143,7 +141,6 @@ public class LearningRecommendationService {
             item.setTitle("薄弱点补强：" + trimText(weak, 28));
             item.setReason("该问题在本场面试中反复出现，建议先做针对性练习。");
             item.setResourceType("practice");
-            item.setDifficulty("L2");
             item.setEstimatedMinutes(30);
             item.setLink(buildSearchLink(weak + " 面试 讲解"));
             items.add(item);
@@ -178,7 +175,6 @@ public class LearningRecommendationService {
             item.setResourceType("article");
             item.setDomainCode(domain == null ? null : domain.domainCode);
             item.setDomainName(domain == null ? null : domain.domainName);
-            item.setDifficulty("L2");
             item.setEstimatedMinutes(45);
             item.setLink(buildSearchLink(topic + " 学习路线"));
             items.add(item);
@@ -196,12 +192,11 @@ public class LearningRecommendationService {
 
         LearningRecommendationDto.Item roadmap = new LearningRecommendationDto.Item();
         roadmap.setItemId("long-term-1");
-        roadmap.setTitle(resolveRoleName(session.getTargetRole()) + " 能力升级路线");
+        roadmap.setTitle(resolveRoleName(session.getPositionCode()) + " 能力升级路线");
         roadmap.setReason("围绕目标岗位补齐系统设计、项目深挖和表达能力，形成可持续提升闭环。");
         roadmap.setResourceType("project");
-        roadmap.setDifficulty("L3");
         roadmap.setEstimatedMinutes(180);
-        roadmap.setLink(buildSearchLink(resolveRoleName(session.getTargetRole()) + " 面试 进阶路线"));
+        roadmap.setLink(buildSearchLink(resolveRoleName(session.getPositionCode()) + " 面试 进阶路线"));
         items.add(roadmap);
 
         List<String> suggestions = report.getImprovementSuggestions();
@@ -213,7 +208,6 @@ public class LearningRecommendationService {
                 item.setTitle(trimText(suggestion, 36));
                 item.setReason("把这条建议拆成 1~2 周的小目标并持续打卡，效果会明显更稳定。");
                 item.setResourceType("project");
-                item.setDifficulty("L3");
                 item.setEstimatedMinutes(120);
                 item.setLink(buildSearchLink(suggestion + " 实战 项目"));
                 items.add(item);
@@ -247,18 +241,18 @@ public class LearningRecommendationService {
         return "https://www.google.com/search?q=" + encoded;
     }
 
-    private String resolveRoleName(String targetRole) {
-        if (targetRole == null) {
+    private String resolveRoleName(String positionCode) {
+        if (positionCode == null) {
             return "目标岗位";
         }
-        return switch (targetRole) {
+        return switch (positionCode) {
             case "JAVA_BACKEND" -> "Java 后端";
             case "GO_BACKEND" -> "Go 后端";
             case "FRONTEND" -> "前端";
             case "DATA_ENGINEER" -> "数据工程";
             case "QA" -> "测试";
             case "DEVOPS" -> "DevOps";
-            default -> targetRole;
+            default -> positionCode;
         };
     }
 

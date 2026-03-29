@@ -18,6 +18,21 @@ spring:
     username: root
     password: ${DB_PASSWORD:123456}
 
+  mail:
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    protocol: smtp
+    default-encoding: UTF-8
+    properties:
+      "[mail.smtp.auth]": ${SMTP_AUTH:true}
+      "[mail.smtp.starttls.enable]": ${SMTP_STARTTLS_ENABLE:true}
+      "[mail.smtp.ssl.enable]": ${SMTP_SSL_ENABLE:false}
+      "[mail.smtp.connectiontimeout]": ${SMTP_CONNECTION_TIMEOUT_MS:5000}
+      "[mail.smtp.timeout]": ${SMTP_TIMEOUT_MS:5000}
+      "[mail.smtp.writetimeout]": ${SMTP_WRITE_TIMEOUT_MS:5000}
+
   data:
     redis:
       host: localhost
@@ -35,12 +50,15 @@ spring:
   # Spring AI official config (consumed by spring-ai-starter-model-openai)
   ai:
     openai:
-      api-key: ${OPENAI_API_KEY:sk-mock}
-      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      api-key: ${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:sk-mock}}
+      base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
       chat:
         options:
-          model: ${OPENAI_MODEL:gpt-4o-mini}
+          model: ${OPENAI_MODEL:qwen-plus}
           temperature: 0.7
+      embedding:
+        options:
+          model: ${OPENAI_EMBEDDING_MODEL:text-embedding-v4}
 
 
   # Qdrant 向量数据库配置（被 spring-ai-qdrant-store 自动读取）
@@ -55,6 +73,10 @@ server:
 jwt:
   secret: ${JWT_SECRET:ai_interview-dev-secret-key-at-least-32-bytes-long}
   expiration-ms: ${JWT_EXPIRATION_MS:604800000}
+
+admin:
+  security:
+    accounts: []
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -71,8 +93,15 @@ mybatis-plus:
 
 logging:
   level:
+    org.springframework.ai: DEBUG
     root: INFO
-    com.a05.aiinterview: INFO
+    com.a05.aiinterview: DEBUG
+
+interview:
+  debug:
+    enabled: ${INTERVIEW_DEBUG_ENABLED:true}
+    include-prompts: ${INTERVIEW_DEBUG_INCLUDE_PROMPTS:false}
+    max-text-chars: ${INTERVIEW_DEBUG_MAX_TEXT_CHARS:1200}
 
 # 简历文件上传目录配置，默认使用系统临时目录，生产环境建议配置固定路径
 resume:
@@ -80,22 +109,23 @@ resume:
 
 # AI 调用配置
 # mock-enabled=true 时使用 MockAiClient 返回硬编码结果，无需 API Key
-# mock-enabled=false 时使用 OpenAiClient 调用真实 AI（通过 Spring AI），需要配置 OPENAI_API_KEY 等变量
+# mock-enabled=false 时使用 OpenAiClient 调用真实 AI（通过 OpenAI-compatible 协议），
+# 默认优先读取 AI_BAILIAN_API_KEY；如需切换其他兼容服务，可覆盖 OPENAI_* 变量
 ai:
   openai:
     mock-enabled: ${AI_MOCK_ENABLED:true}
     # 以下配置仅在 mock-enabled=false 时生效，用于 OpenAiClient 调用真实 AI
-    api-key: ${OPENAI_API_KEY:sk-mock}
-    base-url: ${OPENAI_BASE_URL:https://api.openai.com}
-    model: ${OPENAI_MODEL:gpt-4o-mini}
+    api-key: ${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:sk-mock}}
+    base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+    model: ${OPENAI_MODEL:qwen-plus}
   prompt:
     version:
-      planner: ${AI_PROMPT_PLANNER_VERSION:v1}
-      question-generation: ${AI_PROMPT_QUESTION_GENERATION_VERSION:v1}
-      question-generation-stream: ${AI_PROMPT_QUESTION_GENERATION_STREAM_VERSION:v1}
-      evaluation-decision: ${AI_PROMPT_EVALUATION_DECISION_VERSION:v1}
+      planner: ${AI_PROMPT_PLANNER_VERSION:v2}
+      question-generation-stream: ${AI_PROMPT_QUESTION_GENERATION_STREAM_VERSION:v2}
+      evaluation-decision: ${AI_PROMPT_EVALUATION_DECISION_VERSION:v2}
       report-generation: ${AI_PROMPT_REPORT_GENERATION_VERSION:v1}
-      intro-rewrite: ${AI_PROMPT_INTRO_REWRITE_VERSION:v1}
+      intro-rewrite: ${AI_PROMPT_INTRO_REWRITE_VERSION:v2}
+      question-detail-evaluation: ${AI_PROMPT_QUESTION_DETAIL_EVALUATION_VERSION:v1}
 
 # RAG 配置
 # rag.enabled=true 时会初始化 Qdrant 向量库连接和检索服务
@@ -110,13 +140,27 @@ rag:
   initialize-schema: true
   # init-sample-data=true 时会在启动时向 Qdrant 插入示例知识条目（仅用于开发测试）
   init-sample-data: ${RAG_INIT_SAMPLE:false}
+  rerank:
+    api-key: ${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:}}
+    endpoint: ${RAG_RERANK_ENDPOINT:https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}
+    model: ${RAG_RERANK_MODEL:gte-rerank-v2}
+    timeout-ms: ${RAG_RERANK_TIMEOUT_MS:5000}
+    top-n: ${RAG_RERANK_TOP_N:10}
 
 # SSE 流式生成配置
 # generation-cache-ttl-seconds: Redis 缓存 delta 块和 done 状态的过期时间
 #   - 用于断点续传：客户端重连时可以从缓存恢复已生成的内容
 #   - 避免无限期占用 Redis 内存，默认 1800s = 30 分钟
+# follow.poll-interval-ms: 尾随回放轮询间隔（毫秒）
+# follow.idle-timeout-seconds: 尾随等待超时（秒）
 sse:
+  #TODO 生成缓存过期时间（秒），默认 300s
   generation-cache-ttl-seconds: ${SSE_CACHE_TTL:1800}
+  follow:
+    #TODO 尾随回放轮询间隔（毫秒），默认 250ms
+    poll-interval-ms: ${SSE_FOLLOW_POLL_INTERVAL_MS:250}
+    #TODO 尾随等待超时（秒），默认 30s
+    idle-timeout-seconds: ${SSE_FOLLOW_IDLE_TIMEOUT_SECONDS:30}
 
 # 语音服务配置（ASR + TTS）
 # asr.enabled=false 时跳过语音识别服务初始化，相关 Bean 不加载
@@ -124,23 +168,30 @@ speech:
   asr:
     enabled: ${ASR_ENABLED:false}
     provider: alibaba
-    api-key: ${ASR_API_KEY:${OPENAI_API_KEY:sk-mock}}
-    endpoint: ${ASR_ENDPOINT:wss://dashscope.aliyuncs.com/api-ws/v1/realtime}
+    api-key: ${ASR_API_KEY:${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:sk-mock}}}
+    endpoint: ${ASR_ENDPOINT:wss://dashscope.aliyuncs.com/api-ws/v1/inference}
     model: ${ASR_MODEL:paraformer-realtime-v2}
     # 不同题型的停顿检测阈值（毫秒），超时未说话则自动提交答案
     token-ttl-seconds: ${ASR_TOKEN_TTL:900}
     pause-threshold-config:
-      INTRO: 2000
-      PRINCIPLE: 2500
-      SCENARIO: 3000
-      PROJECT_DEEP_DIVE: 2000
-      BEHAVIORAL: 2500
+      INTRO: 20000
+      PRINCIPLE: 20000
+      SCENARIO: 20000
+      PROJECT_DEEP_DIVE: 20000
+      BEHAVIORAL: 20000
   tts:
     enabled: ${TTS_ENABLED:false}
     provider: alibaba
-    api-key: ${TTS_API_KEY:${OPENAI_API_KEY:sk-mock}}
-    endpoint: ${TTS_ENDPOINT:https://dashscope.aliyuncs.com/api/v1/services/aigc/text2speech/speech-synthesis}
+    api-key: ${TTS_API_KEY:${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:sk-mock}}}
+    endpoint: ${TTS_ENDPOINT:wss://dashscope.aliyuncs.com/api-ws/v1/inference}
     model: ${TTS_MODEL:cosyvoice-v1}
     voice: ${TTS_VOICE:longxiaochun}
+    #TODO 语音缓存过期时间（秒），默认 3600s = 1 小时
     cache-ttl-seconds: ${TTS_CACHE_TTL:3600}
+    #TODO 语音合成超时（毫秒），默认 10s
     timeout-ms: ${TTS_TIMEOUT_MS:10000}
+
+auth:
+  mail:
+    from: ${SMTP_FROM:}
+    startup-check-enabled: ${SMTP_STARTUP_CHECK_ENABLED:true}

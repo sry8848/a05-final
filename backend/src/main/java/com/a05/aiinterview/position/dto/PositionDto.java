@@ -14,7 +14,7 @@ import lombok.NoArgsConstructor;
 @Schema(description = "岗位信息")
 public class PositionDto {
 
-    @Schema(description = "岗位编码，与 targetRole 枚举一致", example = "JAVA_BACKEND")
+    @Schema(description = "岗位编码，与 positionCode 枚举一致", example = "JAVA_BACKEND")
     private String positionCode;
 
     @Schema(description = "岗位中文名", example = "Java 后端开发")

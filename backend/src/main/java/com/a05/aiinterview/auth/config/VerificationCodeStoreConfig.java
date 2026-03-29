@@ -1,8 +1,11 @@
 package com.a05.aiinterview.auth.config;
 
 import com.a05.aiinterview.auth.service.VerificationCodeStore;
+import com.a05.aiinterview.auth.service.VerificationSendThrottleStore;
 import com.a05.aiinterview.auth.service.impl.InMemoryVerificationCodeStore;
+import com.a05.aiinterview.auth.service.impl.InMemoryVerificationSendThrottleStore;
 import com.a05.aiinterview.auth.service.impl.RedisVerificationCodeStore;
+import com.a05.aiinterview.auth.service.impl.RedisVerificationSendThrottleStore;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -24,5 +27,15 @@ public class VerificationCodeStoreConfig {
             return new RedisVerificationCodeStore(redis);
         }
         return new InMemoryVerificationCodeStore();
+    }
+
+    @Bean
+    public VerificationSendThrottleStore verificationSendThrottleStore(
+            ObjectProvider<StringRedisTemplate> redisTemplateProvider) {
+        StringRedisTemplate redis = redisTemplateProvider.getIfAvailable();
+        if (redis != null) {
+            return new RedisVerificationSendThrottleStore(redis);
+        }
+        return new InMemoryVerificationSendThrottleStore();
     }
 }

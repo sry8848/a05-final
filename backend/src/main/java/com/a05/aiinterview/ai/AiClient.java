@@ -6,8 +6,10 @@ import com.a05.aiinterview.ai.dto.EvaluationDecisionOutput;
 import com.a05.aiinterview.ai.dto.IntroRewriteInput;
 import com.a05.aiinterview.ai.dto.PlannerInput;
 import com.a05.aiinterview.ai.dto.PlannerOutput;
+import com.a05.aiinterview.ai.dto.QuestionConsultInput;
+import com.a05.aiinterview.ai.dto.QuestionDetailEvaluationInput;
+import com.a05.aiinterview.ai.dto.QuestionDetailEvaluationOutput;
 import com.a05.aiinterview.ai.dto.QuestionGenerationInput;
-import com.a05.aiinterview.ai.dto.QuestionGenerationOutput;
 import com.a05.aiinterview.ai.dto.ReportGenerationInput;
 import com.a05.aiinterview.ai.dto.ReportGenerationOutput;
 import reactor.core.publisher.Flux;
@@ -33,18 +35,10 @@ public interface AiClient {
     AiCallResult<PlannerOutput> callPlanner(PlannerInput input);
 
     /**
-     * 调用题目生成服务，根据当前考纲和状态生成一道新题（结构化 JSON）。
-     *
-     * @param input 出题入参（含目标知识域、题型、已问题目列表）
-     * @return 包含题目结构化输出和 Token 消耗的结果包装
-     */
-    AiCallResult<QuestionGenerationOutput> callQuestionGeneration(QuestionGenerationInput input);
-
-    /**
      * 调用题目生成服务（流式版本），返回 Token 字符流，供 SSE 推送给前端。
      * 适合前端"打字机"效果；不包含 Token 计数。
      *
-     * @param input 出题入参，与 callQuestionGeneration 相同
+     * @param input 出题入参（含目标知识域、题型、已问题目列表）
      * @return 字符 Token 的响应式流
      */
     Flux<String> callQuestionGenerationStream(QuestionGenerationInput input);
@@ -63,7 +57,7 @@ public interface AiClient {
      * @param input 包含当前题目信息、候选人回答、历史 Q/A 上下文和状态账本
      * @return 包含评估结果、账本 Patch、下一题策略和 Token 消耗的结果包装
      */
-    AiCallResult<EvaluationDecisionOutput> callEvaluationDecision(EvaluationDecisionInput input);
+    AiCallResult<EvaluationDecisionOutput>  callEvaluationDecision(EvaluationDecisionInput input);
 
     /**
      * 调用报告生成服务，根据全场 Q/A 记录和状态账本生成结构化评估报告。
@@ -72,4 +66,20 @@ public interface AiClient {
      * @return 包含结构化报告输出和 Token 消耗的结果包装
      */
     AiCallResult<ReportGenerationOutput> callReportGeneration(ReportGenerationInput input);
+
+    /**
+     * 调用单题详细评估服务，生成题后复盘结构化结果。
+     *
+     * @param input 单题详细评估入参
+     * @return 结构化详细评估结果
+     */
+    AiCallResult<QuestionDetailEvaluationOutput> callQuestionDetailEvaluation(QuestionDetailEvaluationInput input);
+
+    /**
+     * 调用单题追问服务，围绕当前题目生成流式复盘回复。
+     *
+     * @param input 单题追问上下文
+     * @return 文本增量流
+     */
+    Flux<String> callQuestionConsultStream(QuestionConsultInput input);
 }

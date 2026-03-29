@@ -3,7 +3,7 @@
  * 与后端 /api/v1/auth 约定：code=0 成功，非 0 为业务错误，message 为错误说明。
  */
 
-const BASE = '/api/v1'
+import { buildApiUrl } from './base.js'
 
 /**
  * 统一请求：解析 JSON，code 非 0 时抛出 Error(message)。
@@ -12,8 +12,11 @@ const BASE = '/api/v1'
  * @returns {Promise<any>} 成功时返回 data 字段
  */
 async function request(path, options = {}) {
-  const url = BASE + path
+  const url = buildApiUrl(path)
   const headers = { 'Content-Type': 'application/json', ...options.headers }
+  if (options.authToken) {
+    headers.Authorization = `Bearer ${options.authToken}`
+  }
   let body = options.body
   if (body && typeof body === 'object' && !(body instanceof FormData)) {
     body = JSON.stringify(body)
@@ -33,7 +36,7 @@ async function request(path, options = {}) {
  * 发送邮箱验证码
  * @param {string} email
  * @param {'login'|'register'} scene
- * @returns {Promise<{ devCode?: string }>} 开发环境可能返回 devCode
+ * @returns {Promise<{ devCode: null }>} 为兼容旧前端解析逻辑保留 devCode，但真实邮件模式下恒为 null
  */
 export function sendEmailCode(email, scene) {
   return request('/auth/email-code/send', {
@@ -65,6 +68,47 @@ export function loginByEmailCode(email, code) {
   return request('/auth/login/email-code', {
     method: 'POST',
     body: { email: email.trim(), code: code.trim() }
+  })
+}
+
+/**
+ * 管理员账号 + 密码登录
+ * @param {string} username
+ * @param {string} password
+ * @returns {Promise<{ token: string, username: string, displayName: string }>}
+ */
+export function loginAdmin(username, password) {
+  return request('/auth/admin/login', {
+    method: 'POST',
+    body: { username: username.trim(), password }
+  })
+}
+
+export function getCurrentUser(token) {
+  return request('/auth/me', {
+    method: 'GET',
+    authToken: token
+  })
+}
+
+export function getCurrentAdmin(token) {
+  return request('/auth/admin/me', {
+    method: 'GET',
+    authToken: token
+  })
+}
+
+export function logoutUser(token) {
+  return request('/auth/logout', {
+    method: 'POST',
+    authToken: token
+  })
+}
+
+export function logoutAdmin(token) {
+  return request('/auth/admin/logout', {
+    method: 'POST',
+    authToken: token
   })
 }
 

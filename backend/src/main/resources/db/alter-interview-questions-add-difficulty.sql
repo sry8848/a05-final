@@ -1,0 +1,1 @@
+-- obsolete migration retained as a no-op under the new interview contract

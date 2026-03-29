@@ -1,10 +1,12 @@
+import { resolveBackendUrl } from '../api/base.js'
+
 /**
- * TtsPlayerService - 题目 TTS 播放与音量分析服务
+ * TtsPlayerService - 题目片段 TTS 队列播放服务
  *
  * 功能：
- * 1. 轮询后端音频状态接口（/audio），拿到音频文件地址后播放
- * 2. 使用 Web Audio API 的 AnalyserNode 实时输出音量百分比
- * 3. 支持自动播报 / 手动播放 / 静音模式，以及 skip/interrupt 控制
+ * 1. 消费 SSE tts_ready 事件，按 segmentIndex 顺序排队播放
+ * 2. 通过 fetch + Authorization 拉取二进制并转 Blob URL
+ * 3. 保留 auto/manual/mute 三档，skip=停止当前并清空待播
  */
 export class TtsPlayerService {
   constructor() {
@@ -15,7 +17,14 @@ export class TtsPlayerService {
     this.source = null
     this.animationFrameId = null
     this.isPlaying = false
-    this.pendingAudioUrl = ''
+
+    this.currentGenerationId = ''
+    this.nextExpectedIndex = 0
+    this.pendingByIndex = new Map()
+    this.queue = []
+    this.isDraining = false
+    this.manualDrainRequested = false
+    this.currentPlaybackFinish = null
 
     /** 音量回调: (level: number, speaking: boolean) => void */
     this.onVolume = null
@@ -26,49 +35,118 @@ export class TtsPlayerService {
   setMode(mode) {
     this.mode = mode
     if (mode === 'mute') {
-      this.interrupt()
+      this.skip()
+      return
+    }
+    if (mode === 'auto' && this.queue.length > 0) {
+      this._drainQueue()
     }
   }
 
-  /**
-   * 根据后端状态接口轮询并触发播放。
-   * @param {string} audioStatusUrl 例如 /api/v1/interviews/1/questions/42/audio
-   */
-  async handleDoneEvent(audioStatusUrl) {
-    if (!audioStatusUrl || this.mode === 'mute') return null
-    const readyUrl = await this._waitForAudio(audioStatusUrl)
-    this.pendingAudioUrl = readyUrl || ''
-    if (this.mode === 'auto' && readyUrl) {
-      await this.play(readyUrl)
-    }
-    return readyUrl
+  beginGeneration(generationId) {
+    if (!generationId) return
+    if (this.currentGenerationId === generationId) return
+    this.skip()
+    this.currentGenerationId = generationId
+    this.nextExpectedIndex = 0
   }
 
-  async play(url = '') {
-    const targetUrl = url || this.pendingAudioUrl
-    if (!targetUrl || this.mode === 'mute') return
-    await this._ensureAudioGraph(targetUrl)
-    await this.audio.play()
-    this.isPlaying = true
-    this.onPlayingChange?.(true)
-    this._startLevelLoop()
+  async handleTtsReadyEvent(payload) {
+    if (!payload || this.mode === 'mute') return
+
+    const generationId = payload?.generationId || ''
+    if (generationId) {
+      if (!this.currentGenerationId) {
+        this.currentGenerationId = generationId
+      } else if (generationId !== this.currentGenerationId) {
+        // 忽略非当前 generation 的延迟事件，防止跨题音频串播。
+        return
+      }
+    }
+
+    const segmentIndex = Number(payload?.segmentIndex)
+    const audioUrl = payload?.audioUrl || ''
+    if (!Number.isInteger(segmentIndex) || segmentIndex < 0 || !audioUrl) return
+
+    if (segmentIndex < this.nextExpectedIndex) return
+    if (this.pendingByIndex.has(segmentIndex)) return
+    if (this.queue.some((item) => item.segmentIndex === segmentIndex)) return
+
+    const expectedGeneration = this.currentGenerationId
+    const blobUrl = await this._fetchAudioBlobUrl(audioUrl)
+    if (!blobUrl) return
+
+    if (expectedGeneration && this.currentGenerationId !== expectedGeneration) {
+      URL.revokeObjectURL(blobUrl)
+      return
+    }
+
+    this.pendingByIndex.set(segmentIndex, { segmentIndex, blobUrl })
+    this._enqueueReadySegments()
+
+    if (this.mode === 'auto' || (this.mode === 'manual' && this.manualDrainRequested)) {
+      await this._drainQueue()
+    }
+  }
+
+  async play() {
+    if (this.mode === 'mute') return
+    this.manualDrainRequested = true
+    await this._drainQueue()
+  }
+
+  async unlockByUserGesture() {
+    try {
+      await this._ensureAudioGraph()
+      if (!this.audioContext) return false
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume()
+      }
+      return this.audioContext.state === 'running'
+    } catch (err) {
+      console.warn('[TtsPlayerService] unlockByUserGesture failed', err)
+      return false
+    }
+  }
+
+  async playLocalTestAudio(url) {
+    if (!url) return
+    const unlocked = await this.unlockByUserGesture()
+    if (!unlocked) {
+      throw new Error('audio context is not unlocked')
+    }
+    const resp = await fetch(url, { cache: 'no-store' })
+    if (!resp.ok) {
+      throw new Error('failed to fetch local test audio')
+    }
+    const blob = await resp.blob()
+    if (!blob || blob.size <= 0) {
+      throw new Error('empty local test audio')
+    }
+    const blobUrl = URL.createObjectURL(blob)
+    await this._playUrl(blobUrl, { revokeOnFinish: true })
   }
 
   skip() {
-    if (!this.audio) return
-    this.audio.currentTime = this.audio.duration || this.audio.currentTime
+    if (this.audio) {
+      this.audio.pause()
+      this.audio.currentTime = 0
+    }
+    if (this.currentPlaybackFinish) {
+      this.currentPlaybackFinish()
+      this.currentPlaybackFinish = null
+    }
     this._stopPlaybackState()
+    this._clearQueue()
+    this.manualDrainRequested = false
   }
 
   interrupt() {
-    if (!this.audio) return
-    this.audio.pause()
-    this.audio.currentTime = 0
-    this._stopPlaybackState()
+    this.skip()
   }
 
   destroy() {
-    this.interrupt()
+    this.skip()
     if (this.audio) {
       this.audio.src = ''
     }
@@ -78,39 +156,90 @@ export class TtsPlayerService {
     }
     this.analyser = null
     this.source = null
+    this.currentGenerationId = ''
+    this.nextExpectedIndex = 0
   }
 
-  async _waitForAudio(audioStatusUrl) {
-    const maxRetry = 8
-    for (let i = 0; i < maxRetry; i++) {
-      const resp = await fetch(audioStatusUrl, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('aiInterviewToken') || localStorage.getItem('token') || ''}` },
-      })
-      if (!resp.ok) {
-        await this._sleep(300)
-        continue
-      }
-      const json = await resp.json()
-      const ready = json?.data?.ready === true
-      const audioUrl = json?.data?.audioUrl || ''
-      if (ready && audioUrl) return audioUrl
-      await this._sleep(300 + i * 150)
+  _enqueueReadySegments() {
+    while (this.pendingByIndex.has(this.nextExpectedIndex)) {
+      const segment = this.pendingByIndex.get(this.nextExpectedIndex)
+      this.pendingByIndex.delete(this.nextExpectedIndex)
+      this.queue.push(segment)
+      this.nextExpectedIndex += 1
     }
-    return null
   }
 
-  async _ensureAudioGraph(url) {
+  async _drainQueue() {
+    if (this.isDraining) return
+    if (this.mode === 'manual' && !this.manualDrainRequested) return
+    if (!this.queue.length) return
+
+    this.isDraining = true
+    try {
+      while (this.queue.length > 0 && this.mode !== 'mute') {
+        if (this.mode === 'manual' && !this.manualDrainRequested) break
+        const next = this.queue.shift()
+        await this._playUrl(next.blobUrl, { revokeOnFinish: true })
+      }
+    } finally {
+      this.isDraining = false
+      if (this.mode === 'manual') {
+        this.manualDrainRequested = false
+      }
+    }
+  }
+
+  async _playUrl(url, { revokeOnFinish = false } = {}) {
+    try {
+      await this._ensureAudioGraph(url)
+    } catch (err) {
+      if (revokeOnFinish) this._revokeBlobUrl(url)
+      console.warn('[TtsPlayerService] ensure audio graph failed', err)
+      return
+    }
+
+    await new Promise((resolve) => {
+      let finished = false
+
+      const finish = () => {
+        if (finished) return
+        finished = true
+        this.currentPlaybackFinish = null
+        this.audio.removeEventListener('ended', finish)
+        this.audio.removeEventListener('error', finish)
+        if (revokeOnFinish) this._revokeBlobUrl(url)
+        this._stopPlaybackState()
+        resolve()
+      }
+
+      this.currentPlaybackFinish = finish
+      this.audio.addEventListener('ended', finish)
+      this.audio.addEventListener('error', finish)
+
+      this.audio.play().then(() => {
+        this.isPlaying = true
+        this.onPlayingChange?.(true)
+        this._startLevelLoop()
+      }).catch(() => finish())
+    })
+  }
+
+  async _fetchAudioBlobUrl(audioUrl) {
+    const token = localStorage.getItem('aiInterviewToken') || localStorage.getItem('token') || ''
+    const headers = token ? { Authorization: `Bearer ${token}` } : {}
+    const resp = await fetch(resolveBackendUrl(audioUrl), { headers })
+    if (!resp.ok) return null
+    const blob = await resp.blob()
+    if (!blob || blob.size <= 0) return null
+    return URL.createObjectURL(blob)
+  }
+
+  async _ensureAudioGraph(url = '') {
     if (!this.audio) {
       this.audio = new Audio()
       this.audio.preload = 'auto'
-      this.audio.addEventListener('ended', () => this._stopPlaybackState())
-      this.audio.addEventListener('pause', () => {
-        if (this.audio.currentTime === 0 || this.audio.currentTime >= this.audio.duration) {
-          this._stopPlaybackState()
-        }
-      })
     }
-    if (this.audio.src !== location.origin + url && this.audio.src !== url) {
+    if (url && this.audio.src !== url) {
       this.audio.src = url
     }
 
@@ -137,7 +266,7 @@ export class TtsPlayerService {
     const tick = () => {
       if (!this.isPlaying || !this.analyser) return
       this.analyser.getByteFrequencyData(dataArray)
-      const avg = dataArray.reduce((s, v) => s + v, 0) / bufferLength
+      const avg = dataArray.reduce((sum, value) => sum + value, 0) / bufferLength
       const level = Math.min(100, Math.round((avg / 255) * 130))
       this.onVolume?.(level, this.isPlaying)
       this.animationFrameId = requestAnimationFrame(tick)
@@ -155,10 +284,24 @@ export class TtsPlayerService {
     this.onPlayingChange?.(false)
   }
 
-  _sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms))
+  _clearQueue() {
+    for (const queued of this.queue) {
+      this._revokeBlobUrl(queued.blobUrl)
+    }
+    this.queue = []
+
+    for (const pending of this.pendingByIndex.values()) {
+      this._revokeBlobUrl(pending.blobUrl)
+    }
+    this.pendingByIndex.clear()
+  }
+
+  _revokeBlobUrl(url) {
+    if (!url) return
+    try {
+      URL.revokeObjectURL(url)
+    } catch (_) {}
   }
 }
 
 export const ttsPlayerService = new TtsPlayerService()
-

@@ -43,19 +43,29 @@ class ReportGenerationContractTest {
                   "strengths": ["基础知识掌握扎实", "表达逻辑清晰"],
                   "weaknesses": ["高并发实践不足"],
                   "improvementSuggestions": ["深入学习 JUC 源码"],
+                  "comprehensiveRadarScores": [
+                    {
+                      "dimensionKey": "fundamentals",
+                      "dimensionName": "基础原理掌握",
+                      "score": 81.0
+                    },
+                    {
+                      "dimensionKey": "engineering_practice",
+                      "dimensionName": "工程实践与项目落地",
+                      "score": 76.0
+                    }
+                  ],
                   "skillDomainScores": [
                     {
                       "domainCode": "jvm",
                       "domainName": "JVM 原理",
                       "score": 82.0,
-                      "achievedDepth": "L3",
                       "commentary": "对 GC 算法掌握较好，分代模型描述清晰。"
                     },
                     {
                       "domainCode": "concurrency",
                       "domainName": "并发编程",
                       "score": 70.0,
-                      "achievedDepth": "L2",
                       "commentary": "AQS 原理描述不够深入。"
                     }
                   ]
@@ -68,6 +78,8 @@ class ReportGenerationContractTest {
         assertThat(output.getOverallScore()).isEqualByComparingTo(new BigDecimal("78.5"));
         assertThat(output.getSummary()).contains("候选人");
         assertThat(output.getStrengths()).hasSize(2);
+        assertThat(output.getComprehensiveRadarScores()).hasSize(2);
+        assertThat(output.getComprehensiveRadarScores().get(0).getDimensionKey()).isEqualTo("fundamentals");
         assertThat(output.getSkillDomainScores()).hasSize(2);
         assertThat(output.getSkillDomainScores().get(0).getDomainCode()).isEqualTo("jvm");
         assertThat(output.getSkillDomainScores().get(0).getScore())
@@ -169,6 +181,83 @@ class ReportGenerationContractTest {
         ReportGenerationOutput output = validator.parseAndValidateReport(json);
 
         assertThat(output.getSkillDomainScores()).isNotNull().isEmpty();
+    }
+
+    @Test
+    @DisplayName("skillDomainScores.score 超出范围 → 逐项截断到 [0,100]")
+    void outOfRangeSkillDomainScores_shouldBeClampedItemByItem() {
+        String json = """
+                {
+                  "overallScore": 75.0,
+                  "summary": "知识域分超范围",
+                  "skillDomainScores": [
+                    {
+                      "domainCode": "jvm",
+                      "domainName": "JVM 原理",
+                      "score": -5,
+                      "commentary": "分数过低"
+                    },
+                    {
+                      "domainCode": "concurrency",
+                      "domainName": "并发编程",
+                      "score": 108.6,
+                      "commentary": "分数过高"
+                    }
+                  ]
+                }
+                """;
+
+        ReportGenerationOutput output = validator.parseAndValidateReport(json);
+
+        assertThat(output.getSkillDomainScores()).hasSize(2);
+        assertThat(output.getSkillDomainScores().get(0).getScore()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(output.getSkillDomainScores().get(1).getScore()).isEqualByComparingTo(new BigDecimal("100"));
+    }
+
+    @Test
+    @DisplayName("缺少 comprehensiveRadarScores 时保持 null，供上层走回退逻辑")
+    void missingComprehensiveRadarScores_shouldRemainNullForFallback() {
+        String json = """
+                {
+                  "overallScore": 75.0,
+                  "summary": "练习模式报告",
+                  "skillDomainScores": []
+                }
+                """;
+
+        ReportGenerationOutput output = validator.parseAndValidateReport(json);
+
+        assertThat(output.getComprehensiveRadarScores()).isNull();
+    }
+
+    @Test
+    @DisplayName("comprehensiveRadarScores.score 超出范围 → 逐项截断到 [0,100]")
+    void outOfRangeComprehensiveRadarScores_shouldBeClampedItemByItem() {
+        String json = """
+                {
+                  "overallScore": 75.0,
+                  "summary": "能力分超范围",
+                  "comprehensiveRadarScores": [
+                    {
+                      "dimensionKey": "fundamentals",
+                      "dimensionName": "基础原理掌握",
+                      "score": -2
+                    },
+                    {
+                      "dimensionKey": "communication",
+                      "dimensionName": "沟通表达与结构化呈现",
+                      "score": 120.3
+                    }
+                  ],
+                  "skillDomainScores": []
+                }
+                """;
+
+        ReportGenerationOutput output = validator.parseAndValidateReport(json);
+
+        assertThat(output.getComprehensiveRadarScores()).hasSize(2);
+        assertThat(output.getComprehensiveRadarScores().get(0).getScore()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(output.getComprehensiveRadarScores().get(1).getScore()).isEqualByComparingTo(new BigDecimal("100"));
     }
 
     @Test

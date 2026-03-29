@@ -2,8 +2,10 @@ package com.a05.aiinterview.interview;
 
 import com.a05.aiinterview.common.ApiResponse;
 import com.a05.aiinterview.interview.dto.QuestionAudioResponse;
+import com.a05.aiinterview.interview.entity.InterviewAttempt;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 import com.a05.aiinterview.interview.entity.InterviewSession;
+import com.a05.aiinterview.interview.mapper.InterviewAttemptMapper;
 import com.a05.aiinterview.interview.mapper.InterviewQuestionMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
 import com.a05.aiinterview.speech.service.TtsService;
@@ -37,6 +39,7 @@ public class InterviewSpeechController {
 
     private final InterviewSessionMapper interviewSessionMapper;
     private final InterviewQuestionMapper interviewQuestionMapper;
+    private final InterviewAttemptMapper interviewAttemptMapper;
     private final TtsService ttsService;
 
     /**
@@ -90,11 +93,41 @@ public class InterviewSpeechController {
                 .body(bytes);
     }
 
+    /**
+     * 拉取题目片段音频二进制。
+     */
+    @Operation(summary = "获取题目片段播报音频文件")
+    @GetMapping("/{sessionId}/attempts/{attemptId}/audio/segments/{segmentIndex}/file")
+    public ResponseEntity<byte[]> downloadAttemptSegmentAudio(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId,
+            @PathVariable String attemptId,
+            @PathVariable Integer segmentIndex) {
+        checkSessionOwnership(sessionId, userId);
+        checkAttemptOwnership(sessionId, attemptId);
+        byte[] bytes = ttsService.getAttemptSegmentAudioBytes(sessionId, attemptId, segmentIndex);
+        if (bytes == null || bytes.length == 0) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("audio/mpeg"))
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(bytes);
+    }
+
     private void checkOwnership(Long sessionId, Long questionId, Long userId) {
+        checkSessionOwnership(sessionId, userId);
+        checkQuestionOwnership(sessionId, questionId);
+    }
+
+    private void checkSessionOwnership(Long sessionId, Long userId) {
         InterviewSession session = interviewSessionMapper.selectById(sessionId);
         if (session == null || !session.getUserId().equals(userId)) {
             throw new IllegalArgumentException("无权访问该面试会话");
         }
+    }
+
+    private void checkQuestionOwnership(Long sessionId, Long questionId) {
         InterviewQuestion question = interviewQuestionMapper.selectOne(
                 new LambdaQueryWrapper<InterviewQuestion>()
                         .eq(InterviewQuestion::getId, questionId)
@@ -104,5 +137,11 @@ public class InterviewSpeechController {
             throw new IllegalArgumentException("题目不存在");
         }
     }
-}
 
+    private void checkAttemptOwnership(Long sessionId, String attemptId) {
+        InterviewAttempt attempt = interviewAttemptMapper.selectByAttemptId(attemptId);
+        if (attempt == null || !sessionId.equals(attempt.getSessionId())) {
+            throw new IllegalArgumentException("作答记录不存在");
+        }
+    }
+}

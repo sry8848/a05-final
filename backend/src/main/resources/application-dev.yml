@@ -18,3 +18,10 @@ spring:
 logging:
   level:
     com.a05.aiinterview: DEBUG
+
+admin:
+  security:
+    accounts:
+      - username: super-admin
+        passwordHash: $2a$10$CdzB/ZLFb67rErOfqFQExe2w3jw5trvg6cFRPbVijGol3yQzINcda
+        displayName: 超级管理员
