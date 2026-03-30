@@ -48,3 +48,32 @@ test('resolveBackendUrl should expand backend relative resource paths but keep a
     'wss://demo.example.com/api/v1/asr/stream?ticket=1'
   )
 })
+
+test('resolveWebSocketUrl should convert backend paths and http urls into connectable ws urls', async () => {
+  const { resolveWebSocketUrl } = await loadApiBaseModule()
+
+  assert.equal(
+    typeof resolveWebSocketUrl,
+    'function',
+    'resolveWebSocketUrl must be implemented'
+  )
+
+  globalThis.location = {
+    origin: 'https://13dbc08d.r35.cpolar.top',
+    protocol: 'https:',
+    host: '13dbc08d.r35.cpolar.top',
+  }
+
+  assert.equal(
+    resolveWebSocketUrl('/api/v1/asr/stream?ticket=1'),
+    'wss://13dbc08d.r35.cpolar.top/api/v1/asr/stream?ticket=1'
+  )
+  assert.equal(
+    resolveWebSocketUrl('https://demo.example.com/backend/api/v1/asr/stream?ticket=2'),
+    'wss://demo.example.com/backend/api/v1/asr/stream?ticket=2'
+  )
+  assert.equal(
+    resolveWebSocketUrl('ws://localhost:8080/api/v1/asr/stream?ticket=3'),
+    'ws://localhost:8080/api/v1/asr/stream?ticket=3'
+  )
+})

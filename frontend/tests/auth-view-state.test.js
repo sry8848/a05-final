@@ -73,7 +73,7 @@ test('logout should clear admin role residue and return to user login entry', as
       isLoggedIn: true,
       isAdmin: true,
       showAdminLogin: true,
-      currentPage: 'analysis'
+      currentPage: 'resumes'
     }),
     {
       isLoggedIn: false,

@@ -123,7 +123,7 @@ class QuestionConsultServiceTest {
         question.setQuestionType("PRINCIPLE");
         question.setStem("请解释浏览器渲染流水线。");
         question.setExpectedPoints(List.of("Parse", "Layout", "Paint"));
-        question.setGenerationContextJson(Map.of("domainCode", "browser", "domainName", "浏览器原理"));
+        question.setGenerationContextJson(Map.of("domainCode", "browser_runtime", "domainName", "浏览器运行时"));
         when(questionMapper.selectById(22L)).thenReturn(question);
 
         InterviewAttempt attempt = new InterviewAttempt();

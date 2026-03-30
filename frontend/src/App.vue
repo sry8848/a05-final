@@ -99,7 +99,6 @@
             @redo="handleRedoQuestionFromBank"
           />
           <ResumesPage v-else-if="currentPage === 'resumes'" />
-          <AnalysisPage v-else-if="currentPage === 'analysis'" />
           <SettingsPage 
             v-else-if="currentPage === 'settings'"
             :isDarkMode="isDarkMode"
@@ -123,7 +122,6 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import InterviewPage from './components/InterviewPage.vue'
 import HistoryPage from './components/HistoryPage.vue'
-import AnalysisPage from './components/AnalysisPage.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import LoginPage from './components/LoginPage.vue'
 import RegisterPage from './components/RegisterPage.vue'
@@ -173,7 +171,6 @@ export default {
     InterviewPage,
     HistoryPage,
     ResumesPage,
-    AnalysisPage,
     SettingsPage,
     LoginPage,
     RegisterPage,
@@ -1284,9 +1281,9 @@ export default {
       if (!isLoggedIn.value) return
       
       if (event.ctrlKey || event.metaKey) {
-        const pages = ['growth', 'interview', 'history', 'analysis', 'settings']
+        const pages = ['growth', 'interview', 'history', 'settings']
         const key = parseInt(event.key)
-        if (key >= 1 && key <= 5) {
+        if (key >= 1 && key <= 4) {
           event.preventDefault()
           navigateTo(pages[key - 1])
         }

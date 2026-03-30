@@ -1090,7 +1090,7 @@ export default {
         isListening.value = false
         asrState.value = 'stopped'
         if (inputMode.value === 'voice' || config.interviewMode === 'professional') {
-          const message = buildVoiceFailureMessage(config.interviewMode)
+          const message = buildVoiceFailureMessage(config.interviewMode, err?.message || '')
           voiceFailureMessage.value = message
           alert(message)
         }
@@ -2105,7 +2105,7 @@ export default {
           console.error('[InterviewPage] 启动语音识别失败', error)
           isListening.value = false
           asrState.value = 'stopped'
-          const message = buildVoiceFailureMessage(config.interviewMode)
+          const message = buildVoiceFailureMessage(config.interviewMode, error?.message || '')
           voiceFailureMessage.value = message
           alert(message)
         }

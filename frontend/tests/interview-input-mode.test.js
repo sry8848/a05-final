@@ -38,3 +38,14 @@ test('professional mode should expose strict voice-only failure wording', () => 
   assert.match(buildVoiceFailureMessage('professional'), /仅支持语音/)
   assert.doesNotMatch(buildVoiceFailureMessage('professional'), /切换到文字输入/)
 })
+
+test('voice failure wording should preserve specific transport error details', () => {
+  assert.match(
+    buildVoiceFailureMessage('practice', 'WebSocket 连接失败'),
+    /WebSocket 连接失败/
+  )
+  assert.match(
+    buildVoiceFailureMessage('professional', '代理地址不可达'),
+    /代理地址不可达/
+  )
+})
