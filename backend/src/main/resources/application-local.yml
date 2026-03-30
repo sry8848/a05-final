@@ -47,6 +47,11 @@ auth:
     from: 3030256102@qq.com
     startup-check-enabled: ${SMTP_STARTUP_CHECK_ENABLED:true} # 启动时检查
 
+app:
+  cors:
+    # 本地真实联调时临时放开公网来源，便于 cpolar 测试；测试结束后应收紧。
+    allowed-origin-patterns: "*"
+
 admin:
   security:
     accounts:

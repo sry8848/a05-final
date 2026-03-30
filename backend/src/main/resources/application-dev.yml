@@ -19,6 +19,11 @@ logging:
   level:
     com.a05.aiinterview: DEBUG
 
+app:
+  cors:
+    # 开发环境临时放开公网来源，便于 cpolar 联调；测试结束后应收紧。
+    allowed-origin-patterns: "*"
+
 admin:
   security:
     accounts:

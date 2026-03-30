@@ -1,5 +1,6 @@
 package com.a05.aiinterview.common;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.cors.CorsConfiguration;
@@ -14,11 +15,20 @@ import java.util.List;
 @Configuration
 public class WebMvcConfig {
 
+    private final List<String> allowedOriginPatterns;
+
+    public WebMvcConfig(
+            @Value("${app.cors.allowed-origin-patterns:http://localhost:*,http://127.0.0.1:*}")
+            List<String> allowedOriginPatterns
+    ) {
+        this.allowedOriginPatterns = allowedOriginPatterns;
+    }
+
     @Bean
     public UrlBasedCorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowCredentials(true);
-        config.setAllowedOriginPatterns(List.of("http://localhost:*", "http://127.0.0.1:*"));
+        config.setAllowedOriginPatterns(allowedOriginPatterns);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Authorization", TraceContext.TRACE_ID_HEADER, TraceContext.REQUEST_ID_HEADER));
