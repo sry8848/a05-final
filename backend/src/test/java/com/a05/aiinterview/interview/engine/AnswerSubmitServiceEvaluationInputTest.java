@@ -261,7 +261,7 @@ class AnswerSubmitServiceEvaluationInputTest {
         assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.SAME_POINT_CONTINUE).getUsed()).isEqualTo(1);
         assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.SAME_POINT_CONTINUE).getMax()).isEqualTo(2);
         assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.PROJECT_TOTAL).getUsed()).isEqualTo(2);
-        assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.PROJECT_TOTAL).getMax()).isEqualTo(10);
+        assertThat(input.getQuotaSnapshot().get(QuotaStateSupport.PROJECT_TOTAL).getMax()).isEqualTo(8);
         assertThat(session.getStateLedgerJson()).containsEntry("max_questions", 15);
 
         verify(sessionMapper).updateById(argThat(updated ->
@@ -273,80 +273,93 @@ class AnswerSubmitServiceEvaluationInputTest {
     }
 
     @Test
-    @DisplayName("buildRecentInterviewMemory should derive answerAssessment from decisionReason")
-    void buildRecentInterviewMemory_shouldDeriveAnswerAssessmentFromDecisionReason() throws Exception {
+    @DisplayName("buildRecentInterviewMemory should keep latest three history answers raw and older ones summarized")
+    void buildRecentInterviewMemory_shouldKeepLatestThreeHistoryAnswersRawAndOlderOnesSummarized() throws Exception {
         AnswerSubmitService service = buildService();
 
         InterviewSession session = new InterviewSession();
         session.setId(98L);
         session.setStateLedgerJson(Map.of());
 
-        InterviewQuestion question = new InterviewQuestion();
-        question.setId(1L);
-        question.setQuestionNo(1);
-        question.setQuestionType("PRINCIPLE");
-        question.setStem("题目");
-        question.setGenerationContextJson(Map.of());
+        InterviewQuestion q1 = buildHistoryQuestion(1L, 1, "Q1");
+        InterviewQuestion q2 = buildHistoryQuestion(2L, 2, "Q2");
+        InterviewQuestion q3 = buildHistoryQuestion(3L, 3, "Q3");
+        InterviewQuestion q4 = buildHistoryQuestion(4L, 4, "Q4");
+        InterviewQuestion currentQuestion = buildHistoryQuestion(5L, 5, "Q5-current");
 
-        com.a05.aiinterview.interview.entity.InterviewAttempt attempt = new com.a05.aiinterview.interview.entity.InterviewAttempt();
-        attempt.setQuestionId(1L);
-        attempt.setAnswerText("我先解释原理，再补充边界。");
-        attempt.setIsFinal(true);
-        attempt.setEvaluationJson(Map.of(
-                "decisionReason", "回答覆盖了主线原理，但边界条件还需要继续核实。"
-        ));
+        InterviewAttempt a1 = buildHistoryAttempt(1L, "第1题回答，应该被摘要保留。");
+        InterviewAttempt a2 = buildHistoryAttempt(2L, "第2题回答，应该被摘要保留。");
+        InterviewAttempt a3 = buildHistoryAttempt(3L, "第3题回答，应该作为原始内容保留。");
+        InterviewAttempt a4 = buildHistoryAttempt(4L, "第4题回答，应该作为原始内容保留。");
+        InterviewAttempt currentAttempt = buildHistoryAttempt(5L, "当前题回答，不应进入历史。");
 
         List<EvaluationDecisionInput.RecentInterviewMemoryItem> memory = ReflectionTestUtils.invokeMethod(
                 service,
                 "buildRecentInterviewMemory",
                 session,
-                List.of(question),
-                List.of(attempt)
+                currentQuestion,
+                List.of(q1, q2, q3, q4, currentQuestion),
+                List.of(a1, a2, a3, a4, currentAttempt)
         );
 
-        assertThat(memory).hasSize(1);
-        assertThat(memory.getFirst().getAnswerSummary()).isEqualTo("我先解释原理，再补充边界。");
-        assertThat(memory.getFirst().getAnswerAssessment()).isEqualTo("回答覆盖了主线原理，但边界条件还需要继续核实。");
+        assertThat(memory).hasSize(4);
+        assertThat(memory).extracting(EvaluationDecisionInput.RecentInterviewMemoryItem::getQuestionStem)
+                .containsExactly("Q1", "Q2", "Q3", "Q4");
+        assertThat(memory).extracting(EvaluationDecisionInput.RecentInterviewMemoryItem::getAnswerContentType)
+                .containsExactly("SUMMARY", "RAW", "RAW", "RAW");
+        assertThat(memory.getFirst().getAnswerContent()).isEqualTo("第1题回答，应该被摘要保留。");
+        assertThat(memory.get(1).getAnswerContent()).isEqualTo("第2题回答，应该被摘要保留。");
+        assertThat(memory.get(2).getAnswerContent()).isEqualTo("第3题回答，应该作为原始内容保留。");
+        assertThat(memory.get(3).getAnswerContent()).isEqualTo("第4题回答，应该作为原始内容保留。");
         @SuppressWarnings("unchecked")
         Map<String, Object> serialized = new ObjectMapper().convertValue(memory.getFirst(), Map.class);
-        assertThat(serialized).containsKeys("domainCode", "domainName", "focusPoint");
+        assertThat(serialized).containsKeys("domainCode", "domainName", "focusPoint", "answerContent", "answerContentType")
+                .doesNotContainKeys("answerSummary", "answerAssessment");
     }
 
     @Test
-    @DisplayName("buildRecentInterviewMemory should strip fallback diagnostics")
-    void buildRecentInterviewMemory_shouldStripFallbackDiagnostics() {
+    @DisplayName("buildRecentInterviewMemory should keep all earlier history after recent raw window")
+    void buildRecentInterviewMemory_shouldKeepAllEarlierHistoryAfterRecentRawWindow() {
         AnswerSubmitService service = buildService();
 
         InterviewSession session = new InterviewSession();
         session.setId(99L);
         session.setStateLedgerJson(Map.of());
 
-        InterviewQuestion question = new InterviewQuestion();
-        question.setId(1L);
-        question.setQuestionNo(1);
-        question.setQuestionType("BEHAVIORAL");
-        question.setStem("题目");
-        question.setGenerationContextJson(Map.of());
-
-        com.a05.aiinterview.interview.entity.InterviewAttempt attempt = new com.a05.aiinterview.interview.entity.InterviewAttempt();
-        attempt.setQuestionId(1L);
-        attempt.setAnswerText("我当时先调研，再拍板。");
-        attempt.setIsFinal(true);
-        attempt.setEvaluationJson(Map.of(
-                "effectiveDecisionSource", "SYSTEM_FALLBACK",
-                "decisionReason", "系统降级为行为题继续建立真实事件画像。"
-        ));
+        InterviewQuestion currentQuestion = buildHistoryQuestion(8L, 8, "Q8-current");
+        List<InterviewQuestion> historyQuestions = List.of(
+                buildHistoryQuestion(1L, 1, "Q1"),
+                buildHistoryQuestion(2L, 2, "Q2"),
+                buildHistoryQuestion(3L, 3, "Q3"),
+                buildHistoryQuestion(4L, 4, "Q4"),
+                buildHistoryQuestion(5L, 5, "Q5"),
+                buildHistoryQuestion(6L, 6, "Q6"),
+                buildHistoryQuestion(7L, 7, "Q7"),
+                currentQuestion
+        );
+        List<InterviewAttempt> attempts = List.of(
+                buildHistoryAttempt(1L, "A1"),
+                buildHistoryAttempt(2L, "A2"),
+                buildHistoryAttempt(3L, "A3"),
+                buildHistoryAttempt(4L, "A4"),
+                buildHistoryAttempt(5L, "A5"),
+                buildHistoryAttempt(6L, "A6"),
+                buildHistoryAttempt(7L, "A7"),
+                buildHistoryAttempt(8L, "A8")
+        );
 
         List<EvaluationDecisionInput.RecentInterviewMemoryItem> memory = ReflectionTestUtils.invokeMethod(
                 service,
                 "buildRecentInterviewMemory",
                 session,
-                List.of(question),
-                List.of(attempt)
+                currentQuestion,
+                historyQuestions,
+                attempts
         );
 
-        assertThat(memory).hasSize(1);
-        assertThat(memory.getFirst().getAnswerAssessment()).isEmpty();
+        assertThat(memory).hasSize(7);
+        assertThat(memory).extracting(EvaluationDecisionInput.RecentInterviewMemoryItem::getAnswerContentType)
+                .containsExactly("SUMMARY", "SUMMARY", "SUMMARY", "SUMMARY", "RAW", "RAW", "RAW");
     }
 
     @Test
@@ -607,5 +620,24 @@ class AnswerSubmitServiceEvaluationInputTest {
                 new SystemFallbackPlanBuilder(),
                 new PlannerHistoryBuilderService(sessionMapper, questionMapper)
         );
+    }
+
+    private InterviewQuestion buildHistoryQuestion(Long id, int questionNo, String stem) {
+        InterviewQuestion question = new InterviewQuestion();
+        question.setId(id);
+        question.setQuestionNo(questionNo);
+        question.setQuestionType("PRINCIPLE");
+        question.setStem(stem);
+        question.setGenerationContextJson(Map.of());
+        return question;
+    }
+
+    private InterviewAttempt buildHistoryAttempt(Long questionId, String answerText) {
+        InterviewAttempt attempt = new InterviewAttempt();
+        attempt.setQuestionId(questionId);
+        attempt.setAnswerText(answerText);
+        attempt.setIsFinal(true);
+        attempt.setEvaluationJson(Map.of());
+        return attempt;
     }
 }

@@ -1,6 +1,7 @@
 package com.a05.aiinterview.interview.engine;
 
 import com.a05.aiinterview.ai.contract.StrategyCatalog;
+import com.a05.aiinterview.ai.contract.StrategyCode;
 import com.a05.aiinterview.ai.contract.StrategyDefinition;
 import com.a05.aiinterview.ai.contract.StrategyLimit;
 import com.a05.aiinterview.ai.contract.StrategyRequiredContext;
@@ -72,6 +73,12 @@ public class AvailableStrategyAssembler {
             return false;
         }
         if (definition.requiredContext().contains(StrategyRequiredContext.PROJECT_CONTEXT) && !hasProjectContext) {
+            return false;
+        }
+        StrategyCode strategyCode = definition.code();
+        if (QuotaStateSupport.isSamePointFollowUp(strategyCode)
+                && QuotaStateSupport.toInt(quotaState.get(QuotaStateSupport.SAME_POINT_CONTINUE))
+                >= InterviewPacingSupport.maxFor(experienceLevel, StrategyLimit.SAME_POINT_CONTINUE)) {
             return false;
         }
         for (StrategyLimit limit : definition.blockingLimits()) {

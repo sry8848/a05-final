@@ -40,7 +40,9 @@ class PromptTemplateCoverageTest {
                 .contains("不要把整个知识域对象删掉")
                 .contains("如果历史 discussedItems 为空，不要臆造项目去重信息")
                 .contains("experienceItems 必须覆盖简历中所有真实存在")
-                .contains("不允许把整个项目从 experienceItems 中删掉");
+                .contains("不允许把整个项目从 experienceItems 中删掉")
+                .contains("必须复述简历中该项目/实习条目的对应原文片段")
+                .doesNotContain("简历上的原始项目描述");
     }
 
     @Test
@@ -140,7 +142,9 @@ class PromptTemplateCoverageTest {
                 .contains("samePointContinue")
                 .contains("近期跨场禁选知识点")
                 .contains("blockedEntryPoints")
-                .contains("历史问题、回答概要、回答评价")
+                .contains("历史问答记录")
+                .contains("最近 3 题保留原始问答")
+                .contains("其余更早题目只保留问题和回答摘要")
                 .contains("不表示该项目本身被禁选")
                 .doesNotContain("知识域及知识点状态")
                 .doesNotContain("\"possibleNextMoves\"")
@@ -179,6 +183,7 @@ class PromptTemplateCoverageTest {
                 .contains("绝不能写成完整问句")
                 .contains("绝不允许把下一题准备问的知识点提前预支写进去")
                 .contains("\"domainCode\": \"redis\"")
+                .contains("结合最近多轮原始互动与整体进度")
                 .doesNotContain("candidateStrategies")
                 .doesNotContain("expectedAnswerPoints")
                 .doesNotContain("nextQuestionType")
@@ -188,7 +193,8 @@ class PromptTemplateCoverageTest {
                 .doesNotContain("alternateQueries")
                 .doesNotContain("retrievalType")
                 .doesNotContain("expectedEvidence")
-                .doesNotContain("avoidEvidence");
+                .doesNotContain("avoidEvidence")
+                .doesNotContain("回答评价");
     }
 
     @Test

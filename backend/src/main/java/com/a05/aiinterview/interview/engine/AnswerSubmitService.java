@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AnswerSubmitService {
 
-    private static final int RECENT_MEMORY_LIMIT = 6;
+    private static final int RAW_HISTORY_WINDOW = 3;
 
     private final AiClient aiClient;
     private final InterviewSessionMapper interviewSessionMapper;
@@ -174,7 +174,7 @@ public class AnswerSubmitService {
                 .answerText(answerText)
                 .expectedPoints(safeStringList(currentQuestion.getExpectedPoints()))
                 .retrievedMaterials(List.of())
-                .recentInterviewMemory(buildRecentInterviewMemory(session, allQuestions, allAttempts))
+                .recentInterviewMemory(buildRecentInterviewMemory(session, currentQuestion, allQuestions, allAttempts))
                 .build();
     }
 
@@ -252,40 +252,41 @@ public class AnswerSubmitService {
 
     private List<EvaluationDecisionInput.RecentInterviewMemoryItem> buildRecentInterviewMemory(
             InterviewSession session,
+            InterviewQuestion currentQuestion,
             List<InterviewQuestion> allQuestions,
             List<InterviewAttempt> allAttempts) {
         Map<Long, InterviewAttempt> latestFinalAttempts = latestFinalAttemptsByQuestion(allAttempts);
-        return allQuestions.stream()
+        Long currentQuestionId = currentQuestion != null ? currentQuestion.getId() : null;
+        List<InterviewQuestion> historyQuestions = allQuestions.stream()
+                .filter(Objects::nonNull)
+                .filter(question -> !Objects.equals(question.getId(), currentQuestionId))
                 .filter(question -> latestFinalAttempts.containsKey(question.getId()))
-                .sorted(Comparator.comparing(InterviewQuestion::getQuestionNo).reversed())
-                .limit(RECENT_MEMORY_LIMIT)
                 .sorted(Comparator.comparing(InterviewQuestion::getQuestionNo))
-                .map(question -> {
-                    InterviewAttempt attempt = latestFinalAttempts.get(question.getId());
-                    Map<String, Object> evaluationJson = attempt.getEvaluationJson() != null ? attempt.getEvaluationJson() : Map.of();
-                    Map<String, Object> ctx = question.getGenerationContextJson() != null ? question.getGenerationContextJson() : Map.of();
-                    String answerAssessment = "";
-                    if (!"SYSTEM_FALLBACK".equalsIgnoreCase(asString(evaluationJson.get("effectiveDecisionSource")))) {
-                        answerAssessment = firstNonBlank(
-                                asString(evaluationJson.get("decisionReason")),
-                                extractPlanDecisionReason(evaluationJson)
-                        );
-                    }
-                    return EvaluationDecisionInput.RecentInterviewMemoryItem.builder()
-                            .questionNo(question.getQuestionNo())
-                            .questionType(question.getQuestionType())
-                            .domainCode(resolveDomainCode(question))
-                            .domainName(resolveDomainName(question, session))
-                            .focusPoint(resolvePromptFocusPoint(question))
-                            .relatedItemKey(asString(ctx.get("activeItemKey")))
-                            .relatedItemType(asString(ctx.get("activeItemType")))
-                            .relatedItemName(asString(ctx.get("activeItemName")))
-                            .questionStem(question.getStem())
-                            .answerSummary(summarizeAnswer(attempt.getAnswerText()))
-                            .answerAssessment(answerAssessment)
-                            .build();
-                })
                 .toList();
+
+        int rawStartIndex = Math.max(0, historyQuestions.size() - RAW_HISTORY_WINDOW);
+        List<EvaluationDecisionInput.RecentInterviewMemoryItem> memory = new ArrayList<>();
+        for (int index = 0; index < historyQuestions.size(); index++) {
+            InterviewQuestion question = historyQuestions.get(index);
+            InterviewAttempt attempt = latestFinalAttempts.get(question.getId());
+            Map<String, Object> ctx = question.getGenerationContextJson() != null ? question.getGenerationContextJson() : Map.of();
+            boolean useRawAnswer = index >= rawStartIndex;
+            String answerText = firstNonBlank(attempt != null ? attempt.getAnswerText() : "", "");
+            memory.add(EvaluationDecisionInput.RecentInterviewMemoryItem.builder()
+                    .questionNo(question.getQuestionNo())
+                    .questionType(question.getQuestionType())
+                    .domainCode(resolveDomainCode(question))
+                    .domainName(resolveDomainName(question, session))
+                    .focusPoint(resolvePromptFocusPoint(question))
+                    .relatedItemKey(asString(ctx.get("activeItemKey")))
+                    .relatedItemType(asString(ctx.get("activeItemType")))
+                    .relatedItemName(asString(ctx.get("activeItemName")))
+                    .questionStem(question.getStem())
+                    .answerContent(useRawAnswer ? answerText : summarizeAnswer(answerText))
+                    .answerContentType(useRawAnswer ? "RAW" : "SUMMARY")
+                    .build());
+        }
+        return memory;
     }
 
     private Map<Long, InterviewAttempt> latestFinalAttemptsByQuestion(List<InterviewAttempt> allAttempts) {
@@ -585,18 +586,6 @@ public class AnswerSubmitService {
             }
         }
         return callResult.getOutput();
-    }
-
-    private String extractPlanDecisionReason(Map<String, Object> evaluationJson) {
-        if (evaluationJson == null) {
-            return "";
-        }
-        Object rawPlan = evaluationJson.get("effectiveDecisionPlan");
-        if (!(rawPlan instanceof Map<?, ?> plan)) {
-            return "";
-        }
-        Object decisionReason = plan.get("decisionReason");
-        return decisionReason == null ? "" : String.valueOf(decisionReason);
     }
 
     private EvaluationDecisionOutput toEffectiveOutput(DecisionExecutionPlan plan) {
