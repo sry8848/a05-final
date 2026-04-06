@@ -17,6 +17,16 @@ import java.util.List;
 @AllArgsConstructor
 public class EvaluationDecisionOutput {
 
+    /**
+     * 辅助输出：对候选人当前话语的简短理解。
+     * 仅用于帮助模型先理解再决策，不参与后端决策分支。
+     */
+    private String answerUnderstanding;
+    /**
+     * 辅助输出：对当前主线规划的简短判断。
+     * 仅用于帮助模型先规划再映射策略，不参与后端决策分支。
+     */
+    private String planningIntent;
     private String decisionReason;
     /** CONTINUE / WRAPUP */
     private String interviewAction;

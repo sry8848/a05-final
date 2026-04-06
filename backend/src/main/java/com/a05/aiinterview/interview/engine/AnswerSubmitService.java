@@ -33,8 +33,24 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
- * 回答提交主服务。
- * 新版本直接围绕 evaluation-decision 新契约构建输入、落库和返回。
+ * 回答提交主服务，负责处理用户回答、AI评估决策、状态更新等核心流程。
+ *
+ * <p>核心职责：
+ * <ol>
+ *   <li>接收用户提交的回答，进行幂等性检查和参数校验</li>
+ *   <li>构建评估决策输入（包含历史上下文、配额状态、知识域覆盖等）</li>
+ *   <li>调用 AI evaluation-decision 模型进行评估和下一题决策</li>
+ *   <li>对 AI 决策进行三级容错处理（验证 → 修复 → 兜底）</li>
+ *   <li>持久化回答记录并更新状态账本</li>
+ *   <li>根据决策结果返回继续面试或结束面试的响应</li>
+ * </ol>
+ *
+ * <p>容错机制：
+ * <ul>
+ *   <li>第一级：AI决策验证（DecisionExecutionPlanBuilder）</li>
+ *   <li>第二级：决策修复（DecisionRepairOrchestrator）</li>
+ *   <li>第三级：系统兜底（SystemFallbackPlanBuilder）</li>
+ * </ul>
  */
 @Slf4j
 @Service
@@ -57,21 +73,44 @@ public class AnswerSubmitService {
     private final SystemFallbackPlanBuilder systemFallbackPlanBuilder;
     private final PlannerHistoryBuilderService plannerHistoryBuilderService;
 
+    /**
+     * 提交回答的主入口方法，处理用户回答的完整流程。
+     *
+     * <p>处理流程：
+     * <ol>
+     *   <li>幂等性检查：如果该 attemptId 已处理过，直接返回已缓存的结果</li>
+     *   <li>参数校验：验证会话存在、权限、状态等</li>
+     *   <li>强制结束检查：如果已达到最大题数，直接结束面试</li>
+     *   <li>AI评估决策：调用 evaluation-decision 模型</li>
+     *   <li>决策解析与容错：验证 → 修复 → 兜底</li>
+     *   <li>持久化：保存回答记录、更新状态账本</li>
+     *   <li>响应返回：根据决策返回 continue 或 wrapup</li>
+     * </ol>
+     *
+     * @param sessionId 面试会话 ID
+     * @param userId 用户 ID，用于权限校验
+     * @param request 提交回答请求，包含 attemptId、questionId、answerText 等
+     * @return 提交回答响应，包含决策结果和状态
+     */
     public SubmitAttemptResponse submitAnswer(Long sessionId, Long userId, SubmitAttemptRequest request) {
         log.info("提交回答主链路开始, sessionId={}, questionId={}, attemptId={}",
                 sessionId, request.getQuestionId(), request.getAttemptId());
 
+        // 步骤1：幂等性检查 - 防止重复提交同一答案导致重复处理
         InterviewAttempt existing = interviewAttemptMapper.selectByAttemptId(request.getAttemptId());
         if (existing != null) {
+            log.info("检测到重复提交，返回幂等响应, sessionId={}, attemptId={}", sessionId, request.getAttemptId());
             return buildIdempotentResponse(existing);
         }
 
+        // 步骤2：会话和题目校验
         InterviewSession session = interviewSessionMapper.selectById(sessionId);
         validateSession(session, userId, sessionId);
 
         InterviewQuestion currentQuestion = interviewQuestionMapper.selectById(request.getQuestionId());
         validateQuestion(currentQuestion, sessionId, request.getQuestionId());
 
+        // 步骤3：加载历史数据（所有题目和所有回答）
         List<InterviewQuestion> allQuestions = interviewQuestionMapper.selectList(
                 new LambdaQueryWrapper<InterviewQuestion>()
                         .eq(InterviewQuestion::getSessionId, sessionId)
@@ -79,31 +118,38 @@ public class AnswerSubmitService {
         );
         List<InterviewAttempt> allAttempts = interviewAttemptMapper.selectBySessionId(sessionId);
 
+        // 步骤4：评估决策核心流程
         DecisionResolution resolution;
         if (shouldForceEndByMaxQuestions(session)) {
+            // 配额触发强制结束
+            log.info("已达到最大题数，强制结束面试, sessionId={}", sessionId);
             resolution = buildForcedEndResolution();
         } else {
-            EvaluationDecisionInput evalInput = buildEvaluationInput(
+            // 构建评估决策输入对象，包含完整的上下文信息
+            EvaluationDecisionInput evalInput = buildEvaluationInput(// 构建评估决策输入对象
                     session, currentQuestion, allQuestions, allAttempts, request.getAnswerText());
-            interviewDebugTraceService.recordQuestionStage(
+            interviewDebugTraceService.recordQuestionStage(// 记录评估决策输入
                     sessionId,
                     currentQuestion.getId(),
                     request.getAttemptId(),
                     "evaluationInput",
                     evalInput,
                     Map.of(
-                            "questionType", currentQuestion.getQuestionType(),
-                            "expectedPointsCount", evalInput.getExpectedPoints() == null ? 0 : evalInput.getExpectedPoints().size()
+                            "questionType", currentQuestion.getQuestionType(),// 题目类型
+                            "expectedPointsCount", evalInput.getExpectedPoints() == null ? 0 : evalInput.getExpectedPoints().size()// 预期积分数
                     )
             );
             try {
+                // 调用 AI 进行评估决策
                 AiCallResult<EvaluationDecisionOutput> evalCallResult = aiClient.callEvaluationDecision(evalInput);
+                // 解析决策结果，应用三级容错机制
                 resolution = resolveDecision(session, currentQuestion, evalInput, evalCallResult);
             } catch (Exception e) {
                 log.error("评估决策 AI 调用失败, sessionId={}, attemptId={}", sessionId, request.getAttemptId(), e);
                 throw new RuntimeException("评估决策服务暂时不可用", e);
             }
         }
+        // 记录评估决策输出，用于调试和审计
         interviewDebugTraceService.recordQuestionStage(
                 sessionId,
                 currentQuestion.getId(),
@@ -117,10 +163,16 @@ public class AnswerSubmitService {
                         "source", resolution.getEffectivePlan().getEffectiveDecisionSource()
                 )
         );
+
+        // 步骤5：持久化回答记录和更新状态账本
+        // 包含：保存InterviewAttempt、更新state_ledger_json、同步session_skill_states
         AnswerSubmitPersistenceService.PersistedAttemptResult persisted =
                 answerSubmitPersistenceService.persist(sessionId, currentQuestion, request, resolution);
 
+        // 步骤6：根据决策结果构建响应
         if ("WRAPUP".equalsIgnoreCase(resolution.getEffectivePlan().getInterviewAction())) {
+            // 决策为结束面试，启动异步报告生成
+            log.info("AI决策结束面试，开始生成报告, sessionId={}", sessionId);
             reportGenerationService.generateAsync(sessionId);
             InterviewSession endSession = interviewSessionMapper.selectById(sessionId);
             return SubmitAttemptResponse.builder()
@@ -131,6 +183,7 @@ public class AnswerSubmitService {
                     .build();
         }
 
+        // 决策为继续面试，返回continue和streamAttemptId供前端发起SSE连接
         InterviewSession updatedSession = interviewSessionMapper.selectById(sessionId);
         return SubmitAttemptResponse.builder()
                 .attemptId(request.getAttemptId())
@@ -330,11 +383,30 @@ public class AnswerSubmitService {
                 .build();
     }
 
+    /**
+     * 解析AI决策结果，应用三级容错机制（验证 → 修复 → 兜底）。
+     *
+     * <p>容错流程：
+     * <ol>
+     *   <li>第一级：AI决策验证 - 使用 DecisionExecutionPlanBuilder 验证决策的合法性</li>
+     *   <li>第二级：决策修复 - 如果验证失败，使用 DecisionRepairOrchestrator 尝试修复</li>
+     *   <li>第三级：系统兜底 - 如果修复也失败，使用 SystemFallbackPlanBuilder 提供保底策略</li>
+     * </ol>
+     *
+     * @param session 当前面试会话
+     * @param currentQuestion 当前题目
+     * @param evalInput 评估决策输入（包含上下文）
+     * @param evalCallResult AI调用结果
+     * @return 决策解析结果，包含最终生效的执行计划
+     */
     private DecisionResolution resolveDecision(InterviewSession session,
                                                InterviewQuestion currentQuestion,
                                                EvaluationDecisionInput evalInput,
                                                AiCallResult<EvaluationDecisionOutput> evalCallResult) {
+        // 从AI调用结果中提取原始输出
         EvaluationDecisionOutput rawOutput = extractRawOutput(evalCallResult);
+
+        // ========== 第一级：AI决策验证 ==========
         DecisionValidationResult initialValidation = decisionExecutionPlanBuilder.build(
                 currentQuestion,
                 rawOutput,
@@ -343,6 +415,7 @@ public class AnswerSubmitService {
                 DecisionExecutionPlan.EffectiveDecisionSource.RAW_AI
         );
         if (initialValidation.isValid()) {
+            log.info("AI决策验证通过, sessionId={}", session.getId());
             return DecisionResolution.builder()
                     .evalInput(evalInput)
                     .rawOutput(rawOutput)
@@ -355,6 +428,9 @@ public class AnswerSubmitService {
                     .build();
         }
 
+        // ========== 第二级：决策修复 ==========
+        log.warn("AI决策验证失败，尝试修复, sessionId={}, errors={}",
+                session.getId(), initialValidation.getErrorCodes());
         DecisionRepairOrchestrator.RepairResult repairResult = decisionRepairOrchestrator.repair(
                 evalInput,
                 currentQuestion,
@@ -362,6 +438,7 @@ public class AnswerSubmitService {
                 evalCallResult != null ? evalCallResult.getRawResponse() : null
         );
         if (repairResult.success()) {
+            log.info("AI决策修复成功, sessionId={}", session.getId());
             return DecisionResolution.builder()
                     .evalInput(evalInput)
                     .rawOutput(rawOutput)
@@ -379,6 +456,9 @@ public class AnswerSubmitService {
                     .build();
         }
 
+        // ========== 第三级：系统兜底 ==========
+        log.error("AI决策修复失败，启用系统兜底策略, sessionId={}, repairErrors={}",
+                session.getId(), repairResult.errorCodes());
         Map<String, Object> fallbackState = DecisionFallbackStateSupport.ensureState(session.getStateLedgerJson());
         int rotationIndex = DecisionFallbackStateSupport.toInt(fallbackState.get(DecisionFallbackStateSupport.ROTATION_INDEX));
         Map<String, Object> previewState = DecisionFallbackStateSupport.previewAfterFallback(session.getStateLedgerJson());

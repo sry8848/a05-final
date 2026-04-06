@@ -56,14 +56,7 @@
         @restart="handleResultRestart"
         @showQuestionDetail="handleShowQuestionDetailFromResult"
       />
-      <RadarChartPage 
-        v-else-if="showRadarPage"
-        @goBack="showRadarPage = false"
-      />
-      <ScoreTrendPage 
-        v-else-if="showScoreTrendPage"
-        @goBack="showScoreTrendPage = false"
-      />
+
       <div v-else class="main-container" :class="{ 'interview-fullscreen': isInterviewRunning }">
         <Sidebar 
           v-show="!isInterviewRunning"
@@ -128,8 +121,7 @@ import RegisterPage from './components/RegisterPage.vue'
 import InterviewResultPage from './components/InterviewResultPage.vue'
 import QuestionBankPage from './components/QuestionBankPage.vue'
 import GrowthCenterPage from './components/GrowthCenterPage.vue'
-import RadarChartPage from './components/RadarChartPage.vue'
-import ScoreTrendPage from './components/ScoreTrendPage.vue'
+
 import QuestionDetailPage from './components/QuestionDetailPage.vue'
 import InterviewReportGeneratingPage from './components/InterviewReportGeneratingPage.vue'
 import AdminLoginPage from './components/AdminLoginPage.vue'
@@ -177,8 +169,7 @@ export default {
     InterviewResultPage,
     QuestionBankPage,
     GrowthCenterPage,
-    RadarChartPage,
-    ScoreTrendPage,
+
     QuestionDetailPage,
     InterviewReportGeneratingPage,
     AdminLoginPage,
@@ -202,8 +193,7 @@ export default {
     const resultEntrySource = ref('live')
     const historyHasUnread = ref(false)
     const interviewResult = ref(null)
-    const showRadarPage = ref(false)
-    const showScoreTrendPage = ref(false)
+
     const showQuestionDetail = ref(false)
     const questionDetailLoading = ref(false)
     const selectedQuestionDetail = ref(null)
@@ -1326,8 +1316,7 @@ export default {
       reportGeneratingJobName,
       historyHasUnread,
       interviewResult,
-      showRadarPage,
-      showScoreTrendPage,
+
       showQuestionDetail,
       questionDetailLoading,
       selectedQuestionDetail,

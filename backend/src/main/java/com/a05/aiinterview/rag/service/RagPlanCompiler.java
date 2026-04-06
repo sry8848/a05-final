@@ -12,10 +12,45 @@ import java.util.Set;
 
 /**
  * 将 AI 输出的 retrieval brief 编译为可执行的单库检索请求。
+ *
+ * <p>核心职责：
+ * <ul>
+ *   <li>根据 AI 决策（DecisionExecutionPlan）决定是否需要检索</li>
+ *   <li>如果需要检索，构建完整的 RagRetrievalRequest</li>
+ *   <li>如果不需要检索，返回 shouldRetrieve=false 的空请求</li>
+ * </ul>
+ *
+ * <p>检索条件判断：
+ * <ul>
+ *   <li>PRINCIPLE/SCENARIO/BEHAVIORAL：只有有 retrievalPlans 才检索</li>
+ *   <li>PROJECT_DEEP_DIVE：有技术钩子或检索计划才检索</li>
+ * </ul>
+ *
+ * <p>技术钩子（TECH_HOOK_TOKENS）：
+ * <ul>
+ *   <li>包含特定技术术语（如"redis"、"mysql"、"间隙锁"、"幂等"等）时自动触发检索</li>
+ * </ul>
  */
 @Component
 public class RagPlanCompiler {
 
+    /**
+     * 编译决策执行计划为 RAG 检索请求。
+     *
+     * <p>处理流程：
+     * <ol>
+     *   <li>标准化题型</li>
+     *   <li>提取第一个检索计划</li>
+     *   <li>判断是否需要检索（shouldRetrieve）</li>
+     *   <li>如果不需要检索：返回 shouldRetrieve=false 的空请求</li>
+     *   <li>如果需要检索：构建完整的检索请求</li>
+     * </ol>
+     *
+     * @param plan 决策执行计划（来自AI评估决策）
+     * @param positionCode 岗位编码
+     * @param experienceLevel 经验级别
+     * @return RAG检索请求
+     */
     public RagRetrievalRequest compile(DecisionExecutionPlan plan, String positionCode, String experienceLevel) {
         String questionType = normalizeQuestionType(plan == null ? null : plan.getTargetQuestionType());
         EvaluationDecisionOutput.RetrievalPlan retrievalPlan = firstRetrievalPlan(plan);
@@ -59,6 +94,29 @@ public class RagPlanCompiler {
                 .build();
     }
 
+    /**
+     * 判断是否需要执行RAG检索。
+     *
+     * <p>检索条件判断：
+     * <ul>
+     *   <li>PRINCIPLE/SCENARIO/BEHAVIORAL 题型：只有有 retrievalPlans 才检索</li>
+     *   <li>PROJECT_DEEP_DIVE 题型：有技术钩子或检索计划才检索</li>
+     * </ul>
+     *
+     * <p>技术钩子（TECH_HOOK_TOKENS）判断：
+     * <ul>
+     *   <li>nextFocus（当前焦点）是否包含技术钩子</li>
+     *   <li>nextProjectPoint（项目点）是否包含技术钩子</li>
+     *   <li>retrievalPlan.displayQuery（显示查询）是否包含技术钩子</li>
+     *   <li>retrievalPlan.queryText（查询文本）是否包含技术钩子</li>
+     *   <li>retrievalPlan.keywordHints（关键词提示）是否包含技术钩子</li>
+     * </ul>
+     *
+     * @param questionType 标准化后的题型
+     * @param plan 决策执行计划
+     * @param retrievalPlan 第一个检索计划
+     * @return 是否需要执行检索
+     */
     private boolean shouldRetrieve(
             String questionType,
             DecisionExecutionPlan plan,
@@ -81,6 +139,19 @@ public class RagPlanCompiler {
                 || containsTechnicalHint(retrievalPlan.getKeywordHints());
     }
 
+    /**
+     * 提取第一个检索计划。
+     *
+     * <p>处理逻辑：
+     * <ul>
+     *   <li>如果 plan 为空，返回 null</li>
+     *   <li>如果 retrievalPlans 为空或不存在，返回 null</li>
+     *   <li>否则返回第一个检索计划（retrievalPlans.getFirst()）</li>
+     * </ul>
+     *
+     * @param plan 决策执行计划
+     * @return 第一个检索计划，或 null
+     */
     private EvaluationDecisionOutput.RetrievalPlan firstRetrievalPlan(DecisionExecutionPlan plan) {
         if (plan == null || plan.getRetrievalPlans() == null || plan.getRetrievalPlans().isEmpty()) {
             return null;

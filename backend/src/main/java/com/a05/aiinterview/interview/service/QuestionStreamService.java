@@ -107,51 +107,84 @@ public class QuestionStreamService {
             "无外部参考资料，请严格依赖你自身的工程师知识库进行出题。";
 
     /**
-     * 题目流式生成入口，支持断点续传和 SSE 事件推送。
+     * 题目流式生成主入口，支持断点续传和 SSE 事件推送。
+     *
+     * <p>状态处理分支：
+     * <ul>
+     *   <li>status=done：从缓存回放完整的事件流</li>
+     *   <li>status=error：从缓存回放错误事件</li>
+     *   <li>status=streaming：进入"回放+尾随"模式，先回放已生成的再尾随新的</li>
+     *   <li>无缓存：启动新的流式生成流程</li>
+     * </ul>
+     *
+     * <p>核心设计：后台生成任务与单个HTTP SSE连接完全解耦，
+     * 即使前端断开重连，后台任务仍会继续生成并缓存到Redis。
      *
      * @param sessionId   面试会话 ID
      * @param userId      用户 ID，用于权限校验
      * @param attemptId   作答记录 ID，作为本次生成的唯一标识，前端应在提交答案后获得
-     * @param lastEventId 上次接收的事件 ID，用于断点续传；若为 null 则从头开始
+     * @param lastEventId 上次接收的事件 ID（即chunk索引），用于断点续传；若为 null 则从头开始
      * @return SSE 事件流，包含 start、delta...、done | error
      */
     public Flux<ServerSentEvent<String>> streamQuestion(
             Long sessionId, Long userId, String attemptId, String lastEventId) {
         log.info("题目流式生成请求开始, sessionId={}, attemptId={}, lastEventId={}", sessionId, attemptId, lastEventId);
 
+        // 检查Redis中的生成状态
         String statusKey = String.format(KEY_STATUS, attemptId);
         String cachedStatus = redisTemplate.opsForValue().get(statusKey);
 
+        // ========== 分支1：已完成 - 从缓存回放 ==========
         if (STATUS_DONE.equals(cachedStatus)) {
             log.info("题目流式生成已完成，从缓存回放, attemptId={}", attemptId);
             return replayFromCache(attemptId, lastEventId);
         }
 
+        // ========== 分支2：错误状态 - 回放错误事件 ==========
         if (STATUS_ERROR.equals(cachedStatus)) {
             log.info("题目流式生成处于错误状态，从缓存回放 error, attemptId={}", attemptId);
             return replayErrorFromCache(attemptId, lastEventId);
         }
 
+        // ========== 分支3：正在生成 - 进入回放+尾随模式 ==========
         if (STATUS_STREAMING.equals(cachedStatus)) {
             log.info("题目流式生成进行中，进入回放+尾随模式, attemptId={}", attemptId);
             return replayAndFollow(attemptId, lastEventId);
         }
 
+        // ========== 分支4：无缓存 - 启动新的生成流程 ==========
         return startNewStream(sessionId, userId, attemptId, lastEventId);
     }
 
     // ==================== 流式生成核心逻辑 ====================
 
     /**
-     * 启动新的流式生成流程，校验权限后调用 AI。
+     * 启动新的流式生成流程：校验权限 → 提取计划 → RAG检索 → 启动后台任务。
+     *
+     * <p>关键步骤：
+     * <ol>
+     *   <li>权限校验：验证会话存在和用户权限</li>
+     *   <li>提取计划：从 attempt.evaluationJson 中提取 NextQuestionPlan</li>
+     *   <li>RAG检索：根据检索计划调用 RAG 服务获取相关知识点</li>
+     *   <li>分布式锁：使用 Redis setIfAbsent 防止重复启动生成任务</li>
+     *   <li>后台启动：调用 startGenerationInBackground 启动异步生成任务</li>
+     * </ol>
+     *
+     * @param sessionId 面试会话 ID
+     * @param userId 用户 ID
+     * @param attemptId 作答记录 ID
+     * @param lastEventId 上次事件 ID
+     * @return SSE事件流
      */
     private Flux<ServerSentEvent<String>> startNewStream(
             Long sessionId, Long userId, String attemptId, String lastEventId) {
+        // 步骤1：权限校验
         InterviewSession session = interviewSessionMapper.selectById(sessionId);
         if (session == null || !session.getUserId().equals(userId)) {
             return Flux.just(buildErrorEvent("UNAUTHORIZED", "No permission to access this interview session"));
         }
 
+        // 步骤2：提取作答记录和下一题计划
         InterviewAttempt attempt = interviewAttemptMapper.selectByAttemptId(attemptId);
         if (attempt == null) {
             return Flux.just(buildErrorEvent("ATTEMPT_NOT_FOUND", "Attempt record not found, submit answer first"));
@@ -162,17 +195,21 @@ public class QuestionStreamService {
             return Flux.just(buildErrorEvent("NO_PLAN", "No next-question plan in evaluation result"));
         }
 
+        // 步骤3：加载历史题目，构建出题上下文
         List<InterviewQuestion> historyQuestions = interviewQuestionMapper.selectList(
                 new LambdaQueryWrapper<InterviewQuestion>()
                         .eq(InterviewQuestion::getSessionId, sessionId)
                         .orderByAsc(InterviewQuestion::getQuestionNo)
         );
 
+        // 步骤4：安全调用 RAG 检索，失败时回退为空上下文
         RagContext ragContext = safeRetrieveRag(session, plan);
 
+        // 步骤5：构建 AI 出题输入对象
         QuestionGenerationInput genInput = buildGenInput(session, plan, historyQuestions, attempt, ragContext);
         logQuestionGenerationDebugInput(sessionId, attempt.getQuestionId(), attemptId, plan, genInput);
 
+        // 步骤6：分布式锁 - 防止多个请求同时启动同一个生成任务
         String statusKey = String.format(KEY_STATUS, attemptId);
         Boolean locked = redisTemplate.opsForValue().setIfAbsent(
                 statusKey, STATUS_STREAMING, cacheTtlSeconds, TimeUnit.SECONDS);
@@ -181,9 +218,11 @@ public class QuestionStreamService {
             return replayAndFollow(attemptId, lastEventId);
         }
 
+        // 步骤7：清理旧缓存并启动后台生成任务
         clearGenerationCache(attemptId);
         startGenerationInBackground(session, attempt.getQuestionId(), plan, genInput, attemptId);
 
+        // 返回 start 事件 + 回放+尾随流
         return Flux.concat(
                 Flux.just(buildStartEvent(attemptId, session.getId())),
                 replayAndFollow(attemptId, lastEventId)
@@ -193,7 +232,21 @@ public class QuestionStreamService {
     // ==================== 流式任务执行 ====================
 
     /**
-     * 启动后台生成任务，生成过程与单个 HTTP SSE 连接解耦。
+     * 启动后台生成任务，生成过程与单个 HTTP SSE 连接完全解耦。
+     *
+     * <p>核心设计思想：
+     * <ul>
+     *   <li>使用 Reactor Flux 消费 AI 流式输出</li>
+     *   <li>每个 token 到达后立即写入 Redis 缓存</li>
+     *   <li>句子闭合时触发分段 TTS，让用户可以边看边听</li>
+     *   <li>流完成后持久化题目到数据库</li>
+     * </ul>
+     *
+     * @param session 面试会话
+     * @param currentQuestionId 当前题目ID
+     * @param plan 下一题计划
+     * @param genInput AI出题输入
+     * @param attemptId 作答记录ID（作为生成任务标识）
      */
     private void startGenerationInBackground(
             InterviewSession session,
@@ -201,18 +254,22 @@ public class QuestionStreamService {
             NextQuestionPlan plan,
             QuestionGenerationInput genInput,
             String attemptId) {
-        AtomicInteger chunkIndex = new AtomicInteger(0);
-        StringBuilder fullText = new StringBuilder();
-        StringBuilder sentenceBuffer = new StringBuilder();
-        AtomicInteger segmentIndex = new AtomicInteger(0);
-        List<CompletableFuture<Boolean>> segmentTtsTasks = new ArrayList<>();
+        // 初始化生成过程中的各种状态变量
+        AtomicInteger chunkIndex = new AtomicInteger(0);  // chunk索引，用于断点续传
+        StringBuilder fullText = new StringBuilder();    // 完整题目文本累积
+        StringBuilder sentenceBuffer = new StringBuilder(); // 句子缓冲，用于检测句子闭合
+        AtomicInteger segmentIndex = new AtomicInteger(0);  // TTS分段索引
+        List<CompletableFuture<Boolean>> segmentTtsTasks = new ArrayList<>(); // TTS任务列表，用于等待完成
+
         String chunksKey = String.format(KEY_CHUNKS, attemptId);
         String ttsReadyKey = String.format(KEY_TTS_READY, attemptId);
         String statusKey = String.format(KEY_STATUS, attemptId);
 
+        // 调用 AI 流式出题，并订阅三个回调：onNext、onError、onComplete
         aiClient.callQuestionGenerationStream(genInput)
-                .publishOn(Schedulers.boundedElastic())
+                .publishOn(Schedulers.boundedElastic())  // 切换到弹性线程池执行
                 .subscribe(
+                        // onNext：每个 token 到达时的处理
                         token -> onGenerationToken(
                                 token,
                                 session.getId(),
@@ -225,6 +282,7 @@ public class QuestionStreamService {
                                 fullText,
                                 sentenceBuffer,
                                 segmentTtsTasks),
+                        // onError：流出错时的处理
                         error -> onGenerationError(
                                 attemptId,
                                 session,
@@ -232,6 +290,7 @@ public class QuestionStreamService {
                                 plan,
                                 chunkIndex.get() > 0 || fullText.length() > 0,
                                 error),
+                        // onComplete：流正常完成时的处理
                         () -> onGenerationCompleted(
                                 session,
                                 currentQuestionId,
@@ -247,6 +306,21 @@ public class QuestionStreamService {
                 );
     }
 
+    /**
+     * 处理每个生成的 token：追加文本、写入缓存、检测句子闭合触发TTS。
+     *
+     * @param token AI 生成的文本片段
+     * @param sessionId 会话ID
+     * @param attemptId 作答记录ID
+     * @param chunksKey Redis chunks 键
+     * @param ttsReadyKey Redis ttsReady 键
+     * @param statusKey Redis status 键
+     * @param chunkIndex chunk 索引（原子递增）
+     * @param segmentIndex TTS 分段索引（原子递增）
+     * @param fullText 完整题目文本累积
+     * @param sentenceBuffer 句子缓冲，用于检测句子闭合
+     * @param segmentTtsTasks TTS 任务列表
+     */
     private void onGenerationToken(
             String token,
             Long sessionId,
@@ -259,13 +333,17 @@ public class QuestionStreamService {
             StringBuilder fullText,
             StringBuilder sentenceBuffer,
             List<CompletableFuture<Boolean>> segmentTtsTasks) {
+        // 步骤1：累积文本
         fullText.append(token);
         sentenceBuffer.append(token);
+
+        // 步骤2：将 token 写入 Redis 缓存，供 SSE 连接读取
         redisTemplate.opsForList().rightPush(chunksKey, token);
         redisTemplate.expire(chunksKey, cacheTtlSeconds, TimeUnit.SECONDS);
         redisTemplate.expire(statusKey, cacheTtlSeconds, TimeUnit.SECONDS);
         chunkIndex.incrementAndGet();
 
+        // 步骤3：检测句子闭合（遇到句号、问号等），触发分段 TTS
         List<String> closedSentences = extractClosedSentences(sentenceBuffer);
         for (String sentence : closedSentences) {
             segmentTtsTasks.add(triggerSegmentTtsAsync(
@@ -277,6 +355,21 @@ public class QuestionStreamService {
         }
     }
 
+    /**
+     * 处理流式生成完成：刷新剩余句子、保存题目、等待TTS、发送done事件。
+     *
+     * @param session 面试会话
+     * @param currentQuestionId 当前题目ID
+     * @param plan 下一题计划
+     * @param attemptId 作答记录ID
+     * @param statusKey Redis status 键
+     * @param totalTokens 总token数
+     * @param finalStem 完整题目文本
+     * @param sentenceBuffer 剩余句子缓冲
+     * @param segmentIndex TTS分段索引
+     * @param ttsReadyKey Redis ttsReady 键
+     * @param segmentTtsTasks TTS任务列表
+     */
     private void onGenerationCompleted(
             InterviewSession session,
             Long currentQuestionId,
@@ -292,6 +385,7 @@ public class QuestionStreamService {
         log.info("AI 题目流式生成完成, attemptId={}, stemLen={}", attemptId, finalStem.length());
         logQuestionGenerationDebugOutput(session.getId(), currentQuestionId, attemptId, plan, finalStem);
 
+        // 步骤1：刷新缓冲中剩余的不成句文本，也触发 TTS
         String trailing = flushTrailingSentence(sentenceBuffer);
         if (!trailing.isBlank()) {
             segmentTtsTasks.add(triggerSegmentTtsAsync(
@@ -303,19 +397,31 @@ public class QuestionStreamService {
         }
 
         try {
+            // 步骤2：保存题目到数据库
             InterviewQuestion question = saveQuestion(session, currentQuestionId, attemptId, plan, finalStem);
+
+            // 步骤3：缓存题目ID
             String questionIdKey = String.format(KEY_QUESTION_ID, attemptId);
             redisTemplate.opsForValue().set(questionIdKey, String.valueOf(question.getId()),
                     cacheTtlSeconds, TimeUnit.SECONDS);
+
+            // 步骤4：触发完整题目 TTS（作为备份）
             boolean ttsReady = ttsService.triggerQuestionAudioAsync(
                     session.getId(), question.getId(), finalStem);
+
+            // 步骤5：等待所有分段 TTS 任务完成
             waitForSegmentTasks(segmentTtsTasks, attemptId);
+
+            // 步骤6：构建 done 事件并缓存
             ServerSentEvent<String> doneEvent = buildDoneEvent(
                     attemptId, session, question, totalTokens, ttsReady);
             cacheDonePayload(attemptId, doneEvent.data());
+
+            // 步骤7：更新状态为 done
             redisTemplate.opsForValue().set(statusKey, STATUS_DONE, cacheTtlSeconds, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.error("题目流式生成后保存失败, attemptId={}", attemptId, e);
+            // 保存失败时转为错误状态
             onGenerationError(attemptId, session, currentQuestionId, plan, true, e);
         }
     }

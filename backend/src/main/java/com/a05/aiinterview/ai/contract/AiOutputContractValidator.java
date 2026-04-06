@@ -82,6 +82,8 @@ public class AiOutputContractValidator {
             return buildFallbackEvaluationDecisionOutput();
         }
 
+        output.setAnswerUnderstanding(defaultString(output.getAnswerUnderstanding(), ""));
+        output.setPlanningIntent(defaultString(output.getPlanningIntent(), ""));
         output.setDecisionReason(defaultString(output.getDecisionReason(), ""));
         output.setFinalDecision(defaultString(output.getFinalDecision(), ""));
         output.setNextFocus(defaultString(output.getNextFocus(), ""));
@@ -211,6 +213,8 @@ public class AiOutputContractValidator {
 
     private EvaluationDecisionOutput buildFallbackEvaluationDecisionOutput() {
         return EvaluationDecisionOutput.builder()
+                .answerUnderstanding("")
+                .planningIntent("")
                 .interviewAction("WRAPUP")
                 .decisionReason("")
                 .finalDecision(StrategyCode.S_WRAPUP.code())
