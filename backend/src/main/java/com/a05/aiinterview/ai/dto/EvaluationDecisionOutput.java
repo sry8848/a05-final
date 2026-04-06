@@ -55,12 +55,8 @@ public class EvaluationDecisionOutput {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class RetrievalPlan {
-        private String goal;
-        private String displayQuery;
         private String queryText;
         private List<String> keywordHints;
         private String difficultyHint;
-        private List<String> mustHaveClues;
-        private List<String> avoidClues;
     }
 }

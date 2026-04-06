@@ -65,13 +65,9 @@ class QuestionStreamServiceBuildInputTest {
                         "nextFocus", "订单超时关闭链路的幂等与并发控制",
                         "decisionReason", "上一题已经建立基础认知，下一题应切回项目主线核实真实工程落地。",
                         "retrievalPlans", List.of(Map.of(
-                                "goal", "补充项目案例",
-                                "displayQuery", "订单超时关闭",
                                 "queryText", "订单超时关闭 幂等 并发控制 延迟消息",
                                 "keywordHints", List.of("订单超时关闭", "幂等", "延迟消息"),
-                                "difficultyHint", "L3",
-                                "mustHaveClues", List.of("项目案例"),
-                                "avoidClues", List.of("重复问法")
+                                "difficultyHint", "L3"
                         ))
                 )
         )));
@@ -126,13 +122,9 @@ class QuestionStreamServiceBuildInputTest {
                 .nextFocus("缓存击穿")
                 .decisionReason("回答覆盖了基础方案，但还需要继续核实工程取舍。")
                 .retrievalPlans(List.of(EvaluationDecisionOutput.RetrievalPlan.builder()
-                        .goal("补充缓存击穿案例")
-                        .displayQuery("缓存击穿")
                         .queryText("缓存击穿 互斥锁 逻辑过期 热点 key 失效")
                         .keywordHints(List.of("缓存击穿", "互斥锁", "逻辑过期"))
                         .difficultyHint("L3")
-                        .mustHaveClues(List.of("方案边界"))
-                        .avoidClues(List.of())
                         .build()))
                 .build();
 
@@ -175,7 +167,7 @@ class QuestionStreamServiceBuildInputTest {
         assertThat(input.getRecentContext().getRecentTurnsSummary()).isEqualTo("回答覆盖了基础方案，但还需要继续核实工程取舍。");
         assertThat(input.getRetrievalContext().getSummary()).contains("无外部参考资料");
         assertThat(input.getRetrievalContext().getRetrievalPlans()).hasSize(1);
-        assertThat(input.getRetrievalContext().getRetrievalPlans().getFirst().getDisplayQuery()).isEqualTo("缓存击穿");
+        assertThat(input.getRetrievalContext().getRetrievalPlans().getFirst().getQueryText()).isEqualTo("缓存击穿 互斥锁 逻辑过期 热点 key 失效");
         assertThat(input.getRetrievalContext().getRetrievalPlans().getFirst().getKeywordHints()).containsExactly("缓存击穿", "互斥锁", "逻辑过期");
         assertThat(input.getConstraints().getAvoidRepetitionFamilies()).isEmpty();
     }
@@ -334,13 +326,9 @@ class QuestionStreamServiceBuildInputTest {
                 .nextFocus("缓存穿透")
                 .decisionReason("需要继续确认布隆过滤器和空对象缓存的取舍。")
                 .retrievalPlans(List.of(EvaluationDecisionOutput.RetrievalPlan.builder()
-                        .goal("补充缓存穿透高频问法")
-                        .displayQuery("缓存穿透")
                         .queryText("Redis 缓存穿透 布隆过滤器 空对象缓存")
                         .keywordHints(List.of("缓存穿透", "布隆过滤器", "空对象缓存"))
                         .difficultyHint("L2")
-                        .mustHaveClues(List.of("布隆过滤器", "误判"))
-                        .avoidClues(List.of("Redis 安装部署"))
                         .build()))
                 .build();
 
@@ -432,26 +420,19 @@ class QuestionStreamServiceBuildInputTest {
                 .targetDomainCode("redis")
                 .targetDomainName("Redis")
                 .retrievalPlans(List.of(EvaluationDecisionOutput.RetrievalPlan.builder()
-                        .goal("补充高频题")
-                        .displayQuery("缓存穿透")
                         .queryText("Redis 缓存穿透 布隆过滤器")
                         .keywordHints(List.of("缓存穿透", "布隆过滤器"))
                         .difficultyHint("L2")
-                        .mustHaveClues(List.of("布隆过滤器"))
-                        .avoidClues(List.of("安装部署"))
                         .build()))
                 .build();
 
         RagRetrievalRequest request = RagRetrievalRequest.builder()
                 .shouldRetrieve(true)
-                .displayQuery("缓存穿透")
                 .queryText("Redis 缓存穿透 布隆过滤器")
                 .questionType("PRINCIPLE")
                 .domainCode("redis")
                 .difficultyHint("L2")
                 .keywordQueries(List.of("缓存穿透", "布隆过滤器"))
-                .mustHaveClues(List.of("布隆过滤器"))
-                .avoidClues(List.of("安装部署"))
                 .build();
         RagContext expected = RagContext.builder()
                 .summary("命中 1 张题卡")

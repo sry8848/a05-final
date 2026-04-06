@@ -22,9 +22,6 @@ public class RagRetrievalRequest {
     /** 是否应该发起检索；为 false 时调用方应直接跳过检索。 */
     private boolean shouldRetrieve;
 
-    /** 调试和日志使用的短标题。 */
-    private String displayQuery;
-
     /** 真实执行的主查询文本。 */
     private String queryText;
 
@@ -41,10 +38,6 @@ public class RagRetrievalRequest {
     /** 当前轮希望探到的目标深度提示，如 L3；只作为软提示参与查询/排序 */
     private String difficultyHint;
 
-    /** 邻近难度范围；用于后续排序或范围过滤，不做等值硬过滤。 */
-    @Builder.Default
-    private List<String> preferredDifficultyLevels = List.of();
-
     /**
      * 核心考察焦点（自然语言）。
      * 由 EvaluationDecisionOutput.NextQuestionStrategy.focusPoint 提供，
@@ -60,12 +53,4 @@ public class RagRetrievalRequest {
 
     /** 项目题时的项目名；非项目题为空。 */
     private String projectName;
-
-    /** 期望命中的关键线索。 */
-    @Builder.Default
-    private List<String> mustHaveClues = List.of();
-
-    /** 期望规避的低价值线索。 */
-    @Builder.Default
-    private List<String> avoidClues = List.of();
 }

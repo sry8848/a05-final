@@ -37,6 +37,7 @@ public class DecisionExecutionPlanBuilder {
             StrategyCode.S_P_VARIANT.code(),
             StrategyCode.S_P_SAME_DOMAIN_SHIFT.code()
     );
+    private static final Set<String> ALLOWED_DIFFICULTY_HINTS = Set.of("", "L1", "L2", "L3", "L4", "L5");
 
     /**
      * 构建并验证决策执行计划。
@@ -127,6 +128,7 @@ public class DecisionExecutionPlanBuilder {
         if (nextFocus.isBlank()) {
             errors.add("NEXT_FOCUS_REQUIRED");
         }
+        validateRetrievalPlans(output == null ? null : output.getRetrievalPlans(), errors);
 
         String currentType = currentQuestion == null ? "" : normalize(currentQuestion.getQuestionType());
         String targetQuestionType = StrategyCatalog.targetQuestionType(strategyCode);
@@ -229,5 +231,29 @@ public class DecisionExecutionPlanBuilder {
 
     private static String asString(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private static void validateRetrievalPlans(
+            List<EvaluationDecisionOutput.RetrievalPlan> retrievalPlans,
+            List<String> errors
+    ) {
+        if (retrievalPlans == null || retrievalPlans.isEmpty()) {
+            return;
+        }
+        if (retrievalPlans.size() > 1) {
+            errors.add("RETRIEVAL_PLAN_COUNT_INVALID");
+        }
+        for (EvaluationDecisionOutput.RetrievalPlan retrievalPlan : retrievalPlans) {
+            if (retrievalPlan == null) {
+                continue;
+            }
+            if (trim(retrievalPlan.getQueryText()).isBlank()) {
+                errors.add("RETRIEVAL_QUERY_TEXT_REQUIRED");
+            }
+            String difficultyHint = trim(retrievalPlan.getDifficultyHint()).toUpperCase(Locale.ROOT);
+            if (!ALLOWED_DIFFICULTY_HINTS.contains(difficultyHint)) {
+                errors.add("RETRIEVAL_DIFFICULTY_HINT_INVALID");
+            }
+        }
     }
 }

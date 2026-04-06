@@ -76,21 +76,16 @@ class InterviewRagEvaluationTest {
             assertThat(sample.traceId()).isNotBlank();
             assertThat(sample.questionType()).isNotBlank();
             assertThat(sample.focusPoint()).isNotBlank();
-            assertThat(sample.mustHaveClues()).isNotNull();
-            assertThat(sample.avoidClues()).isNotNull();
 
             if (sample.shouldRetrieve()) {
                 RetrievalPlan retrievalPlan = requireSingleRetrievalPlan(sample);
                 assertThat(sample.expectedKeywords()).isNotEmpty();
+                assertThat(retrievalPlan.queryText()).isNotBlank();
                 assertThat(retrievalPlan.keywordHints()).containsAll(sample.expectedKeywords());
-                assertThat(retrievalPlan.mustHaveClues()).containsExactlyElementsOf(sample.mustHaveClues());
-                assertThat(retrievalPlan.avoidClues()).containsExactlyElementsOf(sample.avoidClues());
             } else {
                 assertThat(sample.retrievalPlans()).isEmpty();
                 assertThat(sample.expectedKeywords()).isEmpty();
                 assertThat(sample.expectedFollowUpIds()).isEmpty();
-                assertThat(sample.mustHaveClues()).isEmpty();
-                assertThat(sample.avoidClues()).isEmpty();
             }
         }
 
@@ -126,8 +121,7 @@ class InterviewRagEvaluationTest {
             assertThat(report.routingAccuracy()).isEqualTo(1.0d);
             assertThat(report.routeMismatchTraceIds()).isEmpty();
             assertThat(report.retrievalApplicableHitRate()).isGreaterThanOrEqualTo(0.8d);
-            assertThat(report.mustHaveCoverage()).isGreaterThanOrEqualTo(0.7d);
-            assertThat(report.avoidPollutionRate())
+            assertThat(report.structuralPollutionRate())
                     .withFailMessage(report.failureSummary(DENSE_RECALL_HIT_RATE_GATE))
                     .isLessThanOrEqualTo(0.2d);
             assertThat(report.denseRecallHitRate())
@@ -212,8 +206,8 @@ class InterviewRagEvaluationTest {
         StageResult stageResult = harness.evaluateStages(sample, compiled);
         RagContext context = harness.retrievalService.retrieve(compiled);
         boolean retrieved = containsQuestionId(context.getRetrievedMaterials(), sample.traceId());
-        boolean mustHaveCovered = hasMustHaveCoverage(context, sample);
-        boolean avoidPolluted = hasAvoidPollution(context, sample);
+        boolean structuralPolluted = hasStructuralPollution(context, sample);
+        boolean followUpMatched = hasExpectedFollowUp(context, sample);
 
         return new SampleEvaluationResult(
                 sample.traceId(),
@@ -221,8 +215,8 @@ class InterviewRagEvaluationTest {
                 routingMatched,
                 stageResult,
                 retrieved,
-                mustHaveCovered,
-                avoidPolluted
+                structuralPolluted,
+                followUpMatched
         );
     }
 
@@ -260,13 +254,9 @@ class InterviewRagEvaluationTest {
         }
         return retrievalPlans.stream()
                 .map(plan -> EvaluationDecisionOutput.RetrievalPlan.builder()
-                        .goal(plan.goal())
-                        .displayQuery(plan.displayQuery())
                         .queryText(plan.queryText())
                         .keywordHints(plan.keywordHints())
                         .difficultyHint(plan.difficultyHint())
-                        .mustHaveClues(plan.mustHaveClues())
-                        .avoidClues(plan.avoidClues())
                         .build())
                 .toList();
     }
@@ -275,23 +265,20 @@ class InterviewRagEvaluationTest {
         return materials.stream().anyMatch(material -> Objects.equals(expectedQuestionId, material.getQuestionId()));
     }
 
-    private boolean hasMustHaveCoverage(RagContext context, InterviewRetrievalCase sample) {
-        return context.getRetrievedMaterials().stream()
-                .filter(material -> Objects.equals(sample.traceId(), material.getQuestionId()))
-                .findFirst()
-                .map(material -> material.getScoringKeyPoints().containsAll(sample.mustHaveClues()))
-                .orElse(false);
-    }
-
-    private boolean hasAvoidPollution(RagContext context, InterviewRetrievalCase sample) {
+    private boolean hasStructuralPollution(RagContext context, InterviewRetrievalCase sample) {
         String expectedQuestionType = normalizeQuestionType(sample.questionType());
         String expectedDomainCode = inferDomainCode(sample);
         return context.getRetrievedMaterials().stream()
                 .filter(material -> !Objects.equals(sample.traceId(), material.getQuestionId()))
-                .filter(material -> isStructurallyPolluting(material, expectedQuestionType, expectedDomainCode))
-                .anyMatch(material -> containsAnyClue(material.getReferenceContext(), sample.avoidClues())
-                        || containsAnyClue(material.getIntentConcept(), sample.avoidClues())
-                        || material.getScoringPitfalls().stream().anyMatch(pitfall -> containsAnyClue(pitfall, sample.avoidClues())));
+                .anyMatch(material -> isStructurallyPolluting(material, expectedQuestionType, expectedDomainCode));
+    }
+
+    private boolean hasExpectedFollowUp(RagContext context, InterviewRetrievalCase sample) {
+        if (sample.expectedFollowUpIds() == null || sample.expectedFollowUpIds().isEmpty()) {
+            return true;
+        }
+        return context.getFollowUpCandidates().stream()
+                .anyMatch(sample.expectedFollowUpIds()::contains);
     }
 
     private boolean isStructurallyPolluting(
@@ -318,31 +305,22 @@ class InterviewRagEvaluationTest {
         return !normalizedExpectedDomainCode.equals(actualDomainCode);
     }
 
-    private boolean containsAnyClue(String text, List<String> clues) {
-        if (text == null || text.isBlank() || clues == null || clues.isEmpty()) {
-            return false;
-        }
-        String normalizedText = text.toLowerCase(Locale.ROOT);
-        return clues.stream()
-                .filter(Objects::nonNull)
-                .map(clue -> clue.toLowerCase(Locale.ROOT))
-                .anyMatch(normalizedText::contains);
-    }
-
     private EvaluationReport aggregate(List<SampleEvaluationResult> sampleResults) {
         int total = sampleResults.size();
         List<String> routeMismatchTraceIds = new ArrayList<>();
         List<String> denseRecallMissTraceIds = new ArrayList<>();
-        List<String> avoidPollutionTraceIds = new ArrayList<>();
+        List<String> structuralPollutionTraceIds = new ArrayList<>();
+        List<String> followUpMissTraceIds = new ArrayList<>();
 
         int routingMatches = 0;
         int retrievableSamples = 0;
         int retrievedSamples = 0;
-        int mustHaveCoverageHits = 0;
-        int avoidPollutionHits = 0;
+        int structuralPollutionHits = 0;
         int denseRecallHits = 0;
         int sparseRecallHits = 0;
         int rerankHits = 0;
+        int followUpExpectedSamples = 0;
+        int followUpHits = 0;
 
         for (SampleEvaluationResult result : sampleResults) {
             if (result.routingMatched()) {
@@ -356,12 +334,9 @@ class InterviewRagEvaluationTest {
                 if (result.retrieved()) {
                     retrievedSamples++;
                 }
-                if (result.mustHaveCovered()) {
-                    mustHaveCoverageHits++;
-                }
-                if (result.avoidPolluted()) {
-                    avoidPollutionHits++;
-                    avoidPollutionTraceIds.add(result.traceId());
+                if (result.structuralPolluted()) {
+                    structuralPollutionHits++;
+                    structuralPollutionTraceIds.add(result.traceId());
                 }
                 if (result.stageResult().denseRecallHit()) {
                     denseRecallHits++;
@@ -374,29 +349,36 @@ class InterviewRagEvaluationTest {
                 if (result.stageResult().rerankHit()) {
                     rerankHits++;
                 }
+                if (result.followUpMatched() || !result.retrieved()) {
+                    followUpHits++;
+                } else {
+                    followUpMissTraceIds.add(result.traceId());
+                }
+                followUpExpectedSamples++;
             }
         }
 
         double routingAccuracy = total == 0 ? 1.0d : (double) routingMatches / total;
         double retrievalApplicableHitRate = retrievableSamples == 0 ? 1.0d : (double) retrievedSamples / retrievableSamples;
-        double mustHaveCoverage = retrievableSamples == 0 ? 1.0d : (double) mustHaveCoverageHits / retrievableSamples;
-        double avoidPollutionRate = retrievableSamples == 0 ? 0.0d : (double) avoidPollutionHits / retrievableSamples;
+        double structuralPollutionRate = retrievableSamples == 0 ? 0.0d : (double) structuralPollutionHits / retrievableSamples;
         double denseRecallHitRate = retrievableSamples == 0 ? 0.0d : (double) denseRecallHits / retrievableSamples;
         double lexicalPrefilterHitRate = retrievableSamples == 0 ? 0.0d : (double) sparseRecallHits / retrievableSamples;
         double rerankTop3HitRate = retrievableSamples == 0 ? 0.0d : (double) rerankHits / retrievableSamples;
+        double followUpHitRate = followUpExpectedSamples == 0 ? 1.0d : (double) followUpHits / followUpExpectedSamples;
 
         return new EvaluationReport(
                 total,
                 routeMismatchTraceIds,
                 denseRecallMissTraceIds,
-                avoidPollutionTraceIds,
+                structuralPollutionTraceIds,
+                followUpMissTraceIds,
                 routingAccuracy,
                 retrievalApplicableHitRate,
-                mustHaveCoverage,
-                avoidPollutionRate,
+                structuralPollutionRate,
                 denseRecallHitRate,
                 lexicalPrefilterHitRate,
-                rerankTop3HitRate
+                rerankTop3HitRate,
+                followUpHitRate
         );
     }
 
@@ -448,21 +430,15 @@ class InterviewRagEvaluationTest {
             boolean shouldRetrieve,
             String difficultyHint,
             List<String> expectedKeywords,
-            List<String> mustHaveClues,
-            List<String> avoidClues,
             List<String> expectedFollowUpIds,
             List<RetrievalPlan> retrievalPlans
     ) {
     }
 
     private record RetrievalPlan(
-            String goal,
-            String displayQuery,
             String queryText,
             List<String> keywordHints,
-            String difficultyHint,
-            List<String> mustHaveClues,
-            List<String> avoidClues
+            String difficultyHint
     ) {
     }
 
@@ -470,14 +446,15 @@ class InterviewRagEvaluationTest {
             int totalSamples,
             List<String> routeMismatchTraceIds,
             List<String> denseRecallMissTraceIds,
-            List<String> avoidPollutionTraceIds,
+            List<String> structuralPollutionTraceIds,
+            List<String> followUpMissTraceIds,
             double routingAccuracy,
             double retrievalApplicableHitRate,
-            double mustHaveCoverage,
-            double avoidPollutionRate,
+            double structuralPollutionRate,
             double denseRecallHitRate,
             double lexicalPrefilterHitRate,
-            double rerankTop3HitRate
+            double rerankTop3HitRate,
+            double followUpHitRate
     ) {
         private String failureSummary(double gate) {
             return """
@@ -485,21 +462,23 @@ class InterviewRagEvaluationTest {
                     totalSamples=%d
                     routeMismatchTraceIds=%s
                     denseRecallMissTraceIds=%s
-                    avoidPollutionTraceIds=%s
-                    metrics={routingAccuracy=%.3f, retrievalApplicableHitRate=%.3f, mustHaveCoverage=%.3f, avoidPollutionRate=%.3f, denseRecallHitRate=%.3f, lexicalPrefilterHitRate=%.3f, rerankTop3HitRate=%.3f}
+                    structuralPollutionTraceIds=%s
+                    followUpMissTraceIds=%s
+                    metrics={routingAccuracy=%.3f, retrievalApplicableHitRate=%.3f, structuralPollutionRate=%.3f, denseRecallHitRate=%.3f, lexicalPrefilterHitRate=%.3f, rerankTop3HitRate=%.3f, followUpHitRate=%.3f}
                     gate=denseRecallHitRate>=%.1f
                     """.formatted(
                     totalSamples,
                     routeMismatchTraceIds,
                     denseRecallMissTraceIds,
-                    avoidPollutionTraceIds,
+                    structuralPollutionTraceIds,
+                    followUpMissTraceIds,
                     routingAccuracy,
                     retrievalApplicableHitRate,
-                    mustHaveCoverage,
-                    avoidPollutionRate,
+                    structuralPollutionRate,
                     denseRecallHitRate,
                     lexicalPrefilterHitRate,
                     rerankTop3HitRate,
+                    followUpHitRate,
                     gate
             );
         }
@@ -511,8 +490,8 @@ class InterviewRagEvaluationTest {
             boolean routingMatched,
             StageResult stageResult,
             boolean retrieved,
-            boolean mustHaveCovered,
-            boolean avoidPolluted
+            boolean structuralPolluted,
+            boolean followUpMatched
     ) {
     }
 
@@ -617,15 +596,15 @@ class InterviewRagEvaluationTest {
                 RetrievalPlan retrievalPlan = sample.retrievalPlans().getFirst();
                 documents.add(KnowledgeDocument.builder()
                         .id(sample.traceId())
-                        .questionText(firstNonBlank(retrievalPlan.displayQuery(), sample.focusPoint()))
-                        .intentConcept(firstNonBlank(retrievalPlan.goal(), sample.focusPoint()))
+                        .questionText(sample.focusPoint())
+                        .intentConcept(sample.focusPoint())
                         .referenceContext(firstNonBlank(retrievalPlan.queryText(), sample.focusPoint()))
-                        .scoringKeyPoints(sample.mustHaveClues())
-                        .scoringPitfalls(sample.avoidClues())
+                        .scoringKeyPoints(sample.expectedKeywords())
+                        .scoringPitfalls(List.of())
                         .followUpIds(sample.expectedFollowUpIds())
                         .domainCode(inferDomainCodeStatic(sample))
                         .questionType(normalizeQuestionTypeStatic(sample.questionType()))
-                        .difficulty(firstNonBlank(sample.difficultyHint(), "L3"))
+                        .difficulty(firstNonBlank(retrievalPlan.difficultyHint(), firstNonBlank(sample.difficultyHint(), "L3")))
                         .keywords(sample.expectedKeywords())
                         .source("rag_eval")
                         .active(true)

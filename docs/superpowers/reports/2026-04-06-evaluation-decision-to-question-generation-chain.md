@@ -2,401 +2,171 @@
 
 ## 文档目的
 
-本文用于详细说明从 `evaluation_decision` 提示词到最终 `question generation` 出题提示词之间的完整程序链路。
+本文说明从 `evaluation_decision` 到 `question generation` 的真实程序链路，重点回答：
 
-本文关注的不是抽象方案，而是**当前代码真实怎么跑**，重点回答下面几个问题：
+- AI 当前被要求输出哪些 retrieval 字段
+- 后端如何清洗、校验、修复这些字段
+- 哪些字段会被原样透传，哪些字段会被程序派生
+- `RagPlanCompiler`、`RagRetrievalService`、`QuestionGenerationInput` 分别怎么消费它们
 
-- `evaluation_decision` 提示词要求 AI 输出什么字段？
-- 后端程序如何对这些字段做清洗、校验、修复和兜底？
-- 哪些字段会被原样透传，哪些字段会被删减、清空、补默认值或系统派生？
-- 为什么 `QuestionStreamService` 最终读取的是 `effectiveDecisionPlan`，而不是 AI 的原始 JSON？
-- `RagPlanCompiler`、`RagRetrievalService` 和 `QuestionGenerationInput` 分别如何消费这些字段？
-
-本文默认读者已经了解本项目的基础概念，但不要求提前阅读其他 RAG 基线文档。
+本文描述的是**当前代码真实实现**，不是旧方案，也不是未来理想方案。
 
 ## 总链路概览
 
-从一次回答提交到下一题生成，真实链路不是 4 段，而是 7 段：
+当前真实链路是：
 
-1. `evaluation_decision` Prompt 约束 AI 输出结构化 JSON
-2. `OpenAiClient.callEvaluationDecision()` 调用模型并做第一层契约清洗
-3. `DecisionExecutionPlanBuilder` 对 AI 输出做第二层决策合法性校验
-4. 若失败则进入 `DecisionRepairOrchestrator` 修复；仍失败则进入系统兜底
-5. 生效后的 `DecisionExecutionPlan` 写入 `attempt.evaluationJson.effectiveDecisionPlan`
-6. `QuestionStreamService` 重新读取 `effectiveDecisionPlan`，调用 `RagPlanCompiler` 和 `RagRetrievalService`
-7. `QuestionGenerationInput` 组装完成后，进入 `question_generation_stream` Prompt 生成下一题
+1. `evaluation_decision` Prompt 要求 AI 输出结构化 JSON
+2. `OpenAiClient` 调模型并解析 DTO
+3. `AiOutputContractValidator` 做第一层契约清洗
+4. `DecisionExecutionPlanBuilder` 做第二层执行语义校验
+5. 如校验失败，走 `DecisionRepairOrchestrator`；再失败则走系统兜底
+6. 生效后的 `effectiveDecisionPlan` 写入 `attempt.evaluationJson`
+7. `QuestionStreamService` 读取 `effectiveDecisionPlan`
+8. `RagPlanCompiler` 编译检索请求
+9. `RagRetrievalServiceImpl` 执行检索并返回 `RagContext`
+10. `QuestionGenerationInput` 组装完成后进入 question generation Prompt
 
-这意味着：
+关键结论：
 
-- `QuestionStreamService` 不直接信任 AI 原始输出。
-- 出题阶段依赖的是**生效计划**，不是原始 AI 返回。
-- 任何字段是否最终生效，都要看它是否通过了验证、修复和兜底链。
+- question generation 不直接信任 AI 原始 JSON
+- 后续链路只信任 `effectiveDecisionPlan`
 
-## 第 1 层：`evaluation_decision` Prompt 与输出契约
+## 第 1 层：Prompt 与 DTO 契约
 
 相关文件：
 
 - [evaluation-decision.md](D:\a05-cursor\backend\src\main\resources\prompts\evaluation-decision.md)
 - [EvaluationDecisionOutput.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\ai\dto\EvaluationDecisionOutput.java)
 
-### Prompt 的职责
+当前 Prompt 对 retrieval brief 的要求已经收缩为 3 字段：
 
-`evaluation_decision` Prompt 的职责不是直接出题，而是：
-
-- 理解候选人当前回答在会话中的意义
-- 决定下一步动作是继续、平移、切换还是结束
-- 在需要时给下游提供 `retrievalPlans`
-
-Prompt 中明确要求 AI 返回结构化 JSON，且字段顺序固定。当前 Prompt 仍要求 `retrievalPlans` 输出 7 个字段：
-
-- `goal`
-- `displayQuery`
 - `queryText`
 - `keywordHints`
 - `difficultyHint`
+
+`EvaluationDecisionOutput.RetrievalPlan` 也只保留这 3 个字段。
+
+已经物理删除，不再属于当前契约的字段：
+
+- `goal`
+- `displayQuery`
 - `mustHaveClues`
 - `avoidClues`
 
-这只是 **Prompt 层要求**，不等于这些字段一定全部在后端后续层级中被等价使用。
+这意味着：
 
-### DTO 的职责
+- AI 已经不能再输出旧字段
+- 后端 DTO 也不会再接收旧字段
 
-`EvaluationDecisionOutput` 是 AI 输出 DTO，包含三类信息：
-
-1. 辅助解释字段
-- `answerUnderstanding`
-- `planningIntent`
-- `decisionReason`
-
-2. 决策字段
-- `interviewAction`
-- `finalDecision`
-- `nextFocus`
-- `nextItemType`
-- `nextItemName`
-- `nextProjectPoint`
-- `targetDomainCode`
-
-3. 沉淀与检索字段
-- `newCoveredDomains`
-- `newCoveredPoints`
-- `retrievalPlans`
-
-其中 `retrievalPlans` 的每个元素当前由 `EvaluationDecisionOutput.RetrievalPlan` 表示，字段定义仍是 Prompt 层的 7 字段版本。
-
-## 第 2 层：`OpenAiClient` 调用模型并做第一层清洗
+## 第 2 层：`AiOutputContractValidator` 的第一层清洗
 
 相关文件：
 
-- [OpenAiClient.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\ai\impl\OpenAiClient.java)
 - [AiOutputContractValidator.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\ai\contract\AiOutputContractValidator.java)
 
-### 调用过程
+这一层不负责判断策略是否合理，只负责基础契约清洗。
 
-`OpenAiClient.callEvaluationDecision()` 的主要步骤是：
+### retrievalPlans 的清洗规则
 
-1. 用 `BeanOutputConverter<EvaluationDecisionOutput>` 生成 JSON Schema
-2. 渲染 `evaluation_decision` Prompt
-3. 调用模型
-4. 将模型输出解析为 `EvaluationDecisionOutput`
-5. 交给 `AiOutputContractValidator.validateEvaluationDecision()` 做第一层清洗
+对每条 retrieval plan，只做这三件事：
 
-### 第一层清洗做了什么
-
-`AiOutputContractValidator` 不负责判断策略是否合理，但会做**基础契约清洗**。
-
-#### 字符串字段
-
-下面这些字段都会做 `null -> ""` 和 `trim()`：
-
-- `answerUnderstanding`
-- `planningIntent`
-- `decisionReason`
-- `finalDecision`
-- `nextFocus`
-- `nextItemType`
-- `nextItemName`
-- `nextProjectPoint`
-- `targetDomainCode`
-
-这意味着：
-
-- AI 即使输出 `null`，后端也会把它变成空字符串。
-- 这一层已经消除了大部分 `null` 风险。
-
-#### 数组字段
-
-下面这些字段会被清洗成非 null 的列表：
-
-- `newCoveredDomains`
-- `newCoveredPoints`
-- `retrievalPlans`
-
-#### `newCoveredDomains`
-
-`newCoveredDomains` 会被过滤掉以下非法项：
-
-- `item == null`
-- `domainCode` 为空
-- `domainName` 为空
-
-如果 AI 原始输出里有脏项，清洗后数量会减少。
-
-#### `newCoveredPoints`
-
-会执行：
-
-- 过滤空值和空白字符串
-- `trim()`
-- `distinct()`
-
-这意味着这里允许**删减**，但不新增程序派生值。
-
-#### `retrievalPlans`
-
-`sanitizeRetrievalPlans()` 会对每个计划做以下处理：
-
-- `goal -> defaultString(..., "")`
-- `displayQuery -> defaultString(..., "")`
 - `queryText -> defaultString(..., "")`
-- `keywordHints -> sanitizeStringList()`
+- `keywordHints -> sanitizeStringList(...)`
 - `difficultyHint -> defaultString(..., "")`
-- `mustHaveClues -> sanitizeStringList()`
-- `avoidClues -> sanitizeStringList()`
 
-这里的关键点是：
+这里的效果是：
 
-- `retrievalPlans` 的每个字段都可能被清洗、去空、去重
-- 后端不会在这一层**新增** AI 没给出的语义字段
-- 但会删除空白元素、把 null 变成空字符串或空列表
+- `null` 会被清成空字符串或空数组
+- `keywordHints` 会去空白、去重复
+- 不会新增任何程序猜测字段
 
-### 第一层清洗之后仍会发生什么
+这层不会做的事：
 
-`AiOutputContractValidator` 校验通过不代表“决策已经可执行”。  
-后面还要进入 `DecisionExecutionPlanBuilder` 做第二层合法性校验。
+- 不会把 `nextFocus` 补成 `queryText`
+- 不会生成 `displayQuery`
+- 不会生成负向 clue
 
-## 第 3 层：`DecisionExecutionPlanBuilder` 做第二层决策合法性校验
+## 第 3 层：`DecisionExecutionPlanBuilder` 的第二层校验
 
 相关文件：
 
 - [DecisionExecutionPlanBuilder.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\interview\engine\DecisionExecutionPlanBuilder.java)
-- [DecisionExecutionPlan.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\interview\engine\DecisionExecutionPlan.java)
 
-### 为什么还需要这一层
+这一层负责判断：**这份 AI 决策是否可执行**。
 
-第一层只解决“格式像不像 DTO”，第二层才解决“这个决策在当前上下文里是否合法、可执行”。
+### `retrievalPlans` 的当前规则
 
-`DecisionExecutionPlanBuilder.build()` 输入包括：
+`CONTINUE` 分支下，当前已经新增了 3 条 retrieval 语义校验：
 
-- 当前题目 `currentQuestion`
-- 已经清洗过的 `EvaluationDecisionOutput`
-- 剩余待考察知识域菜单 `remainingTargetDomains`
-- 当前可用策略池 `availableStrategies`
-- 决策来源 `RAW_AI / REPAIRED_AI`
+1. `retrievalPlans` 只能有 `0` 或 `1` 条  
+   错误码：`RETRIEVAL_PLAN_COUNT_INVALID`
 
-### 第二层校验的核心逻辑
+2. 只要存在 retrieval plan，`queryText` 必须非空  
+   错误码：`RETRIEVAL_QUERY_TEXT_REQUIRED`
 
-#### 1. `interviewAction` 必须合法
+3. `difficultyHint` 只能是：
+   - `""`
+   - `L1`
+   - `L2`
+   - `L3`
+   - `L4`
+   - `L5`  
+   错误码：`RETRIEVAL_DIFFICULTY_HINT_INVALID`
 
-只允许：
+### 这一层不会做的事
 
-- `CONTINUE`
-- `WRAPUP`
+- 不会把多条 retrieval plan 合并
+- 不会自动补全缺失的 `queryText`
+- 不会把 `difficultyHint` 改写成合法值
 
-否则直接失败，错误码：
+也就是说，builder 现在是**硬校验**，不是兜底编译器。
 
-- `INVALID_STRATEGY_CODE`
-
-#### 2. `WRAPUP` 分支的强约束
-
-当 `interviewAction == WRAPUP` 时，必须同时满足：
-
-- `finalDecision == S_WRAPUP`
-- `nextFocus == ""`
-- `targetDomainCode == ""`
-- `retrievalPlans` 为空
-
-否则返回失败：
-
-- `WRAPUP_FIELDS_MUST_BE_EMPTY`
-
-并且成功时会构造一个新的 `DecisionExecutionPlan`：
-
-- `retrievalPlans` 被强制写成 `List.of()`
-- 其他继续面试字段被强制清空
-
-这意味着：
-
-- AI 原始输出里如果结束面试却仍带检索计划，后续不会生效
-- 这是**明确删减字段**，不是保留原值
-
-#### 3. `CONTINUE` 分支的强约束
-
-当 `interviewAction == CONTINUE` 时，至少检查：
-
-- `finalDecision` 必须是合法策略编码
-- `finalDecision` 必须出现在 `availableStrategies` 里
-- `nextFocus` 不允许为空
-
-对应错误码包括：
-
-- `INVALID_STRATEGY_CODE`
-- `STRATEGY_NOT_IN_AVAILABLE_POOL`
-- `NEXT_FOCUS_REQUIRED`
-
-#### 4. 知识域相关约束
-
-如果所选策略要求必须指定目标知识域：
-
-- `targetDomainCode` 不能为空
-- 且必须存在于剩余知识域菜单里
-
-否则错误码可能是：
-
-- `TARGET_DOMAIN_REQUIRED`
-- `TARGET_DOMAIN_NOT_IN_MENU`
-
-如果是“同知识域原则题”策略且 AI 没写 `targetDomainCode`：
-
-- 系统会尝试从当前题的 `generationContextJson` 继承知识域
-- 继承失败则报错：
-  - `PRINCIPLE_DOMAIN_INHERITANCE_FAILED`
-
-如果策略本身不需要知识域但 AI 却提供了：
-
-- 报错 `TARGET_DOMAIN_MUST_BE_EMPTY`
-
-### 第二层成功后会发生什么
-
-如果通过校验，系统不会继续沿用原始 `EvaluationDecisionOutput` 作为执行依据，而是生成一个新的 `DecisionExecutionPlan`。
-
-这个计划里：
-
-- `targetQuestionType` 由 `StrategyCatalog.targetQuestionType(strategyCode)` 推导
-- `targetDomainName` 由剩余知识域菜单推导或继承得到
-- `retrievalPlans` 直接来自 `output.getRetrievalPlans()` 的只读拷贝
-- `effectiveDecisionSource` 被明确标记为当前来源
-
-这意味着程序开始进入“**生效计划**”语义，而不是“AI 原始输出”语义。
-
-## 第 4 层：`DecisionRepairOrchestrator` 修复非法决策
+## 第 4 层：repair 与系统兜底
 
 相关文件：
 
 - [DecisionRepairOrchestrator.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\interview\engine\DecisionRepairOrchestrator.java)
 - [AnswerSubmitService.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\interview\engine\AnswerSubmitService.java)
 
-### 进入修复的时机
+如果 builder 校验失败：
 
-在 `AnswerSubmitService.resolveDecision()` 中：
+1. 先进入 repair
+2. repair 仍失败，进入系统兜底
 
-1. 先提取 AI 原始输出
-2. 调 `DecisionExecutionPlanBuilder` 校验
-3. 如果失败，进入 `DecisionRepairOrchestrator.repair()`
+这意味着：
 
-### 修复模式怎么构造
+- question generation 后续看到的 retrieval plan，可能来自 repair 后的结果
+- 也可能完全来自 system fallback
+- 不应把原始 AI 输出等同于最终生效计划
 
-修复时并不是直接拿原输出原地修，而是：
+## 第 5 层：`effectiveDecisionPlan` 落库
 
-- 构造一个新的 `EvaluationDecisionInput`
-- `repairMode = true`
-- 带上 `validationErrors`
-- 带上 `rawDecisionOutput` 摘要
+`AnswerSubmitService` 会把生效后的执行计划写入：
 
-然后再次调用 `OpenAiClient.callEvaluationDecision()`
+- `attempt.evaluationJson.effectiveDecisionPlan`
 
-### 修复后的结果怎么处理
+这里是后续出题链路唯一可信的决策来源。
 
-修复后的输出会再次经过：
-
-1. JSON 解析
-2. `AiOutputContractValidator`
-3. `DecisionExecutionPlanBuilder`
-
-且这次 `effectiveDecisionSource` 标记为：
-
-- `REPAIRED_AI`
-
-如果修复成功：
-
-- 生效计划来自修复后的输出
-- 原始输出不会继续直接生效
-
-这意味着 AI 原始字段有可能在 repair 之后发生变化，最终出题阶段看到的是**修复后的字段版本**。
-
-## 第 5 层：系统兜底会替换整份决策计划
-
-相关文件：
-
-- [AnswerSubmitService.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\interview\engine\AnswerSubmitService.java)
-- `SystemFallbackPlanBuilder`
-
-### 进入兜底的条件
-
-如果 repair 之后仍然非法：
-
-- 系统不再信任 AI 输出
-- 直接根据状态构造兜底计划
-
-可能是：
-
-- `buildContinuePlan(...)`
-- `buildSystemErrorPlan(...)`
-
-### 兜底意味着什么
-
-一旦进入 `SYSTEM_FALLBACK`：
-
-- 生效字段不再来自 AI
-- `retrievalPlans` 也可能变成系统兜底值，或者为空
-- `QuestionStreamService` 后续读取的是系统兜底计划，不是 AI 输出
-
-这一步是当前链路里最容易被忽略的一层。
-
-## 第 6 层：生效计划写入 `evaluationJson`
-
-相关文件：
-
-- [AnswerSubmitService.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\interview\engine\AnswerSubmitService.java)
-
-最终，`DecisionResolution` 会把下面这些信息打进 `evaluationJson`：
+同时还会保留：
 
 - `rawAiOutput`
-- `rawResponse`
 - `decisionValidation`
 - `repairAttempts`
-- `repairInput`
 - `repairOutput`
-- `effectiveDecisionPlan`
 
-这里最关键的是：
+这些字段是审计信息，不是执行依据。
 
-- 出题阶段依赖的是 `effectiveDecisionPlan`
-- 原始输出只是审计信息
-
-## 第 7 层：`QuestionStreamService` 重新读取 `effectiveDecisionPlan`
+## 第 6 层：`QuestionStreamService` 重新读取生效计划
 
 相关文件：
 
 - [QuestionStreamService.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\interview\service\QuestionStreamService.java)
 
-### `extractNextQuestionPlan()`
-
-`QuestionStreamService` 不直接读取 `EvaluationDecisionOutput`，而是从：
+`QuestionStreamService.extractNextQuestionPlan()` 会从：
 
 - `attempt.evaluationJson.effectiveDecisionPlan`
 
-重新提取一个 `NextQuestionPlan`。
-
-具体行为：
-
-- 如果 `evaluationJson == null`，返回 `null`
-- 如果 `effectiveDecisionPlan == null`，返回 `null`
-- 如果 `interviewAction == WRAPUP`，直接返回 `null`
-
-### 字段读取与再包装
-
-`extractNextQuestionPlan()` 会把 `effectiveDecisionPlan` 重新映射为：
+重新提取：
 
 - `interviewAction`
 - `effectiveDecisionSource`
@@ -411,361 +181,215 @@ Prompt 中明确要求 AI 返回结构化 JSON，且字段顺序固定。当前 
 - `decisionReason`
 - `retrievalPlans`
 
-这里有两个关键细节：
+所以：
 
-#### 1. `decisionReason` 在 `SYSTEM_FALLBACK` 情况下会被清空
+- question generation 看到的是落库后的生效计划
+- 不是 Prompt 原始字符串
+- 也不是 DTO 解析前的模型原始输出
 
-如果 `effectiveDecisionSource == SYSTEM_FALLBACK`：
-
-- `decisionReason` 会被写成 `""`
-
-这说明出题阶段不会继续沿用 AI 或修复失败后的原始理由。
-
-#### 2. `retrievalPlans` 来自落库后的生效计划
-
-不是 AI 原始输出，也不是 Prompt 当时的字符串。  
-如果前面修复或兜底改过，这里读到的就是改后的版本。
-
-## 第 8 层：`RagPlanCompiler` 把生效计划编译成检索请求
+## 第 7 层：`RagPlanCompiler`
 
 相关文件：
 
 - [RagPlanCompiler.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\rag\service\RagPlanCompiler.java)
 - [RagRetrievalRequest.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\rag\dto\RagRetrievalRequest.java)
 
-### 输入是什么
+### 当前 `shouldRetrieve` 规则
 
-`safeRetrieveRag()` 会把 `NextQuestionPlan` 转成 `DecisionExecutionPlan`，然后交给：
+当前编译器已经删除项目题技术钩子整套逻辑。
 
-- `ragPlanCompiler.compile(...)`
+现在的规则很简单：
 
-### 编译器做了什么
+- 如果题型属于 `PRINCIPLE / SCENARIO / BEHAVIORAL / PROJECT_DEEP_DIVE`
+- 且存在 retrieval plan
+- 则 `shouldRetrieve = true`
 
-#### 1. 判断是否需要检索
+否则：
 
-`shouldRetrieve()` 的规则是：
+- `shouldRetrieve = false`
 
-- `PRINCIPLE / SCENARIO / BEHAVIORAL`：只要有 `retrievalPlans` 就检索
-- `PROJECT_DEEP_DIVE`：只有有明确技术钩子才检索
+已经删除：
 
-技术钩子当前会检查：
+- `TECH_HOOK_TOKENS`
+- `hasExplicitProjectTechHook(...)`
+- `containsTechnicalHint(...)`
 
-- `nextFocus`
-- `nextProjectPoint`
-- `retrievalPlan.displayQuery`
-- `retrievalPlan.queryText`
-- `retrievalPlan.keywordHints`
+### 当前编译输出
 
-这意味着：
+编译后的 `RagRetrievalRequest` 当前只保留这些核心字段：
 
-- `displayQuery` 虽然不是主检索字段，但当前仍参与“是否检索”的判断
-- 当前实现还没有完全摆脱旧 7 字段契约
+- `shouldRetrieve`
+- `queryText`
+- `keywordQueries`
+- `difficultyHint`
+- `domainCode`
+- `questionType`
+- `focusPoint`
+- `positionCode`
+- `experienceLevel`
+- `projectName`
 
-#### 2. 生成 `RagRetrievalRequest`
+编译规则也已收缩为：
 
-如果 `shouldRetrieve == false`，编译器会返回一个空请求：
-
-- `shouldRetrieve=false`
-- `displayQuery=""`
-- `queryText=""`
-- `difficultyHint=""`
-- `keywordQueries=[]`
-- `preferredDifficultyLevels=[]`
-- `mustHaveClues=[]`
-- `avoidClues=[]`
-
-这是**程序补默认值**，不是 AI 输出。
-
-如果 `shouldRetrieve == true`，会构造一个完整请求：
-
-- `displayQuery <- retrievalPlan.displayQuery`，缺失时退回 `nextFocus`
-- `queryText <- retrievalPlan.queryText`，缺失时退回 `nextFocus`
-- `keywordQueries <- retrievalPlan.keywordHints`
+- `queryText <- retrievalPlan.queryText`
+- `keywordQueries <- retrievalPlan.keywordHints` 清洗去重后得到
 - `difficultyHint <- retrievalPlan.difficultyHint`
-- `preferredDifficultyLevels <- 程序按 difficultyHint 派生`
-- `positionCode / questionType / experienceLevel / domainCode / projectName <- 程序上下文补齐`
-- `mustHaveClues / avoidClues <- retrievalPlan` 原样清洗后透传
+- `focusPoint <- effectiveDecisionPlan.nextFocus`
 
-这里的关键是：
+编译器当前不会再做这些事：
 
-- `RagRetrievalRequest` 字段比 AI `retrievalPlan` 多
-- 多出来的字段主要由编译器派生或补齐
-- 这一步既有“原样透传”，也有“系统派生”
+- 不会生成 `displayQuery`
+- 不会生成 `mustHaveClues / avoidClues`
+- 不会生成 `preferredDifficultyLevels`
+- 不会根据 `nextFocus` 反向补 `queryText`
 
-## 第 9 层：`RagRetrievalServiceImpl` 消费检索请求
+## 第 8 层：`RagRetrievalServiceImpl`
 
 相关文件：
 
 - [RagRetrievalServiceImpl.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\rag\service\impl\RagRetrievalServiceImpl.java)
-- [DashScopeRagRerankService.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\rag\service\impl\DashScopeRagRerankService.java)
-- [RagContext.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\rag\dto\RagContext.java)
 
-### 入口判定
+### 当前真实链路
 
-如果：
-
-- `request == null`
-- 或 `request.shouldRetrieve == false`
-
-直接返回：
-
-- `RagContext.empty()`
-
-### 当前真实检索链路
-
-当前 `RagRetrievalServiceImpl` 实现仍是：
+当前实现仍然是：
 
 1. lexical 预过滤
 2. dense 召回
 3. rerank
-4. 最终硬护栏
-5. 构造 `RagContext`
+4. 硬护栏
+5. 组装 `RagContext`
 
-### 当前字段如何被使用
+### 当前字段消费方式
 
-#### `displayQuery`
+#### dense 查询
 
-当前主要用于：
+`resolveDenseQueryText(...)` 当前规则是：
 
-- 日志打印
-- rerank 失败日志
-- lexical 词法查询缺词时兜底
+1. 先用 `request.queryText`
+2. `queryText` 为空时，才回退到 `request.focusPoint`
 
-它不是主 dense 查询，但在当前实现中仍然有兜底作用。
+不会再拼接：
 
-#### `queryText`
-
-当前主要用于：
-
-- dense 查询的第一优先级输入
-- rerank brief 的“目标”字段
-
-如果 `queryText` 为空，dense 会退到：
-
-- `focusPoint`
 - `keywordQueries`
-- `mustHaveClues`
+- 任何旧字段
 
-#### `keywordQueries`
+#### lexical 预过滤
 
-当前主要用于：
+`resolveLexicalTerms(...)` 当前只消费：
 
-- lexical 预过滤的主词源
+- `request.keywordQueries`
 
-#### `difficultyHint`
+如果 `keywordQueries=[]`：
 
-当前会出现在日志中，并被编译器转成 `preferredDifficultyLevels`，  
-但在当前 `RagRetrievalServiceImpl` 里并没有真正被检索主流程强使用。
+- lexical 预过滤直接跳过
+- 不会回退到 `focusPoint`
+- 不会偷偷生成关键词
 
-这意味着：
+这条规则已经有测试保护。
 
-- 它当前是弱生效字段
-- 不是完全没用，但也不是强影响字段
+### 当前仍未改变的地方
 
-#### `mustHaveClues / avoidClues`
+- 当前还是 lexical 先收缩候选，再做 dense 召回
+- 还没有实现 dense + sparse 双路独立召回
 
-当前主要不参与召回主流程，而是进入 rerank brief：
-
-- `mustHaveClues -> "必须覆盖"`
-- `avoidClues -> "避免内容"`
-
-如果 rerank 失败，本地回退排序只按 `denseRank` 打分，不再看这些字段。
-
-### 输出的 `RagContext`
-
-最终返回给出题链路的不是原始候选，而是：
-
-- `summary`
-- `contextText`
-- `retrievedMaterials`
-- `followUpCandidates`
-- `retrievalAudit`
-
-其中 `retrievalAudit` 会记录：
-
-- `retrievalTriggered`
-- `lexicalCandidateCount`
-- `denseCandidateCount`
-- `rerankPreTopQuestionIds`
-- `rerankPostTopQuestionIds`
-- `injectedQuestionIds`
-
-## 第 10 层：`QuestionGenerationInput` 重组出题上下文
+## 第 9 层：`DashScopeRagRerankService`
 
 相关文件：
 
-- [QuestionStreamService.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\interview\service\QuestionStreamService.java)
+- [DashScopeRagRerankService.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\rag\service\impl\DashScopeRagRerankService.java)
+
+当前 rerank brief 已经收缩为：
+
+- `题型`
+- `目标(queryText)`
+- `焦点(focusPoint)`
+- `关键词(keywordQueries)`
+- `目标难度(difficultyHint)`
+
+已经删除：
+
+- `displayQuery`
+- `mustHaveClues`
+- `avoidClues`
+
+## 第 10 层：`QuestionGenerationInput`
+
+相关文件：
+
 - [QuestionGenerationInput.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\ai\dto\QuestionGenerationInput.java)
-- [question-generation-stream.md](D:\a05-cursor\backend\src\main\resources\prompts\question-generation-stream.md)
+- [QuestionStreamService.java](D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\interview\service\QuestionStreamService.java)
 
-### `safeRetrieveRag()`
-
-`QuestionStreamService.safeRetrieveRag()` 的特点是：
-
-- RAG 失败不阻断主流程
-- 编译失败、检索异常都会回退为 `RagContext.empty()`
-
-也就是说：
-
-- 检索不是硬依赖
-- 它是增强链路，不是必须成功的主链路
-
-### `buildRetrievalContext()`
-
-这里会把两类东西同时放进 `QuestionGenerationInput.RetrievalContext`：
+`QuestionStreamService.buildRetrievalContext()` 会同时放入两类信息：
 
 1. `retrievalPlans`
-- 来自 `plan.getRetrievalPlans()`
+- 来自生效计划
+- 作用是弱提示
 
 2. `retrievedMaterials`
-- 来自 `ragContext.getRetrievedMaterials()`
+- 来自真实检索结果
+- 作用是主要 grounding 材料
 
-同时还会补：
+还有：
 
 - `followUpCandidates`
 - `retrievalAudit`
 - `summary`
 
-### `summary` 的 fallback
+其中 `summary` 在没有命中时会退回系统默认文案。
 
-如果：
+## 字段生命周期总结
 
-- `ragContext` 为空
-- 或 `ragContext.summary` 为空
+### AI 原样输出并可能保留到后面的字段
 
-则 `summary` 会被强制写成：
+- `queryText`
+- `keywordHints`
+- `difficultyHint`
 
-- `RAG_CONTEXT_FALLBACK = "无外部参考资料，请严格依赖你自身的工程师知识库进行出题。"`
+前提是：
 
-这意味着：
+- 通过 validator
+- 通过 builder
+- repair / fallback 没有替换掉它们
 
-- 即便完全没检索命中，出题 Prompt 也总能拿到一个 `retrievalContext.summary`
-- 这是程序补的默认值，不来自 AI 也不来自检索
+### 会被清洗的字段
 
-### `question_generation_stream` Prompt 如何消费这些字段
+- `queryText`：`null -> ""`，并 `trim()`
+- `keywordHints`：去空、去重、`null -> []`
+- `difficultyHint`：`null -> ""`
 
-出题 Prompt 明确写了：
+### 会被程序补齐的字段
 
-- `retrievedMaterials` 非空时，优先使用真实题目卡片材料
-- `retrievalPlans` 仅在无真实材料时作为弱提示
-- `follow_up_ids` 是可选追问候选，不是强制跳题规则
-- 项目题若无检索结果，仍优先依据项目上下文自然追问
+这些不是 AI brief 的一部分，而是程序上下文派生字段：
 
-这说明：
-
-- `retrievalPlans` 到这里已经是**弱信号**
-- `retrievedMaterials` 才是检索成功后的主信号
-
-## 字段总表：每一层到底发生了什么
-
-### A. AI 原样输出后通常还能保留到后面的字段
-
-- `interviewAction`
-- `finalDecision`
-- `nextFocus`
-- `nextItemType`
-- `nextItemName`
-- `nextProjectPoint`
-- `targetDomainCode`
-- `retrievalPlans.*`
-
-前提是它们通过了后续验证和修复。
-
-### B. 会被第一层清洗的字段
-
-- 所有字符串：`null -> ""`，并 `trim()`
-- 所有列表：`null -> []`
-- `newCoveredPoints` / `keywordHints` / `mustHaveClues` / `avoidClues`：去空、去重
-- `newCoveredDomains`：非法项会被删掉
-
-### C. 会被第二层验证强制清空或拒绝的字段
-
-在 `WRAPUP` 时：
-
-- `nextFocus`
-- `targetDomainCode`
-- `retrievalPlans`
-
-如果非空，就整份决策失败。
-
-### D. 会被系统派生的字段
-
-在 `DecisionExecutionPlanBuilder`：
-
-- `targetQuestionType`
-- `targetDomainName`
-
-在 `RagPlanCompiler`：
-
-- `preferredDifficultyLevels`
+- `questionType`
+- `domainCode`
+- `focusPoint`
 - `positionCode`
 - `experienceLevel`
 - `projectName`
-- `domainCode`
-- fallback 的 `displayQuery/queryText`
 
-在 `QuestionStreamService.buildGenInput()`：
+### 已经彻底删除的 retrieval 旧字段
 
-- `goalSummary`
-- `relatedDomainCode`
-- `relatedDomainName`
-- `relatedItemKey`
-- `relatedItemType`
-- `relatedItemName`
-- `retrievalContext.summary` fallback
-
-### E. 会被完全忽略或只用于调试的字段
-
-当前语义下：
-
-- `answerUnderstanding`
-- `planningIntent`
-
-它们只帮助模型先思考，不进入后端决策执行逻辑。
-
-### F. 当前最值得注意的现实偏差
-
-1. Prompt 仍要求 7 字段 `retrievalPlans`
-- 但你们近期讨论方向已经倾向收缩到更小字段集
-
-2. `QuestionStreamService` 只认 `effectiveDecisionPlan`
-- 原始 AI 输出只是审计信息，不是执行依据
-
-3. `RagRetrievalRequest` 里有不少字段并不是 AI 直接给的
-- 它是编译后的执行请求，不是 Prompt 契约镜像
-
-4. 当前检索服务仍保留旧字段依赖
-- 例如 `displayQuery`
-- 例如 `mustHaveClues / avoidClues`
-
-这意味着如果后续要收缩检索字段，不能只改 Prompt，还必须同步：
-
-- DTO
-- Validator
-- `RagPlanCompiler`
-- `RagRetrievalRequest`
-- `RagRetrievalServiceImpl`
-- `DashScopeRagRerankService`
-- `QuestionGenerationInput` 的文档口径
+- `goal`
+- `displayQuery`
+- `mustHaveClues`
+- `avoidClues`
+- `preferredDifficultyLevels`
+- 项目题技术钩子相关词表和方法
 
 ## 结论
 
-这条链路的本质不是：
+当前链路已经完成两件关键收缩：
 
-- `AI 输出什么，后面就直接拿什么去检索和出题`
+1. retrieval brief 从 7 字段收缩为 3 字段
+2. 检索执行层不再消费旧字段，也不再依赖项目题技术钩子
 
-而是：
+因此现在判断一个 retrieval 字段是否还有效，只需要看两点：
 
-1. AI 输出结构化意图
-2. 后端先做契约清洗
-3. 再做决策合法性验证
-4. 必要时修复
-5. 再不行则系统兜底
-6. 只有“生效计划”才会进入检索与出题链路
+- 它是否仍在 `EvaluationDecisionOutput.RetrievalPlan` 中存在
+- 它是否仍被 `RagPlanCompiler / RagRetrievalServiceImpl / DashScopeRagRerankService` 真实消费
 
-因此，任何字段是否真正影响下一题，都必须问两个问题：
+按当前代码，答案已经很清楚：
 
-1. 它有没有通过验证/修复/兜底链条？
-2. 后续执行层到底有没有真正消费它？
-
-这也是为什么单看 Prompt 或单看 DTO，都无法正确理解这条链路。
+- 真正有效的 retrieval brief 只有 `queryText / keywordHints / difficultyHint`
+- 其他旧字段已经退出现行链路

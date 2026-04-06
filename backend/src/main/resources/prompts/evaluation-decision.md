@@ -122,7 +122,7 @@ promptVersion: v2
     - `nextProjectPoint` 必须是结构化项目切口短语，不能写成整句问题
     - 当动作不是项目题时，`nextItemType`、`nextItemName`、`nextProjectPoint` 必须输出 `""`
 - 当你选择的 `finalDecision` 对应动作是【切换知识域】或【进入理论题】时，`targetDomainCode` 必须从【主考纲剩余待考察域（菜单）】中选择一个合法的 `domainCode`。否则此字段输出 `""`，务必不要在对应动作不是【切换知识域】或【进入理论题】时为`targetDomainCode`赋值
-- RAG 强类型：`retrievalPlans` 若无需求必须输出 `[]`。若触发检索，`retrievalPlans` 表示后续检索 brief，而不是已经命中的检索结果；固定输出字段为 `goal / displayQuery / queryText / keywordHints / difficultyHint / mustHaveClues / avoidClues`。其中 `difficultyHint` 只是目标难度提示，属于软约束；项目题只有在 `focus`、`displayQuery`、`queryText` 或 `keywordHints` 出现明确技术钩子时才应请求检索。
+- RAG 强类型：`retrievalPlans` 若无需求必须输出 `[]`。若触发检索，`retrievalPlans` 表示后续检索 brief，而不是已经命中的检索结果；固定输出字段为 `queryText / keywordHints / difficultyHint`。其中 `difficultyHint` 只是目标难度提示，属于软约束。
 - 无 Null 原则：所有数组字段即使为空也要输出 `[]`，所有字符串为空输出 `""`，绝不允许输出 `null` 或缺少 Key。
 
 [Output Schema]
@@ -150,19 +150,11 @@ promptVersion: v2
   "targetDomainCode": "",
   "retrievalPlans": [
     {
-      "goal": "",
-      "displayQuery": "",
       "queryText": "",
       "keywordHints": [
         ""
       ],
-      "difficultyHint": "L3",
-      "mustHaveClues": [
-        ""
-      ],
-      "avoidClues": [
-        ""
-      ]
+      "difficultyHint": "L3"
     }
   ]
 }

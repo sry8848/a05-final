@@ -274,13 +274,9 @@ public class AiOutputContractValidator {
         return values.stream()
                 .filter(item -> item != null)
                 .map(item -> EvaluationDecisionOutput.RetrievalPlan.builder()
-                        .goal(defaultString(item.getGoal(), ""))
-                        .displayQuery(defaultString(item.getDisplayQuery(), ""))
                         .queryText(defaultString(item.getQueryText(), ""))
                         .keywordHints(sanitizeStringList(item.getKeywordHints()))
                         .difficultyHint(defaultString(item.getDifficultyHint(), ""))
-                        .mustHaveClues(sanitizeStringList(item.getMustHaveClues()))
-                        .avoidClues(sanitizeStringList(item.getAvoidClues()))
                         .build())
                 .toList();
     }

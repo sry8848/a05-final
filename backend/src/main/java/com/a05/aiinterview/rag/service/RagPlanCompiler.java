@@ -8,7 +8,6 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 /**
  * 将 AI 输出的 retrieval brief 编译为可执行的单库检索请求。
@@ -22,13 +21,7 @@ import java.util.Set;
  *
  * <p>检索条件判断：
  * <ul>
- *   <li>PRINCIPLE/SCENARIO/BEHAVIORAL：只有有 retrievalPlans 才检索</li>
- *   <li>PROJECT_DEEP_DIVE：有技术钩子或检索计划才检索</li>
- * </ul>
- *
- * <p>技术钩子（TECH_HOOK_TOKENS）：
- * <ul>
- *   <li>包含特定技术术语（如"redis"、"mysql"、"间隙锁"、"幂等"等）时自动触发检索</li>
+ *   <li>PRINCIPLE/SCENARIO/BEHAVIORAL/PROJECT_DEEP_DIVE：只有有 retrievalPlans 才检索</li>
  * </ul>
  */
 @Component
@@ -65,31 +58,23 @@ public class RagPlanCompiler {
                     .experienceLevel(defaultString(experienceLevel))
                     .domainCode(resolveDomainCode(questionType, plan))
                     .projectName(resolveProjectName(questionType, plan))
-                    .displayQuery("")
                     .queryText("")
                     .difficultyHint("")
                     .keywordQueries(List.of())
-                    .preferredDifficultyLevels(List.of())
-                    .mustHaveClues(List.of())
-                    .avoidClues(List.of())
                     .build();
         }
 
         String difficultyHint = retrievalPlan == null ? "" : defaultString(retrievalPlan.getDifficultyHint());
         return RagRetrievalRequest.builder()
                 .shouldRetrieve(true)
-                .displayQuery(retrievalPlan == null ? defaultString(plan.getNextFocus()) : defaultString(retrievalPlan.getDisplayQuery()))
-                .queryText(retrievalPlan == null ? defaultString(plan.getNextFocus()) : defaultString(retrievalPlan.getQueryText()))
+                .queryText(retrievalPlan == null ? "" : defaultString(retrievalPlan.getQueryText()))
                 .keywordQueries(resolveKeywordQueries(retrievalPlan))
                 .difficultyHint(difficultyHint)
-                .preferredDifficultyLevels(resolvePreferredDifficultyLevels(difficultyHint))
                 .positionCode(defaultString(positionCode))
                 .questionType(questionType)
                 .experienceLevel(defaultString(experienceLevel))
                 .domainCode(resolveDomainCode(questionType, plan))
                 .projectName(resolveProjectName(questionType, plan))
-                .mustHaveClues(retrievalPlan == null ? List.of() : sanitizeList(retrievalPlan.getMustHaveClues()))
-                .avoidClues(retrievalPlan == null ? List.of() : sanitizeList(retrievalPlan.getAvoidClues()))
                 .focusPoint(plan == null ? "" : defaultString(plan.getNextFocus()))
                 .build();
     }
@@ -99,17 +84,7 @@ public class RagPlanCompiler {
      *
      * <p>检索条件判断：
      * <ul>
-     *   <li>PRINCIPLE/SCENARIO/BEHAVIORAL 题型：只有有 retrievalPlans 才检索</li>
-     *   <li>PROJECT_DEEP_DIVE 题型：有技术钩子或检索计划才检索</li>
-     * </ul>
-     *
-     * <p>技术钩子（TECH_HOOK_TOKENS）判断：
-     * <ul>
-     *   <li>nextFocus（当前焦点）是否包含技术钩子</li>
-     *   <li>nextProjectPoint（项目点）是否包含技术钩子</li>
-     *   <li>retrievalPlan.displayQuery（显示查询）是否包含技术钩子</li>
-     *   <li>retrievalPlan.queryText（查询文本）是否包含技术钩子</li>
-     *   <li>retrievalPlan.keywordHints（关键词提示）是否包含技术钩子</li>
+     *   <li>PRINCIPLE/SCENARIO/BEHAVIORAL/PROJECT_DEEP_DIVE 题型：只有有 retrievalPlans 才检索</li>
      * </ul>
      *
      * @param questionType 标准化后的题型
@@ -122,21 +97,13 @@ public class RagPlanCompiler {
             DecisionExecutionPlan plan,
             EvaluationDecisionOutput.RetrievalPlan retrievalPlan
     ) {
-        if ("PRINCIPLE".equals(questionType) || "SCENARIO".equals(questionType) || "BEHAVIORAL".equals(questionType)) {
+        if ("PRINCIPLE".equals(questionType)
+                || "SCENARIO".equals(questionType)
+                || "BEHAVIORAL".equals(questionType)
+                || "PROJECT_DEEP_DIVE".equals(questionType)) {
             return retrievalPlan != null;
         }
-        if (!"PROJECT_DEEP_DIVE".equals(questionType)) {
-            return false;
-        }
-        if (hasExplicitProjectTechHook(defaultString(plan == null ? null : plan.getNextFocus()))) {
-            return retrievalPlan != null || hasExplicitProjectTechHook(defaultString(plan == null ? null : plan.getNextProjectPoint()));
-        }
-        if (retrievalPlan == null) {
-            return false;
-        }
-        return hasExplicitProjectTechHook(defaultString(retrievalPlan.getDisplayQuery()))
-                || hasExplicitProjectTechHook(defaultString(retrievalPlan.getQueryText()))
-                || containsTechnicalHint(retrievalPlan.getKeywordHints());
+        return false;
     }
 
     /**
@@ -181,37 +148,6 @@ public class RagPlanCompiler {
         return List.copyOf(deduped);
     }
 
-    private List<String> resolvePreferredDifficultyLevels(String difficultyHint) {
-        return switch (defaultString(difficultyHint)) {
-            case "L1" -> List.of("L1", "L2");
-            case "L2" -> List.of("L1", "L2", "L3");
-            case "L3" -> List.of("L2", "L3", "L4");
-            case "L4" -> List.of("L3", "L4", "L5");
-            case "L5" -> List.of("L4", "L5");
-            default -> List.of();
-        };
-    }
-
-    private boolean hasExplicitProjectTechHook(String text) {
-        if (text == null || text.isBlank()) {
-            return false;
-        }
-        String normalized = text.toLowerCase(Locale.ROOT);
-        return TECH_HOOK_TOKENS.stream().anyMatch(token -> normalized.contains(token.toLowerCase(Locale.ROOT)));
-    }
-
-    private boolean containsTechnicalHint(List<String> hints) {
-        if (hints == null || hints.isEmpty()) {
-            return false;
-        }
-        for (String hint : hints) {
-            if (hasExplicitProjectTechHook(hint)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private List<String> sanitizeList(List<String> values) {
         if (values == null || values.isEmpty()) {
             return List.of();
@@ -236,25 +172,4 @@ public class RagPlanCompiler {
     private String defaultString(String value) {
         return value == null ? "" : value.trim();
     }
-
-    private static final Set<String> TECH_HOOK_TOKENS = Set.of(
-            "seata",
-            "xid",
-            "redisson",
-            "redis",
-            "mysql",
-            "mq",
-            "rabbitmq",
-            "feign",
-            "header",
-            "ttl",
-            "间隙锁",
-            "覆盖索引",
-            "缓存穿透",
-            "看门狗",
-            "订单超时关闭",
-            "幂等",
-            "db+mq",
-            "next-key lock"
-    );
 }

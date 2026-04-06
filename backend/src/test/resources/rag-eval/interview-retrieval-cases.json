@@ -8,18 +8,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L2",
       "expectedKeywords": ["HashMap", "resize", "2的幂", "线程不安全"],
-      "mustHaveClues": ["触发条件", "元素迁移", "2的幂原因"],
-      "avoidClues": ["集合框架泛介绍", "JDK 安装步骤"],
       "expectedFollowUpIds": ["hashmap-resize-treeify-001", "hashmap-thread-safety-001"],
       "retrievalPlans": [
         {
-          "goal": "补充 HashMap 扩容的高频问法和关键误区",
-          "displayQuery": "HashMap扩容机制",
           "queryText": "Java HashMap 扩容机制 触发条件 2的幂 元素迁移 线程不安全",
           "keywordHints": ["HashMap", "resize", "2的幂", "线程不安全"],
-          "difficultyHint": "L2",
-          "mustHaveClues": ["触发条件", "元素迁移", "2的幂原因"],
-          "avoidClues": ["集合框架泛介绍", "JDK 安装步骤"]
+          "difficultyHint": "L2"
         }
       ]
     },
@@ -30,18 +24,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L2",
       "expectedKeywords": ["Redis", "缓存穿透", "布隆过滤器", "空对象缓存"],
-      "mustHaveClues": ["空对象缓存", "布隆过滤器", "误判"],
-      "avoidClues": ["缓存击穿", "缓存雪崩", "部署教程"],
       "expectedFollowUpIds": ["redis-bloom-false-positive-001", "redis-null-cache-expire-001"],
       "retrievalPlans": [
         {
-          "goal": "补充缓存穿透的经典问法、兜底方案和误区",
-          "displayQuery": "Redis缓存穿透",
           "queryText": "Redis 缓存穿透 兜底方案 空对象缓存 布隆过滤器 误判",
           "keywordHints": ["Redis", "缓存穿透", "布隆过滤器", "空对象缓存"],
-          "difficultyHint": "L2",
-          "mustHaveClues": ["空对象缓存", "布隆过滤器", "误判"],
-          "avoidClues": ["缓存击穿", "缓存雪崩", "部署教程"]
+          "difficultyHint": "L2"
         }
       ]
     },
@@ -52,18 +40,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L3",
       "expectedKeywords": ["订单超时关闭", "幂等", "DB+MQ", "顺序"],
-      "mustHaveClues": ["状态机", "消费幂等", "顺序错乱"],
-      "avoidClues": ["纯概念定义", "中间件安装"],
       "expectedFollowUpIds": ["order-state-machine-001"],
       "retrievalPlans": [
         {
-          "goal": "补充订单超时关闭的场景化追问和工程取舍",
-          "displayQuery": "订单超时关闭 幂等性 DB+MQ顺序",
           "queryText": "订单超时关闭 幂等性 DB 和 MQ 顺序 事务状态机 消费重复",
           "keywordHints": ["订单超时关闭", "幂等", "DB+MQ", "顺序"],
-          "difficultyHint": "L3",
-          "mustHaveClues": ["状态机", "消费幂等", "顺序错乱"],
-          "avoidClues": ["纯概念定义", "中间件安装"]
+          "difficultyHint": "L3"
         }
       ]
     },
@@ -74,18 +56,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L2",
       "expectedKeywords": ["沟通", "推进", "冲突", "协作"],
-      "mustHaveClues": ["沟通动作", "推进过程", "结果复盘"],
-      "avoidClues": ["空泛价值观表态", "技术原理"],
       "expectedFollowUpIds": ["behavioral-conflict-resolution-001"],
       "retrievalPlans": [
         {
-          "goal": "补充行为题高频问法和复盘追问角度",
-          "displayQuery": "与产品意见不一致",
           "queryText": "行为面试 与产品意见不一致 冲突沟通 推进结果 复盘",
           "keywordHints": ["沟通", "推进", "冲突", "协作"],
-          "difficultyHint": "L2",
-          "mustHaveClues": ["沟通动作", "推进过程", "结果复盘"],
-          "avoidClues": ["空泛价值观表态", "技术原理"]
+          "difficultyHint": "L2"
         }
       ]
     },
@@ -96,18 +72,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L3",
       "expectedKeywords": ["Redisson", "看门狗", "续期", "分布式锁"],
-      "mustHaveClues": ["续期条件", "失败场景", "锁过期"],
-      "avoidClues": ["只背 API 不讲项目链路", "不说明项目失败场景"],
       "expectedFollowUpIds": ["redisson-lock-leak-001"],
       "retrievalPlans": [
         {
-          "goal": "补充 Redisson 看门狗的续期链路和失败场景",
-          "displayQuery": "Redisson看门狗机制原理",
           "queryText": "Redisson 看门狗机制 原理 续期条件 失败场景 分布式锁",
           "keywordHints": ["Redisson", "看门狗", "续期", "分布式锁"],
-          "difficultyHint": "L3",
-          "mustHaveClues": ["续期条件", "失败场景", "锁过期"],
-          "avoidClues": ["只背 API 不讲项目链路", "不说明项目失败场景"]
+          "difficultyHint": "L3"
         }
       ]
     },
@@ -118,18 +88,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L4",
       "expectedKeywords": ["Seata", "XID", "Feign", "Header透传"],
-      "mustHaveClues": ["透传链路", "丢失位置", "拦截器修复"],
-      "avoidClues": ["Seata 基础定义", "部署步骤"],
       "expectedFollowUpIds": ["seata-undo-log-timing-001"],
       "retrievalPlans": [
         {
-          "goal": "补充 Seata 项目链路里的技术钩子和修复问法",
-          "displayQuery": "Seata XID 丢失怎么修",
           "queryText": "Seata AT 模式 Feign 调用 XID 丢失 Header 透传 拦截器修复",
           "keywordHints": ["Seata", "XID", "Feign", "Header透传"],
-          "difficultyHint": "L4",
-          "mustHaveClues": ["透传链路", "丢失位置", "拦截器修复"],
-          "avoidClues": ["Seata 基础定义", "部署步骤"]
+          "difficultyHint": "L4"
         }
       ]
     },
@@ -140,18 +104,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L3",
       "expectedKeywords": ["购物车", "覆盖索引", "MySQL", "查询"],
-      "mustHaveClues": ["回表", "索引命中", "查询条件"],
-      "avoidClues": ["SQL 基础入门", "数据库安装"],
       "expectedFollowUpIds": ["mysql-covering-index-leftmost-001"],
       "retrievalPlans": [
         {
-          "goal": "补充购物车查询的索引设计和场景化问法",
-          "displayQuery": "购物车查询覆盖索引",
           "queryText": "购物车查询 覆盖索引 MySQL 查询性能 索引回表",
           "keywordHints": ["购物车", "覆盖索引", "MySQL", "查询"],
-          "difficultyHint": "L3",
-          "mustHaveClues": ["回表", "索引命中", "查询条件"],
-          "avoidClues": ["SQL 基础入门", "数据库安装"]
+          "difficultyHint": "L3"
         }
       ]
     },
@@ -162,18 +120,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L4",
       "expectedKeywords": ["InnoDB", "间隙锁", "next-key lock", "触发条件"],
-      "mustHaveClues": ["RR 隔离级别", "next-key lock", "范围查询"],
-      "avoidClues": ["存储引擎简介", "数据库启动教程"],
       "expectedFollowUpIds": ["innodb-next-key-lock-001"],
       "retrievalPlans": [
         {
-          "goal": "补充 InnoDB 间隙锁的高频原理问法和误区",
-          "displayQuery": "InnoDB间隙锁触发条件",
           "queryText": "InnoDB 间隙锁 触发条件 next-key lock RR 隔离级别",
           "keywordHints": ["InnoDB", "间隙锁", "next-key lock", "触发条件"],
-          "difficultyHint": "L4",
-          "mustHaveClues": ["RR 隔离级别", "next-key lock", "范围查询"],
-          "avoidClues": ["存储引擎简介", "数据库启动教程"]
+          "difficultyHint": "L4"
         }
       ]
     },
@@ -184,18 +136,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L4",
       "expectedKeywords": ["Redis", "多轮对话", "上下文", "TTL"],
-      "mustHaveClues": ["key 设计", "TTL", "历史消息"],
-      "avoidClues": ["单轮聊天示例", "中间件安装"],
       "expectedFollowUpIds": ["redis-context-key-design-001"],
       "retrievalPlans": [
         {
-          "goal": "补充多轮对话上下文的 key 设计和过期策略",
-          "displayQuery": "Redis多轮对话上下文设计",
           "queryText": "Redis 多轮对话 上下文设计 key TTL 过期策略 缓存历史消息",
           "keywordHints": ["Redis", "多轮对话", "上下文", "TTL"],
-          "difficultyHint": "L4",
-          "mustHaveClues": ["key 设计", "TTL", "历史消息"],
-          "avoidClues": ["单轮聊天示例", "中间件安装"]
+          "difficultyHint": "L4"
         }
       ]
     },
@@ -206,18 +152,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L4",
       "expectedKeywords": ["图文", "混合搜索", "融合", "RRF"],
-      "mustHaveClues": ["融合策略", "排序", "评估指标"],
-      "avoidClues": ["单模态搜索介绍", "安装教程"],
       "expectedFollowUpIds": ["hybrid-search-rrf-001"],
       "retrievalPlans": [
         {
-          "goal": "补充图文混合搜索的融合策略和评估指标",
-          "displayQuery": "图文混合搜索结果融合",
           "queryText": "图文混合搜索 结果融合 RRF 召回 排序",
           "keywordHints": ["图文", "混合搜索", "融合", "RRF"],
-          "difficultyHint": "L4",
-          "mustHaveClues": ["融合策略", "排序", "评估指标"],
-          "avoidClues": ["单模态搜索介绍", "安装教程"]
+          "difficultyHint": "L4"
         }
       ]
     },
@@ -228,18 +168,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L4",
       "expectedKeywords": ["RRF", "长尾词", "缺陷", "融合"],
-      "mustHaveClues": ["排名融合", "召回偏置", "长尾词"],
-      "avoidClues": ["纯数学推导", "泛搜索概念"],
       "expectedFollowUpIds": ["rrf-ranking-bias-001"],
       "retrievalPlans": [
         {
-          "goal": "补充 RRF 的适用边界和长尾词缺陷",
-          "displayQuery": "RRF 长尾词缺陷",
           "queryText": "RRF 长尾词 缺陷 排名融合 召回偏置",
           "keywordHints": ["RRF", "长尾词", "缺陷", "融合"],
-          "difficultyHint": "L4",
-          "mustHaveClues": ["排名融合", "召回偏置", "长尾词"],
-          "avoidClues": ["纯数学推导", "泛搜索概念"]
+          "difficultyHint": "L4"
         }
       ]
     },
@@ -250,8 +184,6 @@
       "shouldRetrieve": false,
       "difficultyHint": "",
       "expectedKeywords": [],
-      "mustHaveClues": [],
-      "avoidClues": [],
       "expectedFollowUpIds": [],
       "retrievalPlans": []
     },
@@ -262,18 +194,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L3",
       "expectedKeywords": ["Java", "ThreadLocal", "TransmittableThreadLocal", "上下文传递"],
-      "mustHaveClues": ["线程池复用", "上下文丢失", "修复方案"],
-      "avoidClues": ["线程基础入门", "JDK 安装"],
       "expectedFollowUpIds": ["threadlocal-transmittable-thread-local-001", "threadlocal-inheritable-limit-001"],
       "retrievalPlans": [
         {
-          "goal": "补充 ThreadLocal 跨线程传递的经典误区和修复问法",
-          "displayQuery": "ThreadLocal跨线程传递",
           "queryText": "Java ThreadLocal 跨线程传递 线程池复用 上下文丢失 TransmittableThreadLocal 修复方案",
           "keywordHints": ["Java", "ThreadLocal", "TransmittableThreadLocal", "上下文传递"],
-          "difficultyHint": "L3",
-          "mustHaveClues": ["线程池复用", "上下文丢失", "修复方案"],
-          "avoidClues": ["线程基础入门", "JDK 安装"]
+          "difficultyHint": "L3"
         }
       ]
     },
@@ -284,8 +210,6 @@
       "shouldRetrieve": false,
       "difficultyHint": "",
       "expectedKeywords": [],
-      "mustHaveClues": [],
-      "avoidClues": [],
       "expectedFollowUpIds": [],
       "retrievalPlans": []
     },
@@ -296,18 +220,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L3",
       "expectedKeywords": ["Redisson", "看门狗", "续期", "分布式锁"],
-      "mustHaveClues": ["续期条件", "显式 leaseTime", "失败场景"],
-      "avoidClues": ["基础 API 用法", "安装部署"],
       "expectedFollowUpIds": ["redisson-lock-leak-001"],
       "retrievalPlans": [
         {
-          "goal": "补充项目里 Redisson 看门狗的技术深挖边界",
-          "displayQuery": "Redisson 看门狗项目追问",
           "queryText": "项目里 Redisson 看门狗为什么会自动续期 显式 leaseTime 有什么影响 失败场景是什么",
           "keywordHints": ["Redisson", "看门狗", "续期", "分布式锁"],
-          "difficultyHint": "L3",
-          "mustHaveClues": ["续期条件", "显式 leaseTime", "失败场景"],
-          "avoidClues": ["基础 API 用法", "安装部署"]
+          "difficultyHint": "L3"
         }
       ]
     },
@@ -318,18 +236,12 @@
       "shouldRetrieve": true,
       "difficultyHint": "L2",
       "expectedKeywords": ["推动", "协作", "阻力", "复盘"],
-      "mustHaveClues": ["个人动作", "推进过程", "结果复盘"],
-      "avoidClues": ["技术原理", "空泛价值观表态"],
       "expectedFollowUpIds": ["behavior-push-hard-problem-001"],
       "retrievalPlans": [
         {
-          "goal": "补充行为题中推动复杂问题落地的高频问法",
-          "displayQuery": "推动难题落地",
           "queryText": "行为面试 推动复杂问题落地 遇到阻力 如何推进 最终结果和复盘",
           "keywordHints": ["推动", "协作", "阻力", "复盘"],
-          "difficultyHint": "L2",
-          "mustHaveClues": ["个人动作", "推进过程", "结果复盘"],
-          "avoidClues": ["技术原理", "空泛价值观表态"]
+          "difficultyHint": "L2"
         }
       ]
     }

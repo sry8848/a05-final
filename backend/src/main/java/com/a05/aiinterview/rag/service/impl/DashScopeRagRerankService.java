@@ -19,7 +19,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -102,10 +101,10 @@ public class DashScopeRagRerankService implements RagRerankService {
     private String buildQueryBrief(RagRetrievalRequest request) {
         List<String> lines = new ArrayList<>();
         addLine(lines, "题型", request.getQuestionType());
-        addLine(lines, "目标", firstNonBlank(request.getQueryText(), request.getDisplayQuery()));
+        addLine(lines, "目标", request.getQueryText());
         addLine(lines, "焦点", request.getFocusPoint());
-        addJoinedLine(lines, "必须覆盖", request.getMustHaveClues());
-        addJoinedLine(lines, "避免内容", request.getAvoidClues());
+        addJoinedLine(lines, "关键词", request.getKeywordQueries());
+        addLine(lines, "目标难度", request.getDifficultyHint());
         return String.join("\n", lines).trim();
     }
 
@@ -137,13 +136,6 @@ public class DashScopeRagRerankService implements RagRerankService {
         if (!normalized.isEmpty()) {
             lines.add(label + "：" + String.join("；", normalized));
         }
-    }
-
-    private String firstNonBlank(String primary, String fallback) {
-        if (primary != null && !primary.isBlank()) {
-            return primary.trim();
-        }
-        return fallback == null ? "" : fallback.trim();
     }
 
     private record DashScopeRerankRequest(

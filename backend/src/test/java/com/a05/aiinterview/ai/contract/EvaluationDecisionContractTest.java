@@ -41,13 +41,9 @@ class EvaluationDecisionContractTest {
                   ],
                   "retrievalPlans": [
                     {
-                      "goal": "补充 Seata AT 边界细节",
-                      "displayQuery": "Seata AT 边界",
                       "queryText": "Seata AT 模式 本地事务边界 分支事务注册",
                       "keywordHints": ["Seata", "AT", "分支事务注册"],
-                      "difficultyHint": "L4",
-                      "mustHaveClues": ["事务边界", "分支事务注册"],
-                      "avoidClues": ["通用微服务定义"]
+                      "difficultyHint": "L4"
                     }
                   ]
                 }
@@ -69,13 +65,42 @@ class EvaluationDecisionContractTest {
         assertThat(output.getNewCoveredDomains().getFirst().getDomainName()).isEqualTo("Spring 框架");
         assertThat(output.getNewCoveredPoints()).containsExactly("Seata AT 模式下全局事务与本地事务的协同边界");
         assertThat(output.getRetrievalPlans()).hasSize(1);
-        assertThat(output.getRetrievalPlans().getFirst().getGoal()).isEqualTo("补充 Seata AT 边界细节");
-        assertThat(output.getRetrievalPlans().getFirst().getDisplayQuery()).isEqualTo("Seata AT 边界");
         assertThat(output.getRetrievalPlans().getFirst().getQueryText()).contains("分支事务注册");
         assertThat(output.getRetrievalPlans().getFirst().getKeywordHints()).containsExactly("Seata", "AT", "分支事务注册");
         assertThat(output.getRetrievalPlans().getFirst().getDifficultyHint()).isEqualTo("L4");
-        assertThat(output.getRetrievalPlans().getFirst().getMustHaveClues()).containsExactly("事务边界", "分支事务注册");
-        assertThat(output.getRetrievalPlans().getFirst().getAvoidClues()).containsExactly("通用微服务定义");
+    }
+
+    @Test
+    @DisplayName("retrieval plan should allow empty keyword hints")
+    void retrievalPlan_shouldAllowEmptyKeywordHints() {
+        String json = """
+                {
+                  "answerUnderstanding": "候选人回答较泛，但仍有继续追问价值。",
+                  "planningIntent": "继续围绕当前焦点做事实补充。",
+                  "decisionReason": "当前回答还有澄清空间，因此继续。",
+                  "interviewAction": "CONTINUE",
+                  "finalDecision": "S_ENTER_PROJECT",
+                  "nextFocus": "Seata 事务边界落地",
+                  "targetDomainCode": "",
+                  "newCoveredDomains": [],
+                  "newCoveredPoints": [],
+                  "retrievalPlans": [
+                    {
+                      "queryText": "Seata 事务边界落地",
+                      "keywordHints": [],
+                      "difficultyHint": "L3"
+                    }
+                  ]
+                }
+                """;
+
+        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
+
+        assertThat(output.getInterviewAction()).isEqualTo("CONTINUE");
+        assertThat(output.getRetrievalPlans()).hasSize(1);
+        assertThat(output.getRetrievalPlans().getFirst().getQueryText()).isEqualTo("Seata 事务边界落地");
+        assertThat(output.getRetrievalPlans().getFirst().getKeywordHints()).isEmpty();
+        assertThat(output.getRetrievalPlans().getFirst().getDifficultyHint()).isEqualTo("L3");
     }
 
     @Test
@@ -94,13 +119,9 @@ class EvaluationDecisionContractTest {
                   "newCoveredPoints": [],
                   "retrievalPlans": [
                     {
-                      "goal": "无效",
-                      "displayQuery": "无效",
                       "queryText": "无效",
                       "keywordHints": [],
-                      "difficultyHint": "",
-                      "mustHaveClues": [],
-                      "avoidClues": []
+                      "difficultyHint": ""
                     }
                   ]
                 }

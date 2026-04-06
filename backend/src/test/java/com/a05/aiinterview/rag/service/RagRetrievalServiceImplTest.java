@@ -106,14 +106,11 @@ class RagRetrievalServiceImplTest {
 
         RagRetrievalRequest request = RagRetrievalRequest.builder()
                 .shouldRetrieve(true)
-                .displayQuery("Redis缓存穿透")
                 .queryText("Redis 缓存穿透 兜底方案 空对象缓存 布隆过滤器 误判")
                 .keywordQueries(List.of("Redis", "缓存穿透", "布隆过滤器"))
                 .domainCode("redis")
                 .questionType("PRINCIPLE")
                 .difficultyHint("L2")
-                .mustHaveClues(List.of("空对象缓存", "布隆过滤器"))
-                .avoidClues(List.of("部署教程", "基础 API"))
                 .build();
 
         RagContext context = service.retrieve(request);
@@ -175,14 +172,11 @@ class RagRetrievalServiceImplTest {
 
         RagRetrievalRequest request = RagRetrievalRequest.builder()
                 .shouldRetrieve(true)
-                .displayQuery("与产品意见不一致")
                 .queryText("行为面试 与产品意见不一致 冲突沟通 推进结果 复盘")
                 .keywordQueries(List.of("沟通", "推进", "冲突", "协作"))
                 .domainCode("")
                 .questionType("BEHAVIORAL")
                 .difficultyHint("L2")
-                .mustHaveClues(List.of("沟通动作", "推进过程"))
-                .avoidClues(List.of("技术原理"))
                 .build();
 
         service.retrieve(request);
@@ -217,7 +211,6 @@ class RagRetrievalServiceImplTest {
 
         RagContext context = service.retrieve(RagRetrievalRequest.builder()
                 .shouldRetrieve(false)
-                .displayQuery("泛项目叙述")
                 .build());
 
         assertThat(context.isEmpty()).isTrue();
@@ -301,14 +294,11 @@ class RagRetrievalServiceImplTest {
 
         RagRetrievalRequest request = RagRetrievalRequest.builder()
                 .shouldRetrieve(true)
-                .displayQuery("Redis缓存穿透")
                 .queryText("Redis 缓存穿透 兜底方案 空对象缓存 布隆过滤器 误判")
                 .keywordQueries(List.of("Redis", "缓存穿透", "布隆过滤器"))
                 .domainCode("redis")
                 .questionType("PRINCIPLE")
                 .difficultyHint("L2")
-                .mustHaveClues(List.of("解释缓存穿透场景", "空对象缓存", "布隆过滤器"))
-                .avoidClues(List.of("把缓存穿透和击穿混淆"))
                 .focusPoint("Redis 缓存穿透")
                 .build();
 
@@ -402,14 +392,11 @@ class RagRetrievalServiceImplTest {
 
         RagRetrievalRequest request = RagRetrievalRequest.builder()
                 .shouldRetrieve(true)
-                .displayQuery("Redis缓存穿透")
                 .queryText("Redis 缓存穿透 兜底方案 空对象缓存 布隆过滤器")
                 .keywordQueries(List.of("Redis", "缓存穿透"))
                 .domainCode("redis")
                 .questionType("PRINCIPLE")
                 .difficultyHint("L2")
-                .mustHaveClues(List.of("解释缓存穿透场景"))
-                .avoidClues(List.of("把缓存穿透和击穿混淆"))
                 .focusPoint("Redis 缓存穿透")
                 .build();
 
@@ -492,14 +479,11 @@ class RagRetrievalServiceImplTest {
 
         RagRetrievalRequest request = RagRetrievalRequest.builder()
                 .shouldRetrieve(true)
-                .displayQuery("与产品意见不一致")
                 .queryText("行为面试 与产品意见不一致 冲突沟通 推进结果 复盘")
                 .keywordQueries(List.of("沟通", "推进", "冲突", "协作"))
                 .domainCode("")
                 .questionType("BEHAVIORAL")
                 .difficultyHint("L2")
-                .mustHaveClues(List.of("个人动作", "推进过程"))
-                .avoidClues(List.of("技术原理"))
                 .focusPoint("与产品意见不一致")
                 .build();
 
@@ -507,6 +491,33 @@ class RagRetrievalServiceImplTest {
 
         assertThat(context.getRetrievedMaterials()).extracting(RagContext.RetrievedMaterial::getQuestionId)
                 .containsExactly("behavior-conflict-001");
+    }
+
+    @Test
+    @DisplayName("retrieve should skip lexical prefilter when keyword queries are empty")
+    void retrieve_shouldSkipLexicalPrefilterWhenKeywordQueriesAreEmpty() {
+        VectorStore vectorStore = mock(VectorStore.class);
+        QdrantClient qdrantClient = mock(QdrantClient.class);
+        RagRerankService rerankService = mock(RagRerankService.class);
+        RagRetrievalServiceImpl service = newService(vectorStore, qdrantClient, rerankService);
+
+        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of());
+
+        RagRetrievalRequest request = RagRetrievalRequest.builder()
+                .shouldRetrieve(true)
+                .queryText("行为面试 与产品意见不一致 冲突沟通 推进结果 复盘")
+                .keywordQueries(List.of())
+                .questionType("BEHAVIORAL")
+                .domainCode("")
+                .focusPoint("与产品意见不一致")
+                .build();
+
+        RagContext context = service.retrieve(request);
+
+        assertThat(context.isEmpty()).isTrue();
+        verify(qdrantClient, never()).scrollAsync(any());
+        verify(vectorStore).similaritySearch(any(SearchRequest.class));
+        verify(rerankService, never()).rerank(any(), any());
     }
 
     private RagRetrievalServiceImpl newService(VectorStore vectorStore,

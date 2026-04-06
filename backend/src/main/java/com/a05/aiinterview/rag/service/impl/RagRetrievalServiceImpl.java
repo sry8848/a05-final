@@ -23,7 +23,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -80,9 +79,9 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
             return RagContext.empty();
         }
 
-        log.info("RAG 检索开始, questionType={}, domainCode={}, difficultyHint={}, displayQuery={}",
+        log.info("RAG 检索开始, questionType={}, domainCode={}, difficultyHint={}, queryText={}",
                 request.getQuestionType(), request.getDomainCode(),
-                request.getDifficultyHint(), request.getDisplayQuery());
+                request.getDifficultyHint(), request.getQueryText());
         try {
             // ========== 步骤1：Lexical 预过滤 ==========
             // 使用 Qdrant Scroll API 进行词法检索，快速收缩候选集
@@ -443,8 +442,8 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
                 candidate.finalScore = rerankScores.getOrDefault(candidate.questionId, 0.0d);
             }
         } catch (Exception e) {
-            log.warn("RAG 商业 rerank 失败，回退到本地排序, displayQuery={}, reason={}",
-                    request.getDisplayQuery(), e.getMessage());
+            log.warn("RAG 商业 rerank 失败，回退到本地排序, queryText={}, reason={}",
+                    request.getQueryText(), e.getMessage());
             for (Candidate candidate : reranked) {
                 candidate.finalScore = denseRankScore(candidate.denseRank);
             }
@@ -691,8 +690,6 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
      * <ol>
      *   <li>queryText：显式查询文本（最优先）</li>
      *   <li>focusPoint：焦点（如"Redis缓存击穿"）</li>
-     *   <li>keywordQueries.getFirst()：第一个关键词</li>
-     *   <li>displayQuery：显示查询（兜底）</li>
      * </ol>
      *
      * @param request RAG检索请求
@@ -702,26 +699,7 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
         if (hasText(request.getQueryText())) {
             return request.getQueryText().trim();
         }
-        List<String> segments = new ArrayList<>();
-        addIfHasText(segments, request.getFocusPoint());
-        addAllIfHasText(segments, request.getKeywordQueries());
-        addAllIfHasText(segments, request.getMustHaveClues());
-        return String.join(" ", segments).trim();
-    }
-
-    private void addIfHasText(List<String> values, String text) {
-        if (hasText(text)) {
-            values.add(text.trim());
-        }
-    }
-
-    private void addAllIfHasText(List<String> values, List<String> texts) {
-        if (texts == null) {
-            return;
-        }
-        for (String text : texts) {
-            addIfHasText(values, text);
-        }
+        return hasText(request.getFocusPoint()) ? request.getFocusPoint().trim() : "";
     }
 
     /**
@@ -851,8 +829,7 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
      *
      * <p>检索词来源：
      * <ol>
-     *   <li>keywordQueries：关键词查询列表（优先使用）</li>
-     *   <li>focusPoint：焦点（如果有）</li>
+     *   <li>keywordQueries：关键词查询列表（唯一来源）</li>
      * </ol>
      *
      * <p>去重说明：
@@ -867,10 +844,6 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
     private List<String> resolveLexicalTerms(RagRetrievalRequest request) {
         LinkedHashSet<String> lexicalTerms = new LinkedHashSet<>();
         addLexicalTerms(lexicalTerms, request.getKeywordQueries());
-        if (lexicalTerms.isEmpty()) {
-            addLexicalTerm(lexicalTerms, request.getDisplayQuery());
-            addLexicalTerm(lexicalTerms, request.getFocusPoint());
-        }
         return List.copyOf(lexicalTerms);
     }
 
