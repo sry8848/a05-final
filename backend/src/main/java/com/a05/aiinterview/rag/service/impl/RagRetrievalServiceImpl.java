@@ -35,6 +35,8 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
     private final RrfFusion rrfFusion;
     private final RagRerankService ragRerankService;
     private final RagProperties ragProperties;
+    private final com.a05.aiinterview.rag.qdrant.DifficultyWindowResolver difficultyWindowResolver =
+            new com.a05.aiinterview.rag.qdrant.DifficultyWindowResolver();
 
     @Override
     public RagContext retrieve(RagRetrievalRequest request) {
@@ -47,6 +49,8 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
                 request.getQuestionType(), request.getDifficultyHint(),
                 request.getDenseQueryText(), request.getSparseQueryText());
         try {
+            List<String> difficultyWindow = resolveDifficultyWindow(request);
+            boolean difficultyWindowApplied = !difficultyWindow.isEmpty();
             List<QdrantHybridQueryExecutor.SearchHit> denseHits = queryExecutor.denseRecall(request);
             List<QdrantHybridQueryExecutor.SearchHit> sparseHits = queryExecutor.sparseRecall(request);
 
@@ -64,6 +68,8 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
                     .retrievalTriggered(true)
                     .denseCandidateCount(denseHits.size())
                     .sparseCandidateCount(sparseHits.size())
+                    .difficultyWindowApplied(difficultyWindowApplied)
+                    .difficultyWindowValues(difficultyWindow)
                     .fusionTopQuestionIds(topQuestionIds(fusionOrdered, resolveFusionLimit()))
                     .rerankPreTopQuestionIds(topQuestionIds(fusionOrdered, resolveFusionLimit()))
                     .rerankPostTopQuestionIds(List.of())
@@ -82,6 +88,8 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
                         .retrievalTriggered(true)
                         .denseCandidateCount(audit.getDenseCandidateCount())
                         .sparseCandidateCount(audit.getSparseCandidateCount())
+                        .difficultyWindowApplied(audit.isDifficultyWindowApplied())
+                        .difficultyWindowValues(audit.getDifficultyWindowValues())
                         .fusionTopQuestionIds(audit.getFusionTopQuestionIds())
                         .rerankPreTopQuestionIds(audit.getRerankPreTopQuestionIds())
                         .rerankPostTopQuestionIds(rerankPostIds)
@@ -107,6 +115,8 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
                             .retrievalTriggered(true)
                             .denseCandidateCount(denseHits.size())
                             .sparseCandidateCount(sparseHits.size())
+                            .difficultyWindowApplied(difficultyWindowApplied)
+                            .difficultyWindowValues(difficultyWindow)
                             .fusionTopQuestionIds(audit.getFusionTopQuestionIds())
                             .rerankPreTopQuestionIds(audit.getRerankPreTopQuestionIds())
                             .rerankPostTopQuestionIds(rerankPostIds)
@@ -120,6 +130,13 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
                     request.getQuestionType(), e);
             return RagContext.emptyTriggered(RagContext.RetrievalAudit.empty(true));
         }
+    }
+
+    private List<String> resolveDifficultyWindow(RagRetrievalRequest request) {
+        if (request == null || !ragProperties.isDifficultyWindowEnabled()) {
+            return List.of();
+        }
+        return difficultyWindowResolver.resolve(request.getDifficultyHint());
     }
 
     private Map<String, Candidate> mergeCandidates(List<QdrantHybridQueryExecutor.SearchHit> denseHits,

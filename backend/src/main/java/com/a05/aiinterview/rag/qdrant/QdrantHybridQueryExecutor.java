@@ -30,6 +30,7 @@ public class QdrantHybridQueryExecutor {
     private final EmbeddingModel embeddingModel;
     private final QdrantClient qdrantClient;
     private final RagProperties ragProperties;
+    private final DifficultyWindowResolver difficultyWindowResolver = new DifficultyWindowResolver();
 
     public List<SearchHit> denseRecall(RagRetrievalRequest request) {
         if (request == null || isBlank(request.getDenseQueryText())) {
@@ -103,9 +104,21 @@ public class QdrantHybridQueryExecutor {
             must.add(ConditionFactory.matchKeyword("question_type", questionType));
         }
 
+        List<String> difficultyWindow = resolveDifficultyWindow(request);
+        if (!difficultyWindow.isEmpty()) {
+            must.add(ConditionFactory.matchKeywords("difficulty", difficultyWindow));
+        }
+
         return Points.Filter.newBuilder()
                 .addAllMust(must)
                 .build();
+    }
+
+    private List<String> resolveDifficultyWindow(RagRetrievalRequest request) {
+        if (request == null || !ragProperties.isDifficultyWindowEnabled()) {
+            return List.of();
+        }
+        return difficultyWindowResolver.resolve(request.getDifficultyHint());
     }
 
     private SearchHit fromPoint(Points.ScoredPoint point) {

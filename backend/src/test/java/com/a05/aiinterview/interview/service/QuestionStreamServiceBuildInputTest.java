@@ -352,6 +352,8 @@ class QuestionStreamServiceBuildInputTest {
                         .retrievalTriggered(true)
                         .denseCandidateCount(4)
                         .sparseCandidateCount(6)
+                        .difficultyWindowApplied(true)
+                        .difficultyWindowValues(List.of("L1", "L2", "L3"))
                         .fusionTopQuestionIds(List.of("redis-cache-penetration-001", "redis-null-cache-expire-001"))
                         .rerankPreTopQuestionIds(List.of("redis-cache-penetration-001", "redis-null-cache-expire-001"))
                         .rerankPostTopQuestionIds(List.of("redis-cache-penetration-001", "redis-null-cache-expire-001"))
@@ -391,6 +393,8 @@ class QuestionStreamServiceBuildInputTest {
                 .containsEntry("retrievalTriggered", true)
                 .containsEntry("denseCandidateCount", 4)
                 .containsEntry("sparseCandidateCount", 6)
+                .containsEntry("difficultyWindowApplied", true)
+                .containsEntry("difficultyWindowValues", List.of("L1", "L2", "L3"))
                 .containsEntry("fusionTopQuestionIds", List.of("redis-cache-penetration-001", "redis-null-cache-expire-001"))
                 .containsEntry("injectedQuestionIds", List.of("redis-cache-penetration-001"));
         @SuppressWarnings("unchecked")

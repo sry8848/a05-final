@@ -22,6 +22,8 @@ class RagContextTest {
                         .retrievalTriggered(true)
                         .denseCandidateCount(3)
                         .sparseCandidateCount(5)
+                        .difficultyWindowApplied(true)
+                        .difficultyWindowValues(List.of("L1", "L2", "L3"))
                         .fusionTopQuestionIds(List.of("q2", "q1"))
                         .rerankPreTopQuestionIds(List.of("q1", "q2"))
                         .rerankPostTopQuestionIds(List.of("q2", "q1"))

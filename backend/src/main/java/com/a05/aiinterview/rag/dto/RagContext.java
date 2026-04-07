@@ -98,6 +98,8 @@ public class RagContext {
             auditMap.put("retrievalTriggered", retrievalAudit.isRetrievalTriggered());
             auditMap.put("denseCandidateCount", retrievalAudit.getDenseCandidateCount());
             auditMap.put("sparseCandidateCount", retrievalAudit.getSparseCandidateCount());
+            auditMap.put("difficultyWindowApplied", retrievalAudit.isDifficultyWindowApplied());
+            auditMap.put("difficultyWindowValues", retrievalAudit.getDifficultyWindowValues());
             auditMap.put("fusionTopQuestionIds", retrievalAudit.getFusionTopQuestionIds());
             auditMap.put("rerankPreTopQuestionIds", retrievalAudit.getRerankPreTopQuestionIds());
             auditMap.put("rerankPostTopQuestionIds", retrievalAudit.getRerankPostTopQuestionIds());
@@ -143,6 +145,9 @@ public class RagContext {
         private boolean retrievalTriggered;
         private int denseCandidateCount;
         private int sparseCandidateCount;
+        private boolean difficultyWindowApplied;
+        @Builder.Default
+        private List<String> difficultyWindowValues = new ArrayList<>();
         @Builder.Default
         private List<String> fusionTopQuestionIds = new ArrayList<>();
         @Builder.Default
@@ -157,6 +162,8 @@ public class RagContext {
                     .retrievalTriggered(retrievalTriggered)
                     .denseCandidateCount(0)
                     .sparseCandidateCount(0)
+                    .difficultyWindowApplied(false)
+                    .difficultyWindowValues(List.of())
                     .fusionTopQuestionIds(List.of())
                     .rerankPreTopQuestionIds(List.of())
                     .rerankPostTopQuestionIds(List.of())
