@@ -15,9 +15,12 @@ import java.util.stream.Stream;
 /**
  * 单库题目卡片 DTO。
  *
- * <p>每条记录同时承载题面、考察点、参考语境和评分锚点，
- * 入库时统一拼接为 {@code retrieval_text} 写入向量库正文，
- * 业务字段则保留在 metadata 中供过滤、重排和追问扩展使用。
+ * <p>每条记录同时承载题面、考察点、参考语境和评分锚点。
+ * hybrid 检索阶段分别生成：
+ * <ul>
+ *   <li>dense 文本：保留完整语义上下文</li>
+ *   <li>sparse 文本：突出术语锚点，尽量剔除长叙事噪音</li>
+ * </ul>
  */
 @Data
 @Builder
@@ -80,14 +83,20 @@ public class KnowledgeDocument {
     @Schema(description = "版本号", example = "v1")
     private String version;
 
-    /**
-     * 统一拼接向量化主文本，避免各处各自拼接导致语义漂移。
-     */
-    public String toRetrievalText() {
+    /** 生成 dense 检索文本，保留完整语义上下文。 */
+    public String toDenseRetrievalText() {
         return Stream.of(
                         questionText,
-                        intentConcept,
-                        referenceContext,
+                        intentConcept
+                )
+                .filter(this::hasText)
+                .collect(Collectors.joining("\n"));
+    }
+
+    /** 生成 sparse/BM25 检索文本，强调术语锚点并压缩叙事噪音。 */
+    public String toSparseRetrievalText() {
+        return Stream.of(
+                        questionText,
                         joinList(scoringKeyPoints),
                         joinList(keywords)
                 )

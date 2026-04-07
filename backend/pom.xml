@@ -132,6 +132,13 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-qdrant-store</artifactId>
         </dependency>
+        <!-- Qdrant 原生 Java Client：hybrid collection、named vectors、sparse/BM25、RRF 融合查询都直接基于它实现。
+             Chunk 1 先显式锁版本，后续 chunk 在移除 VectorStore 主实现后仍保持原生 API 稳定。 -->
+        <dependency>
+            <groupId>io.qdrant</groupId>
+            <artifactId>client</artifactId>
+            <version>1.13.0</version>
+        </dependency>
         <!-- grpc-api 由 io.qdrant:client 引入但为 runtime scope，RagConfiguration 编译时需引用
              ManagedChannel，需显式提升为 compile scope -->
         <dependency>

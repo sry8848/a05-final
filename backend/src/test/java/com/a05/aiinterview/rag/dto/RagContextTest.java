@@ -20,8 +20,9 @@ class RagContextTest {
                 .followUpCandidates(List.of("follow-up-001"))
                 .retrievalAudit(RagContext.RetrievalAudit.builder()
                         .retrievalTriggered(true)
-                        .lexicalCandidateCount(5)
                         .denseCandidateCount(3)
+                        .sparseCandidateCount(5)
+                        .fusionTopQuestionIds(List.of("q2", "q1"))
                         .rerankPreTopQuestionIds(List.of("q1", "q2"))
                         .rerankPostTopQuestionIds(List.of("q2", "q1"))
                         .injectedQuestionIds(List.of("q2"))
@@ -39,8 +40,11 @@ class RagContextTest {
         Map<String, Object> retrievalAudit = (Map<String, Object>) auditMap.get("retrievalAudit");
         assertThat(retrievalAudit)
                 .containsEntry("retrievalTriggered", true)
-                .containsEntry("lexicalCandidateCount", 5)
                 .containsEntry("denseCandidateCount", 3)
+                .containsEntry("sparseCandidateCount", 5)
+                .containsEntry("fusionTopQuestionIds", List.of("q2", "q1"))
+                .containsEntry("rerankPreTopQuestionIds", List.of("q1", "q2"))
+                .containsEntry("rerankPostTopQuestionIds", List.of("q2", "q1"))
                 .containsEntry("injectedQuestionIds", List.of("q2"));
     }
 }

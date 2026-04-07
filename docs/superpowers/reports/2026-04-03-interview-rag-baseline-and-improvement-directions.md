@@ -2,401 +2,132 @@
 
 ## 文档目的
 
-本文用于统一面试 RAG 的下一阶段推荐基线，并作为后续改造与评审的共同起点。
+本文用于统一当前已经落地的面试 RAG 基线，并明确后续演进时哪些约束仍然成立、哪些内容不再视为现行契约。
 
-- 本文描述的是**推荐方案**，不是当前代码的逐行镜像。
-- 本文重点回答四件事：检索意图怎么表达、题卡材料怎么组织、双路召回怎么跑、哪些路线明确不采用。
-- 本文可单独阅读，不依赖旧版计划文档。
+- 本文描述的是**当前代码口径下的现行基线**。
+- 本文重点回答四件事：检索意图怎么表达、题卡材料怎么组织、双路召回怎么跑、当前不再采用哪些路线。
+- 更专业的 RAG 质量评估体系后续单独设计；本文不再把主观质量门槛写成现行 blocker。
 
-## 推荐基线一句话
+## 现行基线一句话
 
-下一阶段推荐基线是：
+当前面试 RAG 基线是：
 
-**单库题目卡片 + 单意图检索 + dense 与 lexical/sparse 双路独立召回 + RRF 融合 + 商业 rerank 主排序 + 程序硬护栏 + Top N 题卡注入出题链路。**
+**单库题目卡片 + 单意图检索 + dense 与 sparse/BM25 双路独立召回 + RRF 融合 + 商业 rerank 主排序 + 程序硬护栏 + Top N 题卡注入出题链路。**
 
 也就是：
 
 - dense 分支负责语义召回
-- lexical/sparse 分支负责术语锚点召回
+- sparse/BM25 分支负责术语锚点召回
+- 两路候选先融合，再做最终排序和后置护栏
 
-## 背景与问题定义
+## 现行实现摘要
 
-这套 RAG 不是通用问答系统，而是服务端驱动的题库检索增强链路。
+### 1. retrieval brief 继续保持 3 字段
 
-服务端要解决的不是“用户刚刚问了什么”，而是：
-
-- 这一轮想确认什么能力
-- 应该问成哪种题型
-- 需要保住哪些术语锚点
-- 如何从题库里选出更像真实面试官会问的问题
-
-当前问题已经很清楚：
-
-- 单纯用 lexical 先裁剪 dense，会真实压缩 dense 的候选空间
-- `Top-K` 盲区会让很多本该由 dense 补回来的好题，连进入候选集的机会都没有
-- 所以 lexical 不能再担当 dense 的前置主裁剪器
-
-因此，下一阶段推荐方案不是：
-
-- `lexical prefilter -> dense -> rerank`
-
-而是：
-
-- `dense branch + lexical/sparse branch -> RRF -> rerank -> hard guardrails`
-
-## 关键约束
-
-### 1. 单意图，不做多意图检索
-
-当前推荐的是：
-
-- retrieval plan是个数组，这是未来保证未来扩展性，但现阶段强制要求不超过1个retrieval plan
-
-不是：
-
-- 多个并列 retrieval plan 同时执行
-- 多个不相关意图一起召回
-
-原因很直接：
-
-- 面试下一题天然应该有一个主焦点
-- 多意图会提高召回量，但会伤害聚焦度、可解释性和最终出题质量
-
-### 2. retrieval brief 继续保持 3 字段
-
-AI retrieval brief 继续保持最小集合：
+AI retrieval brief 当前仍然只保留：
 
 - `queryText`
 - `keywordHints`
 - `difficultyHint`
 
-它们的职责必须固定：
+它们的职责是：
 
-- `queryText`：完整语义意图，给 dense 分支使用
-- `keywordHints`：正向术语锚点，给 lexical/sparse 分支使用，可为空数组
-- `difficultyHint`：目标深度提示，只做排序软约束，不做硬过滤
+- `queryText`：完整语义意图
+- `keywordHints`：术语锚点
+- `difficultyHint`：排序软提示
 
+当前不再恢复旧 retrieval 字段，也不再让程序为旧字段兜底。
 
-### 3. 单库题目卡片继续保留
+### 2. 题卡材料已经拆成 dense 文本与 sparse 文本
 
-下一阶段不重回多语料分裂设计，继续使用单库题目卡片。
+当前题卡仍然是单库单卡设计，但文档侧已经显式拆成两类检索文本：
 
-单张题卡至少包含：
+- dense 文本：保留完整语义上下文
+- sparse 文本：保留术语锚点并压缩叙事噪音
 
-- `id`
-- `question_text`
-- `intent_concept`
-- `reference_context`
-- `scoring_key_points`
-- `scoring_pitfalls`
-- `follow_up_ids`
-- `domainCode`
+因此当前实现不再使用“一份正文同时兼顾所有阶段”的旧折中口径。
+
+### 3. collection 与 schema 已按 hybrid 方式组织
+
+当前默认 collection 为：
+
+- `interview_knowledge_hybrid`
+
+当前默认 named vector 为：
+
+- dense：`dense`
+- sparse：`bm25`
+
+当前 payload 索引只保留仍有业务价值的元数据索引：
+
 - `question_type`
-- `difficulty`
-- `keywords`
-- `source`
+- `domain_code`
 - `active`
-- `version`
 
-这意味着：
+### 4. 当前真实检索主链路
 
-- 主材料不是纯问题文本
-- 也不是纯知识片段
-- 而是可检索、可 grounding、可出题的题目卡片
+当前真实主链路已经收敛为：
 
-## 双路召回方案
+1. `RagPlanCompiler` 生成 `queryText / denseQueryText / sparseQueryText`
+2. `QdrantHybridQueryExecutor` 执行 dense 分支查询
+3. `QdrantHybridQueryExecutor` 执行 sparse/BM25 分支查询
+4. `RrfFusion` 融合两路候选
+5. `DashScopeRagRerankService` 执行最终主排序
+6. `RagRetrievalServiceImpl` 执行题型与领域硬护栏
+7. `QuestionGenerationInput` 注入 Top N 材料
 
-### 1. 上游仍然由服务端决定检索意图
+### 5. 当前入库主路径
 
-`evaluation_decision` 仍负责：
+当前入库已经切换到原生 Qdrant Java Client：
 
-- 决定下一题大方向
-- 判断这一轮是否值得检索
-- 输出 retrieval brief
+- `KnowledgeIngestionService` 负责计算 dense embedding
+- `QdrantHybridPointMapper` 负责构造 stable point、payload 与 named vectors
+- 入库通过 Qdrant 原生 upsert 写入 dense vector、sparse document 与 payload
 
-它不负责：
+## 仍然成立的约束
 
-- 直接做数据库级 DSL
-- 直接给出最终排序结果
+### 1. 单意图，不做多意图并行召回
 
-### 2. `RagPlanCompiler` 负责把 3 字段编译成两条查询分支
+当前执行语义仍然要求：
 
-编译器的职责应收敛为三件事：
+- `retrievalPlans` 最多 1 条
+- 一轮下一题只围绕一个主焦点检索
 
-1. 生成 dense 查询
-2. 生成 lexical/sparse 查询
-3. 生成 rerank brief
+### 2. 前置过滤只保留低误伤边界
 
-推荐编译规则：
-
-- `denseQueryText <- queryText`
-- `lexicalAnchors <- keywordHints`
-- `rerankBrief <- queryText + keywordHints + questionType + domainCode + focusPoint + difficultyHint`
-
-这里要明确：
-
-- 不要再从 `focusPoint` 偷偷给 lexical 分支造词
-- `keywordHints=[]` 时，允许 lexical 分支为空
-- `difficultyHint` 不要在编译层变成硬过滤条件
-
-### 3. 前置硬边界只保留低误伤条件
-
-双路召回前，只下推低误伤、刚性的业务边界：
+当前查询执行前只下推这些刚性边界：
 
 - `active=true`
 - `questionType`
-- `domainCode`
+- `domainCode` 可选精确过滤
 
-必要时也可以包含：
+### 3. `difficultyHint` 仍然不是硬过滤
 
-- 行为题 `domainCode=""`
-- 题型映射，如 `PROJECT_DEEP_DIVE -> PROJECT`
+当前 `difficultyHint` 仍然只作为排序提示，不作为召回层硬约束。
 
-不应前置成硬过滤的东西：
+### 4. 最终硬护栏仍然必须存在
 
-- `difficultyHint`
-- `keywordHints`
-- 任何自由文本负向约束
-
-### 4. dense 分支
-
-dense 分支的目标是：
-
-- 找到与检索意图语义接近的题卡
-- 补回“词不一样但意思一样”的候选
-
-输入要求：
-
-- 只吃 `queryText`
-- `queryText` 缺失时才回退到 `focusPoint`
-- 不堆关键词，不拼负向词
-
-输出建议：
-
-- 独立召回 `Top 20`
-
-### 5. lexical/sparse 分支
-
-lexical 分支的目标是：
-
-- 精确捞出术语锚点相关题卡
-- 补足 dense 对专有词、缩写、机制名不够敏感的部分
-
-输入要求：
-
-- 只吃 `keywordHints`
-- 只允许正向术语锚点
-- 可以为空
-
-词类型建议包括：
-
-- 技术名词
-- 组件名
-- 缩写
-- 故障名
-- 机制名
-- 必要别名
-
-输出建议：
-
-- 独立召回 `Top 20`
-
-### lexical 的推荐技术路线
-
-下一阶段推荐 lexical 主路使用：
-
-- `Qdrant sparse / BM25`
-
-不推荐把下面这些当主 lexical 方案：
-
-- payload full-text filter
-- 手工 clue 打分主排序
-- 继续把 lexical 当作 dense 的前置筛子
-
-### 6. 融合层使用 RRF
-
-dense 和 sparse 的分数空间不同，不应该直接比较绝对分值。
-
-推荐第一版融合方式：
-
-- `RRF`
-
-原因：
-
-- 简单
-- 稳定
-- 适合两路独立召回后的第一版融合
-
-推荐顺序：
-
-1. dense Top 20
-2. sparse Top 20
-3. RRF 融合
-4. 得到融合候选集
-
-### 7. rerank 继续保留
-
-RRF 负责把两路候选拉到一起，但不负责最终最优排序。
-
-因此下一阶段仍应保留商业 rerank，作为主排序器。
-
-rerank 输入建议：
-
-- `questionType`
-- `queryText`
-- `focusPoint`
-- `keywordHints`
-- `difficultyHint`
-- 融合后的候选题卡
-
-rerank 的职责是：
-
-- 按当前检索意图重新排序
-- 提升 Top N 质量
-- 降低 dense 和 sparse 单独偏科的问题
-
-### 8. 最终硬护栏
-
-无论前面怎么召回和排序，最后都必须有硬护栏。
-
-当前推荐保留：
+无论前面怎么召回和排序，最终都保留程序级硬护栏：
 
 - 行为题不能混入技术题
-- 非行为题不能错题型漂移
-- `domainCode` 明显冲突的候选要剔除
-- 项目题不能退化成完全脱离项目上下文的泛八股
+- 非行为题不能题型漂移
+- 明显领域冲突的候选要剔除
+- 项目题不能退化成脱离项目语境的泛八股
 
-这里的原则是：
+## 当前不再采用的路线
 
-- 强约束尽量前置
-- 但最终仍要保留一次后置硬兜底
+下面这些不再视为现行主线：
 
-## 当前推荐的数据与查询形态
+- 让单一路径先压缩 dense 候选空间
+- 用通用 payload 文本匹配充当主术语召回路线
+- 恢复旧 retrieval 字段
+- 把主观命中率门槛当作当前代码正确性的硬标准
 
-### 1. 文档侧
+## 当前审计与回归边界
 
-第一版可以继续共用一份题卡检索正文，例如：
+### 1. 现行审计字段
 
-- `retrieval_text = question_text + intent_concept + reference_context + scoring_key_points + keywords`
-
-但要明确：
-
-- 这是第一版折中
-- 如果后续评测发现 sparse 被长叙事稀释，再拆出单独的 sparse 文本
-
-### 2. 查询侧
-
-查询侧不再是“一份 query 通吃所有阶段”，而是至少要拆成：
-
-- `denseQueryText`
-- `lexicalAnchors`
-- `rerankBrief`
-
-尽管 AI 只输出 3 字段，但程序内部不应该继续把三层职责混成一团。
-
-## 明确不采用的路线
-
-下面这些路线，下一阶段不建议采用：
-
-### 1. 不把 lexical prefilter 当主链路
-
-不再采用：
-
-- `lexical -> dense` 作为推荐目标架构
-
-它可以是当前过渡实现，但不是推荐基线。
-
-### 2. 不把 payload full-text filter 当 lexical 主方案
-
-payload full-text 更适合：
-
-- 辅助过滤
-- phrase 调试
-- 局部约束
-
-它不是推荐的独立 lexical 召回主路。
-
-### 3. 不把 `difficultyHint` 当硬过滤
-
-`difficultyHint` 只做软偏置。
-
-### 4. 不恢复旧 retrieval 字段
-
-不恢复：
-
-- `goal`
-- `displayQuery`
-- `mustHaveClues`
-- `avoidClues`
-
-这些字段已经被证明会制造语义重叠和职责漂移。
-
-### 5. 不第一步就引入 Python 稀疏向量微服务
-
-如果后续要上 neural sparse，可以再评估。
-
-但第一步不需要为了 lexical 分支就先搭 Python 服务。
-
-## 与当前实现的差异
-
-这部分必须写清楚，否则文档会误导团队。
-
-当前代码现状仍然是：
-
-- lexical 预过滤
-- dense 召回
-- rerank
-- hard guardrails
-
-当前代码**还没有**完全落地：
-
-- dense + sparse 双路独立召回
-- RRF 融合
-- BM25 sparse 主 lexical 路
-
-所以这份文档表达的是：
-
-- **下一阶段推荐基线**
-
-而不是：
-
-- 当前代码已经全部完成
-
-## 下一阶段最值得验证的问题
-
-### 1. 双路召回是否真的比当前单路链路更好
-
-要验证的不是概念，而是：
-
-- target card 是否更稳定进入 Top 20
-- dense 是否少被 lexical 误伤
-- rerank 之后 Top N 是否更自然
-
-### 2. `keywordHints` 是否足以支撑 lexical/sparse 分支
-
-要重点观察：
-
-- principle / scenario / project 题是否能稳定给出高价值锚点
-- behavior 题是否能允许空关键词而不被误伤
-
-### 3. 项目题是否会继续八股漂移
-
-项目题最危险的退化仍然是：
-
-- 明明应该围绕真实项目追问
-- 最后却被拉回成纯知识问答
-
-双路召回能否缓解这点，需要评测，而不是想当然。
-
-## 评测与审计口径
-
-下一阶段评测至少要能对比三种路径：
-
-1. dense only
-2. dense + sparse + RRF
-3. dense + sparse + RRF + rerank
-
-建议持续记录的审计字段：
+当前检索审计字段已经统一为：
 
 - `retrievalTriggered`
 - `denseCandidateCount`
@@ -406,28 +137,43 @@ payload full-text 更适合：
 - `rerankPostTopQuestionIds`
 - `injectedQuestionIds`
 
-建议重点看这些指标：
+### 2. 当前明确契约
 
-- `routingAccuracy`
-- `retrievalApplicableHitRate`
-- `denseOnlyHitRate`
-- `hybridHitRate`
-- `rerankTop3HitRate`
-- `behavioralPollutionRate`
-- `projectAnchorRetentionRate`
+当前代码层面明确保留的回归契约只有两类：
+
+- `shouldRetrieve=false` 不触发真实检索
+- `RagPlanCompiler` 对 `questionType / queryText / denseQueryText / sparseQueryText` 的编译结果
+
+像 `domainCode`、`keywordQueries`、主观命中率、污染率、follow-up 精确命中等内容，不再作为当前代码正确性的硬门槛。
+
+### 3. 当前没有保留主观评测夹具
+
+仓库当前已经删除旧的主观评测夹具；更专业的 RAG 质量评估需要后续单独建设。
+
+## 运维与升级注意事项
+
+当前 cutover 仍然有两类人工风险需要单独处理：
+
+- Qdrant server 是否支持 sparse/BM25 与当前 named vector schema
+- Qdrant client 与 server 的版本兼容性是否满足要求
+
+因此上线切换仍应遵循：
+
+- 新建 collection
+- 重建数据
+- 验证检索
+- 切换默认 collection
+- 最后再删除旧 collection
 
 ## 结论
 
-这份文档要表达的核心不是“当前代码怎样”，而是“下一阶段应该往哪条线上收敛”。
-
-当前推荐路线已经很明确：
+当前面试 RAG 已经不再是旧的单路裁剪方案，而是：
 
 - 继续保留单库题目卡片
 - 继续保留 3 字段 retrieval brief
-- 放弃 lexical 先裁剪 dense 的推荐口径
-- 改成单意图、双路独立召回
-- 用 RRF 做第一版融合
-- 用商业 rerank 做最终主排序
-- 用程序硬护栏做最后兜底
+- 使用 dense + sparse/BM25 双路独立召回
+- 使用 RRF 做第一版融合
+- 使用商业 rerank 做最终主排序
+- 使用程序硬护栏做最后兜底
 
-如果后续方案继续演进，也不应再回到旧字段恢复、技术钩子词表门槛、payload full-text 充当主 lexical 召回这些已经被排除的方向。
+后续如果继续演进，应该沿着更专业的评估体系、版本兼容治理、collection 运维自动化去做，而不是回到已被放弃的旧路线。

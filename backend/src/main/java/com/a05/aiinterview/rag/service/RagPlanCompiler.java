@@ -59,16 +59,22 @@ public class RagPlanCompiler {
                     .domainCode(resolveDomainCode(questionType, plan))
                     .projectName(resolveProjectName(questionType, plan))
                     .queryText("")
+                    .denseQueryText("")
+                    .sparseQueryText("")
                     .difficultyHint("")
                     .keywordQueries(List.of())
                     .build();
         }
 
+        String queryText = retrievalPlan == null ? "" : defaultString(retrievalPlan.getQueryText());
+        List<String> keywordQueries = resolveKeywordQueries(retrievalPlan);
         String difficultyHint = retrievalPlan == null ? "" : defaultString(retrievalPlan.getDifficultyHint());
         return RagRetrievalRequest.builder()
                 .shouldRetrieve(true)
-                .queryText(retrievalPlan == null ? "" : defaultString(retrievalPlan.getQueryText()))
-                .keywordQueries(resolveKeywordQueries(retrievalPlan))
+                .queryText(queryText)
+                .denseQueryText(queryText)
+                .sparseQueryText(joinKeywords(keywordQueries))
+                .keywordQueries(keywordQueries)
                 .difficultyHint(difficultyHint)
                 .positionCode(defaultString(positionCode))
                 .questionType(questionType)
@@ -159,6 +165,13 @@ public class RagPlanCompiler {
             }
         }
         return List.copyOf(deduped);
+    }
+
+    private String joinKeywords(List<String> keywordQueries) {
+        if (keywordQueries == null || keywordQueries.isEmpty()) {
+            return "";
+        }
+        return String.join(" ", keywordQueries);
     }
 
     private String normalizeQuestionType(String questionType) {

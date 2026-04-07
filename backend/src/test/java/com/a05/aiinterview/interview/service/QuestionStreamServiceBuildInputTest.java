@@ -350,8 +350,9 @@ class QuestionStreamServiceBuildInputTest {
                 .followUpCandidates(List.of("redis-bloom-filter-false-positive-001"))
                 .retrievalAudit(RagContext.RetrievalAudit.builder()
                         .retrievalTriggered(true)
-                        .lexicalCandidateCount(6)
                         .denseCandidateCount(4)
+                        .sparseCandidateCount(6)
+                        .fusionTopQuestionIds(List.of("redis-cache-penetration-001", "redis-null-cache-expire-001"))
                         .rerankPreTopQuestionIds(List.of("redis-cache-penetration-001", "redis-null-cache-expire-001"))
                         .rerankPostTopQuestionIds(List.of("redis-cache-penetration-001", "redis-null-cache-expire-001"))
                         .injectedQuestionIds(List.of("redis-cache-penetration-001"))
@@ -388,8 +389,9 @@ class QuestionStreamServiceBuildInputTest {
         Map<String, Object> retrievalAudit = (Map<String, Object>) retrievalContextMap.get("retrievalAudit");
         assertThat(retrievalAudit)
                 .containsEntry("retrievalTriggered", true)
-                .containsEntry("lexicalCandidateCount", 6)
                 .containsEntry("denseCandidateCount", 4)
+                .containsEntry("sparseCandidateCount", 6)
+                .containsEntry("fusionTopQuestionIds", List.of("redis-cache-penetration-001", "redis-null-cache-expire-001"))
                 .containsEntry("injectedQuestionIds", List.of("redis-cache-penetration-001"));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> retrievedMaterials =

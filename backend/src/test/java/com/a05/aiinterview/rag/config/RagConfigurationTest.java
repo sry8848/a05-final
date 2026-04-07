@@ -1,83 +1,56 @@
 package com.a05.aiinterview.rag.config;
 
-import com.google.common.util.concurrent.Futures;
-import io.qdrant.client.QdrantClient;
-import io.qdrant.client.grpc.Collections;
-import io.qdrant.client.grpc.Points;
+import com.a05.aiinterview.rag.qdrant.QdrantHybridCollectionManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 
-import java.time.Duration;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @DisplayName("RagConfiguration tests")
 class RagConfigurationTest {
 
     @Test
-    @DisplayName("ensureLexicalPayloadIndexes should register text and keyword indexes for lexical prefilter fields")
-    void ensureLexicalPayloadIndexes_shouldRegisterTextAndKeywordIndexesForLexicalPrefilterFields() throws Exception {
+    @DisplayName("ragHybridCollectionManager should expose native hybrid schema manager")
+    void ragHybridCollectionManager_shouldExposeNativeHybridSchemaManager() {
         RagConfiguration configuration = new RagConfiguration();
-        QdrantClient qdrantClient = mock(QdrantClient.class);
         RagProperties properties = new RagProperties();
-        properties.setCollectionName("interview_knowledge");
 
-        when(qdrantClient.createPayloadIndexAsync(
-                eq("interview_knowledge"),
-                any(String.class),
-                any(Collections.PayloadSchemaType.class),
-                any(Collections.PayloadIndexParams.class),
-                eq(Boolean.TRUE),
-                eq(Points.WriteOrderingType.Weak),
-                any(Duration.class)
-        )).thenReturn(Futures.immediateFuture(Points.UpdateResult.newBuilder().build()));
+        QdrantHybridCollectionManager manager = configuration.ragHybridCollectionManager(
+                mock(io.qdrant.client.QdrantClient.class),
+                properties
+        );
 
-        configuration.ensureLexicalPayloadIndexes(qdrantClient, properties);
-
-        verify(qdrantClient, times(1)).createPayloadIndexAsync(
-                eq("interview_knowledge"),
-                eq("question_text"),
-                eq(Collections.PayloadSchemaType.Text),
-                any(Collections.PayloadIndexParams.class),
-                eq(Boolean.TRUE),
-                eq(Points.WriteOrderingType.Weak),
-                any(Duration.class)
-        );
-        verify(qdrantClient, times(1)).createPayloadIndexAsync(
-                eq("interview_knowledge"),
-                eq("intent_concept"),
-                eq(Collections.PayloadSchemaType.Text),
-                any(Collections.PayloadIndexParams.class),
-                eq(Boolean.TRUE),
-                eq(Points.WriteOrderingType.Weak),
-                any(Duration.class)
-        );
-        verify(qdrantClient, times(1)).createPayloadIndexAsync(
-                eq("interview_knowledge"),
-                eq("keywords"),
-                eq(Collections.PayloadSchemaType.Keyword),
-                any(Collections.PayloadIndexParams.class),
-                eq(Boolean.TRUE),
-                eq(Points.WriteOrderingType.Weak),
-                any(Duration.class)
-        );
+        org.assertj.core.api.Assertions.assertThat(manager).isNotNull();
     }
 
     @Test
-    @DisplayName("text index params should use multilingual lowercase tokenization")
-    void lexicalTextIndexParams_shouldUseMultilingualLowercaseTokenization() {
+    @DisplayName("ragHybridSchemaInitializer should invoke manager when initializeSchema is enabled")
+    void ragHybridSchemaInitializer_shouldInvokeManagerWhenInitializeSchemaEnabled() throws Exception {
         RagConfiguration configuration = new RagConfiguration();
+        RagProperties properties = new RagProperties();
+        properties.setInitializeSchema(true);
+        QdrantHybridCollectionManager manager = mock(QdrantHybridCollectionManager.class);
 
-        Collections.PayloadIndexParams params = configuration.lexicalTextIndexParams();
+        SmartInitializingSingleton initializer = configuration.ragHybridSchemaInitializer(manager, properties);
+        initializer.afterSingletonsInstantiated();
 
-        assertThat(params.hasTextIndexParams()).isTrue();
-        assertThat(params.getTextIndexParams().getTokenizer()).isEqualTo(Collections.TokenizerType.Multilingual);
-        assertThat(params.getTextIndexParams().getLowercase()).isTrue();
+        verify(manager).ensureCollectionSchema();
+    }
+
+    @Test
+    @DisplayName("ragHybridSchemaInitializer should skip manager when initializeSchema is disabled")
+    void ragHybridSchemaInitializer_shouldSkipManagerWhenInitializeSchemaDisabled() {
+        RagConfiguration configuration = new RagConfiguration();
+        RagProperties properties = new RagProperties();
+        properties.setInitializeSchema(false);
+        QdrantHybridCollectionManager manager = mock(QdrantHybridCollectionManager.class);
+
+        SmartInitializingSingleton initializer = configuration.ragHybridSchemaInitializer(manager, properties);
+        initializer.afterSingletonsInstantiated();
+
+        verifyNoInteractions(manager);
     }
 }

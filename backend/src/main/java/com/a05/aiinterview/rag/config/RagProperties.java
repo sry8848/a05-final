@@ -31,10 +31,28 @@ public class RagProperties {
     private int port = 6334;
 
     /** Qdrant 集合名称 */
-    private String collectionName = "interview_knowledge";
+    private String collectionName = "interview_knowledge_hybrid";
+
+    /** dense named vector 名称 */
+    private String denseVectorName = "dense";
+
+    /** dense named vector 维度；当前默认对齐 text-embedding-v4 的默认输出维度 1024。 */
+    private int denseVectorSize = 1024;
+
+    /** sparse named vector 名称 */
+    private String sparseVectorName = "bm25";
 
     /** 若集合不存在是否自动创建（生产环境建议手动预创建后设为 false） */
     private boolean initializeSchema = true;
+
+    /** dense 分支独立召回 TopK。 */
+    private int denseTopK = 20;
+
+    /** sparse 分支独立召回 TopK。 */
+    private int sparseTopK = 20;
+
+    /** RRF 融合后的候选规模上限。 */
+    private int fusionTopK = 20;
 
     /** 启动时是否自动注入内置样本知识数据（仅用于开发/演示，生产应关闭） */
     private boolean initSampleData = false;
