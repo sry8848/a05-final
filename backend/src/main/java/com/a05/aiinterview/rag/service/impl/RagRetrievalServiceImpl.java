@@ -47,12 +47,20 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
 
         List<String> difficultyWindow = resolveDifficultyWindow(request);
         boolean difficultyWindowApplied = !difficultyWindow.isEmpty();
+        int denseCandidateCount = 0;
+        int sparseCandidateCount = 0;
+        List<String> fusionTopQuestionIds = List.of();
+        List<String> rerankPreTopQuestionIds = List.of();
+        List<String> rerankPostTopQuestionIds = List.of();
+        List<String> injectedQuestionIds = List.of();
         log.info("RAG 检索开始, questionType={}, difficultyHint={}, denseQueryText={}, sparseQueryText={}",
                 request.getQuestionType(), request.getDifficultyHint(),
                 request.getDenseQueryText(), request.getSparseQueryText());
         try {
             List<QdrantHybridQueryExecutor.SearchHit> denseHits = queryExecutor.denseRecall(request);
+            denseCandidateCount = denseHits.size();
             List<QdrantHybridQueryExecutor.SearchHit> sparseHits = queryExecutor.sparseRecall(request);
+            sparseCandidateCount = sparseHits.size();
 
             List<String> denseIds = denseHits.stream().map(QdrantHybridQueryExecutor.SearchHit::questionId).toList();
             List<String> sparseIds = sparseHits.stream().map(QdrantHybridQueryExecutor.SearchHit::questionId).toList();
@@ -63,44 +71,45 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
 
             Map<String, Candidate> candidatePool = mergeCandidates(denseHits, sparseHits);
             List<Candidate> fusionOrdered = orderByFusion(fusedScores, candidatePool, denseIds, sparseIds);
+            fusionTopQuestionIds = topQuestionIds(fusionOrdered, resolveFusionLimit());
+            rerankPreTopQuestionIds = fusionTopQuestionIds;
 
-            RagContext.RetrievalAudit audit = RagContext.RetrievalAudit.builder()
-                    .retrievalTriggered(true)
-                    .denseCandidateCount(denseHits.size())
-                    .sparseCandidateCount(sparseHits.size())
-                    .difficultyWindowApplied(difficultyWindowApplied)
-                    .difficultyWindowValues(difficultyWindow)
-                    .fusionTopQuestionIds(topQuestionIds(fusionOrdered, resolveFusionLimit()))
-                    .rerankPreTopQuestionIds(topQuestionIds(fusionOrdered, resolveFusionLimit()))
-                    .rerankPostTopQuestionIds(List.of())
-                    .injectedQuestionIds(List.of())
-                    .build();
+            RagContext.RetrievalAudit audit = buildAudit(
+                    denseCandidateCount,
+                    sparseCandidateCount,
+                    difficultyWindowApplied,
+                    difficultyWindow,
+                    fusionTopQuestionIds,
+                    rerankPreTopQuestionIds,
+                    rerankPostTopQuestionIds,
+                    injectedQuestionIds
+            );
 
             if (fusionOrdered.isEmpty()) {
                 return RagContext.emptyTriggered(audit);
             }
 
             List<Candidate> reranked = rerank(fusionOrdered, request);
-            List<String> rerankPostIds = topQuestionIds(reranked, resolveResultLimit());
+            rerankPostTopQuestionIds = topQuestionIds(reranked, resolveResultLimit());
             List<Candidate> guarded = applyHardGuardrails(reranked, request);
             if (guarded.isEmpty()) {
-                return RagContext.emptyTriggered(RagContext.RetrievalAudit.builder()
-                        .retrievalTriggered(true)
-                        .denseCandidateCount(audit.getDenseCandidateCount())
-                        .sparseCandidateCount(audit.getSparseCandidateCount())
-                        .difficultyWindowApplied(audit.isDifficultyWindowApplied())
-                        .difficultyWindowValues(audit.getDifficultyWindowValues())
-                        .fusionTopQuestionIds(audit.getFusionTopQuestionIds())
-                        .rerankPreTopQuestionIds(audit.getRerankPreTopQuestionIds())
-                        .rerankPostTopQuestionIds(rerankPostIds)
-                        .injectedQuestionIds(List.of())
-                        .build());
+                return RagContext.emptyTriggered(buildAudit(
+                        denseCandidateCount,
+                        sparseCandidateCount,
+                        difficultyWindowApplied,
+                        difficultyWindow,
+                        fusionTopQuestionIds,
+                        rerankPreTopQuestionIds,
+                        rerankPostTopQuestionIds,
+                        injectedQuestionIds
+                ));
             }
 
             int resultLimit = resolveResultLimit();
             List<Candidate> topCandidates = guarded.stream()
                     .limit(resultLimit)
                     .toList();
+            injectedQuestionIds = topQuestionIds(topCandidates, resultLimit);
             List<RagContext.RetrievedMaterial> retrievedMaterials = topCandidates.stream()
                     .map(this::toRetrievedMaterial)
                     .toList();
@@ -111,39 +120,53 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
                     .contextText(buildContextText(retrievedMaterials))
                     .retrievedMaterials(retrievedMaterials)
                     .followUpCandidates(followUpCandidates)
-                    .retrievalAudit(RagContext.RetrievalAudit.builder()
-                            .retrievalTriggered(true)
-                            .denseCandidateCount(denseHits.size())
-                            .sparseCandidateCount(sparseHits.size())
-                            .difficultyWindowApplied(difficultyWindowApplied)
-                            .difficultyWindowValues(difficultyWindow)
-                            .fusionTopQuestionIds(audit.getFusionTopQuestionIds())
-                            .rerankPreTopQuestionIds(audit.getRerankPreTopQuestionIds())
-                            .rerankPostTopQuestionIds(rerankPostIds)
-                            .injectedQuestionIds(topQuestionIds(topCandidates, resultLimit))
-                            .build())
+                    .retrievalAudit(buildAudit(
+                            denseCandidateCount,
+                            sparseCandidateCount,
+                            difficultyWindowApplied,
+                            difficultyWindow,
+                            fusionTopQuestionIds,
+                            rerankPreTopQuestionIds,
+                            rerankPostTopQuestionIds,
+                            injectedQuestionIds
+                    ))
                     .hitCount(retrievedMaterials.size())
                     .empty(false)
                     .build();
         } catch (Exception e) {
             log.error("RAG 检索异常, questionType={}",
                     request.getQuestionType(), e);
-            return RagContext.emptyTriggered(emptyAuditWithDifficultyWindow(difficultyWindowApplied, difficultyWindow));
+            return RagContext.emptyTriggered(buildAudit(
+                    denseCandidateCount,
+                    sparseCandidateCount,
+                    difficultyWindowApplied,
+                    difficultyWindow,
+                    fusionTopQuestionIds,
+                    rerankPreTopQuestionIds,
+                    rerankPostTopQuestionIds,
+                    injectedQuestionIds
+            ));
         }
     }
 
-    private RagContext.RetrievalAudit emptyAuditWithDifficultyWindow(boolean difficultyWindowApplied,
-                                                                     List<String> difficultyWindow) {
+    private RagContext.RetrievalAudit buildAudit(int denseCandidateCount,
+                                                 int sparseCandidateCount,
+                                                 boolean difficultyWindowApplied,
+                                                 List<String> difficultyWindow,
+                                                 List<String> fusionTopQuestionIds,
+                                                 List<String> rerankPreTopQuestionIds,
+                                                 List<String> rerankPostTopQuestionIds,
+                                                 List<String> injectedQuestionIds) {
         return RagContext.RetrievalAudit.builder()
                 .retrievalTriggered(true)
-                .denseCandidateCount(0)
-                .sparseCandidateCount(0)
+                .denseCandidateCount(denseCandidateCount)
+                .sparseCandidateCount(sparseCandidateCount)
                 .difficultyWindowApplied(difficultyWindowApplied)
                 .difficultyWindowValues(difficultyWindow == null ? List.of() : List.copyOf(difficultyWindow))
-                .fusionTopQuestionIds(List.of())
-                .rerankPreTopQuestionIds(List.of())
-                .rerankPostTopQuestionIds(List.of())
-                .injectedQuestionIds(List.of())
+                .fusionTopQuestionIds(fusionTopQuestionIds == null ? List.of() : List.copyOf(fusionTopQuestionIds))
+                .rerankPreTopQuestionIds(rerankPreTopQuestionIds == null ? List.of() : List.copyOf(rerankPreTopQuestionIds))
+                .rerankPostTopQuestionIds(rerankPostTopQuestionIds == null ? List.of() : List.copyOf(rerankPostTopQuestionIds))
+                .injectedQuestionIds(injectedQuestionIds == null ? List.of() : List.copyOf(injectedQuestionIds))
                 .build();
     }
 

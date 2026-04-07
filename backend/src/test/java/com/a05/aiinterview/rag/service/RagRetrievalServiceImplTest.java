@@ -228,6 +228,50 @@ class RagRetrievalServiceImplTest {
     }
 
     @Test
+    @DisplayName("retrieve should preserve known audit state when sparse recall throws after dense succeeds")
+    void retrieve_shouldPreserveKnownAuditStateWhenSparseRecallThrowsAfterDenseSucceeds() {
+        EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
+        QdrantClient qdrantClient = mock(QdrantClient.class);
+        RagRerankService rerankService = mock(RagRerankService.class);
+        RagRetrievalServiceImpl service = newService(embeddingModel, qdrantClient, rerankService, true);
+
+        when(embeddingModel.embed("Redis 缓存穿透的原理与防护")).thenReturn(new float[]{0.1f, 0.2f});
+        when(qdrantClient.queryAsync(any(Points.QueryPoints.class)))
+                .thenReturn(Futures.immediateFuture(List.of(
+                        scoredPoint(
+                                1L, "redis-cache-penetration-001", "讲一下 Redis 缓存穿透",
+                                "考察空对象缓存和布隆过滤器", "高并发查询不存在数据时需要空对象缓存和布隆过滤器兜底。",
+                                List.of("空对象缓存", "布隆过滤器"), List.of("混淆缓存击穿和穿透"), List.of("follow-penetration"),
+                                "redis", "PRINCIPLE", "L2", List.of("Redis", "缓存穿透", "布隆过滤器"), 0.86f
+                        )
+                )))
+                .thenThrow(new IllegalStateException("qdrant down"));
+
+        RagContext context = service.retrieve(RagRetrievalRequest.builder()
+                .shouldRetrieve(true)
+                .queryText("Redis 缓存穿透的原理与防护")
+                .denseQueryText("Redis 缓存穿透的原理与防护")
+                .sparseQueryText("Redis 缓存穿透 布隆过滤器")
+                .keywordQueries(List.of("Redis", "缓存穿透", "布隆过滤器"))
+                .questionType("PRINCIPLE")
+                .difficultyHint("L2")
+                .focusPoint("缓存穿透")
+                .build());
+
+        assertThat(context.isEmpty()).isTrue();
+        assertThat(context.getRetrievalAudit())
+                .extracting(
+                        "retrievalTriggered",
+                        "denseCandidateCount",
+                        "sparseCandidateCount",
+                        "difficultyWindowApplied",
+                        "difficultyWindowValues",
+                        "fusionTopQuestionIds"
+                )
+                .containsExactly(true, 1, 0, true, List.of("L1", "L2", "L3"), List.of());
+    }
+
+    @Test
     @DisplayName("retrieve audit should keep full fusion and rerank input candidates when they exceed injected topk")
     void retrieveAudit_shouldKeepFullFusionAndRerankInputCandidatesWhenTheyExceedInjectedTopk() throws Exception {
         EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
