@@ -54,6 +54,9 @@ public class RagProperties {
     /** RRF 融合后的候选规模上限。 */
     private int fusionTopK = 20;
 
+    /** 是否启用 difficultyHint 的相邻一级扩窗过滤。 */
+    private boolean difficultyWindowEnabled = false;
+
     /** 启动时是否自动注入内置样本知识数据（仅用于开发/演示，生产应关闭） */
     private boolean initSampleData = false;
 

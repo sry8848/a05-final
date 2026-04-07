@@ -143,6 +143,7 @@ rag:
   dense-top-k: ${RAG_DENSE_TOP_K:20}
   sparse-top-k: ${RAG_SPARSE_TOP_K:20}
   fusion-top-k: ${RAG_FUSION_TOP_K:20}
+  difficulty-window-enabled: ${RAG_DIFFICULTY_WINDOW_ENABLED:false}
   # init-sample-data=true 时会在启动时向 Qdrant 插入示例知识条目（仅用于开发测试）
   init-sample-data: ${RAG_INIT_SAMPLE:false}
   rerank:
