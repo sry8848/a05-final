@@ -43,8 +43,8 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
             return RagContext.empty();
         }
 
-        log.info("RAG 检索开始, questionType={}, domainCode={}, difficultyHint={}, denseQueryText={}, sparseQueryText={}",
-                request.getQuestionType(), request.getDomainCode(), request.getDifficultyHint(),
+        log.info("RAG 检索开始, questionType={}, difficultyHint={}, denseQueryText={}, sparseQueryText={}",
+                request.getQuestionType(), request.getDifficultyHint(),
                 request.getDenseQueryText(), request.getSparseQueryText());
         try {
             List<QdrantHybridQueryExecutor.SearchHit> denseHits = queryExecutor.denseRecall(request);
@@ -116,8 +116,8 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
                     .empty(false)
                     .build();
         } catch (Exception e) {
-            log.error("RAG 检索异常, questionType={}, domainCode={}",
-                    request.getQuestionType(), request.getDomainCode(), e);
+            log.error("RAG 检索异常, questionType={}",
+                    request.getQuestionType(), e);
             return RagContext.emptyTriggered(RagContext.RetrievalAudit.empty(true));
         }
     }
@@ -216,37 +216,23 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
         }
 
         String expectedQuestionType = normalizeQuestionTypeForCorpus(request.getQuestionType());
-        String expectedDomainCode = normalizeText(request.getDomainCode());
         return candidates.stream()
-                .filter(candidate -> matchesHardGuardrails(candidate, expectedQuestionType, expectedDomainCode))
+                .filter(candidate -> matchesHardGuardrails(candidate, expectedQuestionType))
                 .toList();
     }
 
-    private boolean matchesHardGuardrails(Candidate candidate, String expectedQuestionType, String expectedDomainCode) {
+    private boolean matchesHardGuardrails(Candidate candidate, String expectedQuestionType) {
         String actualQuestionType = normalizeQuestionTypeForCorpus(candidate.questionType);
-        String actualDomainCode = normalizeText(candidate.domainCode);
 
         if ("BEHAVIORAL".equals(expectedQuestionType)) {
-            return "BEHAVIORAL".equals(actualQuestionType) && actualDomainCode.isBlank();
+            return "BEHAVIORAL".equals(actualQuestionType);
         }
 
         if ("PROJECT".equals(expectedQuestionType)) {
-            if (!"PROJECT".equals(actualQuestionType)) {
-                return false;
-            }
-            if (expectedDomainCode.isBlank()) {
-                return true;
-            }
-            return expectedDomainCode.equals(actualDomainCode);
+            return "PROJECT".equals(actualQuestionType);
         }
 
-        if (!expectedQuestionType.isBlank() && !expectedQuestionType.equals(actualQuestionType)) {
-            return false;
-        }
-        if (expectedDomainCode.isBlank()) {
-            return true;
-        }
-        return expectedDomainCode.equals(actualDomainCode);
+        return expectedQuestionType.isBlank() || expectedQuestionType.equals(actualQuestionType);
     }
 
     private RagRerankService.RerankCandidate toRerankCandidate(Candidate candidate) {

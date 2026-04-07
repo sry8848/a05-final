@@ -1,0 +1,36 @@
+sequenceDiagram
+    participant QS as QuestionStreamService
+    participant RPC as RagPlanCompiler
+    participant RRS as RagRetrievalServiceImpl
+    participant QE as QdrantHybridQueryExecutor
+    participant QD as Qdrant
+    participant RRF as RrfFusion
+    participant RR as DashScopeRagRerankService
+    participant QGI as QuestionGenerationInput
+
+    QS->>RPC: compile(NextQuestionPlan, positionCode, experienceLevel)
+    RPC-->>QS: RagRetrievalRequest
+    alt shouldRetrieve = false
+        QS-->>QGI: 空 RagContext
+    else shouldRetrieve = true
+        QS->>RRS: retrieve(request)
+        RRS->>QE: denseRecall(request)
+        QE->>QD: dense query(active + questionType)
+        QD-->>QE: dense hits
+        QE-->>RRS: dense hits
+
+        RRS->>QE: sparseRecall(request)
+        QE->>QD: sparse query(active + questionType)
+        QD-->>QE: sparse hits
+        QE-->>RRS: sparse hits
+
+        RRS->>RRF: fuse(denseIds, sparseIds)
+        RRF-->>RRS: fused scores
+
+        RRS->>RR: rerank(request, fused candidates)
+        RR-->>RRS: rerank scores
+
+        RRS->>RRS: applyHardGuardrails()
+        RRS-->>QS: RagContext(retrievedMaterials + retrievalAudit)
+        QS-->>QGI: buildRetrievalContext(plan, ragContext)
+    end

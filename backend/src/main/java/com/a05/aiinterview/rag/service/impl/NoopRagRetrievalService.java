@@ -20,7 +20,7 @@ public class NoopRagRetrievalService implements RagRetrievalService {
 
     @Override
     public RagContext retrieve(RagRetrievalRequest request) {
-        log.debug("RAG 未启用（rag.enabled=false），跳过检索, domainCode={}", request.getDomainCode());
+        log.debug("RAG 未启用（rag.enabled=false），跳过检索");
         return RagContext.empty();
     }
 }

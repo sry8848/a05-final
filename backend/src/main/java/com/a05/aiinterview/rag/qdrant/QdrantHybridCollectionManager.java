@@ -72,7 +72,6 @@ public class QdrantHybridCollectionManager {
 
     private void ensureMetadataPayloadIndexes(String collectionName) throws Exception {
         createKeywordPayloadIndex(collectionName, "question_type");
-        createKeywordPayloadIndex(collectionName, "domain_code");
         createBooleanPayloadIndex(collectionName, "active");
     }
 

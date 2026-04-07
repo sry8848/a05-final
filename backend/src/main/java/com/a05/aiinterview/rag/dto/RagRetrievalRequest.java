@@ -11,7 +11,7 @@ import java.util.List;
  * RAG 检索请求，由 AnswerSubmitService 在 Step6 组装并传入 RagRetrievalService。
  *
  * <p>各字段均来自 EvaluationDecisionOutput.NextQuestionStrategy，
- * 检索服务根据这些维度构建 dense/sparse 查询，并结合低误伤元数据条件执行召回。
+ * 检索服务根据这些维度构建 dense/sparse 查询，并执行后续融合与精排。
  */
 @Data
 @Builder
@@ -34,9 +34,6 @@ public class RagRetrievalRequest {
     /** 关键词检索候选词。 */
     @Builder.Default
     private List<String> keywordQueries = List.of();
-
-    /** 目标知识域编码；当前保留给护栏和下游上下文，不作为召回阶段的硬过滤条件。 */
-    private String domainCode;
 
     /** 目标题目类型，如 PRINCIPLE / SCENARIO，可用于进一步过滤 */
     private String questionType;

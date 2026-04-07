@@ -56,7 +56,6 @@ public class RagPlanCompiler {
                     .focusPoint(plan == null ? "" : defaultString(plan.getNextFocus()))
                     .positionCode(defaultString(positionCode))
                     .experienceLevel(defaultString(experienceLevel))
-                    .domainCode(resolveDomainCode(questionType, plan))
                     .projectName(resolveProjectName(questionType, plan))
                     .queryText("")
                     .denseQueryText("")
@@ -79,7 +78,6 @@ public class RagPlanCompiler {
                 .positionCode(defaultString(positionCode))
                 .questionType(questionType)
                 .experienceLevel(defaultString(experienceLevel))
-                .domainCode(resolveDomainCode(questionType, plan))
                 .projectName(resolveProjectName(questionType, plan))
                 .focusPoint(plan == null ? "" : defaultString(plan.getNextFocus()))
                 .build();
@@ -130,13 +128,6 @@ public class RagPlanCompiler {
             return null;
         }
         return plan.getRetrievalPlans().getFirst();
-    }
-
-    private String resolveDomainCode(String questionType, DecisionExecutionPlan plan) {
-        if ("BEHAVIORAL".equals(questionType)) {
-            return "";
-        }
-        return plan == null ? "" : defaultString(plan.getTargetDomainCode());
     }
 
     private String resolveProjectName(String questionType, DecisionExecutionPlan plan) {

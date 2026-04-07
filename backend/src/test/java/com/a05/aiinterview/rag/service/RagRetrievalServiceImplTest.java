@@ -54,7 +54,7 @@ class RagRetrievalServiceImplTest {
         EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
         QdrantClient qdrantClient = mock(QdrantClient.class);
         RagRerankService rerankService = mock(RagRerankService.class);
-        RagRetrievalServiceImpl service = newService(embeddingModel, qdrantClient, rerankService);
+        RagRetrievalServiceImpl service = newService(embeddingModel, qdrantClient, rerankService, true);
 
         when(embeddingModel.embed("Redis 缓存穿透的原理与防护")).thenReturn(new float[]{0.1f, 0.2f});
         when(qdrantClient.queryAsync(any(Points.QueryPoints.class)))
@@ -99,7 +99,6 @@ class RagRetrievalServiceImplTest {
                 .sparseQueryText("Redis 缓存穿透 布隆过滤器")
                 .keywordQueries(List.of("Redis", "缓存穿透", "布隆过滤器"))
                 .questionType("PRINCIPLE")
-                .domainCode("redis")
                 .difficultyHint("L2")
                 .focusPoint("缓存穿透")
                 .build();
@@ -116,10 +115,13 @@ class RagRetrievalServiceImplTest {
         assertThat(denseRequest.getQuery().hasNearest()).isTrue();
         assertThat(denseRequest.getQuery().getNearest().hasDense()).isTrue();
         assertThat(denseRequest.getQuery().getNearest().getDense().getDataList()).containsExactly(0.1f, 0.2f);
-        assertThat(denseRequest.getFilter().getMustCount()).isEqualTo(2);
         assertThat(denseRequest.getFilter().toString())
                 .contains("active")
                 .contains("question_type")
+                .contains("difficulty")
+                .contains("L1")
+                .contains("L2")
+                .contains("L3")
                 .doesNotContain("domain_code");
 
         assertThat(sparseRequest.getUsing()).isEqualTo("bm25");
@@ -127,10 +129,13 @@ class RagRetrievalServiceImplTest {
         assertThat(sparseRequest.getQuery().getNearest().hasDocument()).isTrue();
         assertThat(sparseRequest.getQuery().getNearest().getDocument().getText()).isEqualTo("Redis 缓存穿透 布隆过滤器");
         assertThat(sparseRequest.getQuery().getNearest().getDocument().getModel()).isEqualTo("qdrant/bm25");
-        assertThat(sparseRequest.getFilter().getMustCount()).isEqualTo(2);
         assertThat(sparseRequest.getFilter().toString())
                 .contains("active")
                 .contains("question_type")
+                .contains("difficulty")
+                .contains("L1")
+                .contains("L2")
+                .contains("L3")
                 .doesNotContain("domain_code");
 
         assertThat(context.isEmpty()).isFalse();
@@ -138,10 +143,12 @@ class RagRetrievalServiceImplTest {
                 .containsExactly("redis-bloom-filter-001", "redis-cache-penetration-001", "redis-null-cache-expire-001");
         assertThat(context.getRetrievalAudit())
                 .extracting(
-                        RagContext.RetrievalAudit::getDenseCandidateCount,
-                        RagContext.RetrievalAudit::getSparseCandidateCount
+                        "difficultyWindowApplied",
+                        "difficultyWindowValues",
+                        "denseCandidateCount",
+                        "sparseCandidateCount"
                 )
-                .containsExactly(2, 2);
+                .containsExactly(true, List.of("L1", "L2", "L3"), 2, 2);
         assertThat(context.getRetrievalAudit().getFusionTopQuestionIds())
                 .containsExactly("redis-cache-penetration-001", "redis-null-cache-expire-001", "redis-bloom-filter-001");
         assertThat(context.getRetrievalAudit().getRerankPreTopQuestionIds())
@@ -150,6 +157,45 @@ class RagRetrievalServiceImplTest {
                 .containsExactly("redis-bloom-filter-001", "redis-cache-penetration-001", "redis-null-cache-expire-001");
         assertThat(context.getRetrievalAudit().getInjectedQuestionIds())
                 .containsExactly("redis-bloom-filter-001", "redis-cache-penetration-001", "redis-null-cache-expire-001");
+    }
+
+    @Test
+    @DisplayName("retrieve should not append difficulty filter when window switch is disabled")
+    void retrieve_shouldNotAppendDifficultyFilterWhenWindowSwitchIsDisabled() throws Exception {
+        EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
+        QdrantClient qdrantClient = mock(QdrantClient.class);
+        RagRerankService rerankService = mock(RagRerankService.class);
+        RagRetrievalServiceImpl service = newService(embeddingModel, qdrantClient, rerankService, false);
+
+        when(embeddingModel.embed("Redis 缓存穿透的原理与防护")).thenReturn(new float[]{0.1f, 0.2f});
+        when(qdrantClient.queryAsync(any(Points.QueryPoints.class)))
+                .thenReturn(Futures.immediateFuture(List.of()))
+                .thenReturn(Futures.immediateFuture(List.of()));
+
+        RagContext context = service.retrieve(RagRetrievalRequest.builder()
+                .shouldRetrieve(true)
+                .queryText("Redis 缓存穿透的原理与防护")
+                .denseQueryText("Redis 缓存穿透的原理与防护")
+                .sparseQueryText("Redis 缓存穿透 布隆过滤器")
+                .keywordQueries(List.of("Redis", "缓存穿透", "布隆过滤器"))
+                .questionType("PRINCIPLE")
+                .difficultyHint("L2")
+                .focusPoint("缓存穿透")
+                .build());
+
+        ArgumentCaptor<Points.QueryPoints> queryCaptor = ArgumentCaptor.forClass(Points.QueryPoints.class);
+        verify(qdrantClient, org.mockito.Mockito.times(2)).queryAsync(queryCaptor.capture());
+        List<Points.QueryPoints> requests = queryCaptor.getAllValues();
+
+        assertThat(requests.get(0).getFilter().toString())
+                .contains("active")
+                .contains("question_type")
+                .doesNotContain("difficulty");
+        assertThat(requests.get(1).getFilter().toString())
+                .contains("active")
+                .contains("question_type")
+                .doesNotContain("difficulty");
+        assertThat(context.isEmpty()).isTrue();
     }
 
     @Test
@@ -185,7 +231,6 @@ class RagRetrievalServiceImplTest {
                 .sparseQueryText("Redis 缓存击穿 穿透")
                 .keywordQueries(List.of("Redis", "缓存击穿", "穿透"))
                 .questionType("PRINCIPLE")
-                .domainCode("redis")
                 .focusPoint("缓存保护")
                 .build());
 
@@ -228,7 +273,6 @@ class RagRetrievalServiceImplTest {
                 .sparseQueryText("")
                 .keywordQueries(List.of())
                 .questionType("BEHAVIORAL")
-                .domainCode("")
                 .focusPoint("与产品意见不一致")
                 .build());
 
@@ -277,7 +321,6 @@ class RagRetrievalServiceImplTest {
                 .sparseQueryText("")
                 .keywordQueries(List.of())
                 .questionType("BEHAVIORAL")
-                .domainCode("")
                 .focusPoint("跨团队协作")
                 .build());
 
@@ -326,7 +369,6 @@ class RagRetrievalServiceImplTest {
                 .sparseQueryText("Redis 缓存穿透")
                 .keywordQueries(List.of("Redis", "缓存穿透"))
                 .questionType("PRINCIPLE")
-                .domainCode("redis")
                 .focusPoint("缓存穿透")
                 .build());
 
@@ -345,6 +387,24 @@ class RagRetrievalServiceImplTest {
     private RagRetrievalServiceImpl newService(EmbeddingModel embeddingModel,
                                                QdrantClient qdrantClient,
                                                RagRerankService rerankService,
+                                               boolean difficultyWindowEnabled) {
+        RagProperties properties = new RagProperties();
+        properties.setCollectionName("interview_knowledge_hybrid");
+        properties.setDenseVectorName("dense");
+        properties.setSparseVectorName("bm25");
+        properties.setDenseTopK(3);
+        properties.setSparseTopK(3);
+        properties.setFusionTopK(3);
+        properties.setTopK(3);
+        properties.setMinScore(0.0d);
+        configureDifficultyWindow(properties, difficultyWindowEnabled);
+        QdrantHybridQueryExecutor queryExecutor = new QdrantHybridQueryExecutor(embeddingModel, qdrantClient, properties);
+        return new RagRetrievalServiceImpl(queryExecutor, new RrfFusion(), rerankService, properties);
+    }
+
+    private RagRetrievalServiceImpl newService(EmbeddingModel embeddingModel,
+                                               QdrantClient qdrantClient,
+                                               RagRerankService rerankService,
                                                int topK,
                                                int fusionTopK) {
         RagProperties properties = new RagProperties();
@@ -358,6 +418,16 @@ class RagRetrievalServiceImplTest {
         properties.setMinScore(0.0d);
         QdrantHybridQueryExecutor queryExecutor = new QdrantHybridQueryExecutor(embeddingModel, qdrantClient, properties);
         return new RagRetrievalServiceImpl(queryExecutor, new RrfFusion(), rerankService, properties);
+    }
+
+    private void configureDifficultyWindow(RagProperties properties, boolean enabled) {
+        try {
+            java.lang.reflect.Field field = RagProperties.class.getDeclaredField("difficultyWindowEnabled");
+            field.setAccessible(true);
+            field.setBoolean(properties, enabled);
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new AssertionError("RagProperties should expose difficultyWindowEnabled", e);
+        }
     }
 
     private Points.ScoredPoint scoredPoint(long pointId,

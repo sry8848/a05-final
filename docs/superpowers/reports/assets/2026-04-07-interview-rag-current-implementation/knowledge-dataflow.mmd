@@ -1,0 +1,24 @@
+flowchart TD
+    DOC["单张题卡 KnowledgeDocument\nquestionText / intentConcept / referenceContext /\nscoringKeyPoints / scoringPitfalls /\nfollowUpIds / domainCode / questionType / difficulty / keywords"]
+
+    DENSE["Dense 表示\nquestionText + intentConcept"]
+    SPARSE["Sparse 表示\nquestionText + scoringKeyPoints + keywords"]
+    PAYLOAD["Payload 保留完整业务字段\nquestion_text / intent_concept / reference_context /\nscoring_key_points / scoring_pitfalls /\nfollow_up_ids / domain_code / question_type / difficulty / keywords / source / active / version"]
+
+    POINT["Qdrant Point\n稳定 point id + dense vector + sparse document + payload"]
+    HIT["SearchHit / Candidate\n从 payload 还原题卡候选"]
+    RERANKDOC["Rerank 文档视图\n题目 + 考点 + 语境 + 关键点 + 误区"]
+    OUT["RagContext\nretrievedMaterials / followUpCandidates / retrievalAudit / contextText"]
+    PROMPT["QuestionGenerationInput.RetrievalContext"]
+
+    DOC --> DENSE
+    DOC --> SPARSE
+    DOC --> PAYLOAD
+    DENSE --> POINT
+    SPARSE --> POINT
+    PAYLOAD --> POINT
+    POINT --> HIT
+    HIT --> RERANKDOC
+    HIT --> OUT
+    RERANKDOC --> OUT
+    OUT --> PROMPT

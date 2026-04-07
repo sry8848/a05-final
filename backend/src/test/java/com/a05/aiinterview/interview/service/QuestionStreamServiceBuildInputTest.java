@@ -432,7 +432,6 @@ class QuestionStreamServiceBuildInputTest {
                 .shouldRetrieve(true)
                 .queryText("Redis 缓存穿透 布隆过滤器")
                 .questionType("PRINCIPLE")
-                .domainCode("redis")
                 .difficultyHint("L2")
                 .keywordQueries(List.of("缓存穿透", "布隆过滤器"))
                 .build();

@@ -14,6 +14,7 @@ import java.time.Duration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -94,17 +95,17 @@ class QdrantHybridCollectionManagerTest {
         );
         verify(qdrantClient, times(1)).createPayloadIndexAsync(
                 eq("interview_knowledge_hybrid"),
-                eq("domain_code"),
-                eq(Collections.PayloadSchemaType.Keyword),
+                eq("active"),
+                eq(Collections.PayloadSchemaType.Bool),
                 any(Collections.PayloadIndexParams.class),
                 eq(Boolean.TRUE),
                 eq(Points.WriteOrderingType.Weak),
                 any(Duration.class)
         );
-        verify(qdrantClient, times(1)).createPayloadIndexAsync(
+        verify(qdrantClient, never()).createPayloadIndexAsync(
                 eq("interview_knowledge_hybrid"),
-                eq("active"),
-                eq(Collections.PayloadSchemaType.Bool),
+                eq("domain_code"),
+                eq(Collections.PayloadSchemaType.Keyword),
                 any(Collections.PayloadIndexParams.class),
                 eq(Boolean.TRUE),
                 eq(Points.WriteOrderingType.Weak),

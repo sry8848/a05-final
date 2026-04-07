@@ -6,6 +6,7 @@ import com.a05.aiinterview.rag.dto.RagRetrievalRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -16,6 +17,15 @@ class RagPlanCompilerTest {
     private final RagPlanCompiler compiler = new RagPlanCompiler();
 
     @Test
+    @DisplayName("rag retrieval request should not expose domainCode as executable retrieval input")
+    void ragRetrievalRequest_shouldNotExposeDomainCodeAsExecutableRetrievalInput() {
+        assertThat(Arrays.stream(RagRetrievalRequest.class.getDeclaredFields())
+                .map(field -> field.getName())
+                .toList())
+                .doesNotContain("domainCode");
+    }
+
+    @Test
     @DisplayName("principle retrieval plan should compile into executable request")
     void principlePlan_shouldCompileIntoExecutableRequest() {
         RagRetrievalRequest request = compiler.compile(
@@ -24,7 +34,7 @@ class RagPlanCompilerTest {
                         "HashMap扩容机制",
                         "",
                         List.of(retrievalPlan(
-                                "Java HashMap 扩容机制 触发条件 2的幂 元素迁移 线程不安全",
+                                "寻找考察 Java HashMap 扩容触发条件、2 的幂容量设计与元素迁移机制的题目。",
                                 List.of("HashMap", "resize", "2的幂", "线程不安全"),
                                 "L2"
                         ))
@@ -36,9 +46,8 @@ class RagPlanCompilerTest {
         assertThat(request.isShouldRetrieve()).isTrue();
         assertThat(request.getQuestionType()).isEqualTo("PRINCIPLE");
         assertThat(request.getQueryText())
-                .isEqualTo("Java HashMap 扩容机制 触发条件 2的幂 元素迁移 线程不安全");
-        assertThat(request.getDenseQueryText())
-                .isEqualTo("Java HashMap 扩容机制 触发条件 2的幂 元素迁移 线程不安全");
+                .isEqualTo("寻找考察 Java HashMap 扩容触发条件、2 的幂容量设计与元素迁移机制的题目。");
+        assertThat(request.getDenseQueryText()).isEqualTo(request.getQueryText());
         assertThat(request.getSparseQueryText()).isEqualTo("HashMap resize 2的幂 线程不安全");
     }
 
@@ -51,7 +60,7 @@ class RagPlanCompilerTest {
                         "讲一次和产品意见不一致的经历",
                         "",
                         List.of(retrievalPlan(
-                                "行为面试 与产品意见不一致 冲突沟通 推进结果 复盘",
+                                "寻找行为面试中考察与产品意见不一致时如何沟通、推进和复盘的题目。",
                                 List.of("沟通", "推进", "冲突", "协作"),
                                 "L2"
                         ))
@@ -63,9 +72,8 @@ class RagPlanCompilerTest {
         assertThat(request.isShouldRetrieve()).isTrue();
         assertThat(request.getQuestionType()).isEqualTo("BEHAVIORAL");
         assertThat(request.getQueryText())
-                .isEqualTo("行为面试 与产品意见不一致 冲突沟通 推进结果 复盘");
-        assertThat(request.getDenseQueryText())
-                .isEqualTo("行为面试 与产品意见不一致 冲突沟通 推进结果 复盘");
+                .isEqualTo("寻找行为面试中考察与产品意见不一致时如何沟通、推进和复盘的题目。");
+        assertThat(request.getDenseQueryText()).isEqualTo(request.getQueryText());
         assertThat(request.getSparseQueryText()).isEqualTo("沟通 推进 冲突 协作");
     }
 
@@ -99,7 +107,7 @@ class RagPlanCompilerTest {
                         "Seata XID 丢失怎么修",
                         "订单系统",
                         List.of(retrievalPlan(
-                                "Seata AT 模式 Feign 调用 XID 丢失 Header 透传 拦截器修复",
+                                "寻找项目面试中考察 Seata AT 模式下 Feign 调用时 XID 丢失与 Header 透传修复的题目。",
                                 List.of("Seata", "XID", "Feign", "Header透传"),
                                 "L4"
                         ))
@@ -111,9 +119,8 @@ class RagPlanCompilerTest {
         assertThat(request.isShouldRetrieve()).isTrue();
         assertThat(request.getQuestionType()).isEqualTo("PROJECT_DEEP_DIVE");
         assertThat(request.getQueryText())
-                .isEqualTo("Seata AT 模式 Feign 调用 XID 丢失 Header 透传 拦截器修复");
-        assertThat(request.getDenseQueryText())
-                .isEqualTo("Seata AT 模式 Feign 调用 XID 丢失 Header 透传 拦截器修复");
+                .isEqualTo("寻找项目面试中考察 Seata AT 模式下 Feign 调用时 XID 丢失与 Header 透传修复的题目。");
+        assertThat(request.getDenseQueryText()).isEqualTo(request.getQueryText());
         assertThat(request.getSparseQueryText()).isEqualTo("Seata XID Feign Header透传");
     }
 
@@ -127,7 +134,7 @@ class RagPlanCompilerTest {
                         .nextItemName("订单系统")
                         .targetDomainCode("distributed")
                         .retrievalPlans(List.of(retrievalPlan(
-                                "订单超时关闭 幂等性 DB 和 MQ 顺序 事务状态机 消费重复",
+                                "寻找订单超时关闭场景下，考察幂等、DB 与 MQ 顺序一致性及事务状态机的题目。",
                                 List.of("订单超时关闭", "幂等", "DB+MQ", "顺序"),
                                 "L4"
                         )))
@@ -139,9 +146,8 @@ class RagPlanCompilerTest {
         assertThat(request.isShouldRetrieve()).isTrue();
         assertThat(request.getQuestionType()).isEqualTo("SCENARIO");
         assertThat(request.getQueryText())
-                .isEqualTo("订单超时关闭 幂等性 DB 和 MQ 顺序 事务状态机 消费重复");
-        assertThat(request.getDenseQueryText())
-                .isEqualTo("订单超时关闭 幂等性 DB 和 MQ 顺序 事务状态机 消费重复");
+                .isEqualTo("寻找订单超时关闭场景下，考察幂等、DB 与 MQ 顺序一致性及事务状态机的题目。");
+        assertThat(request.getDenseQueryText()).isEqualTo(request.getQueryText());
         assertThat(request.getSparseQueryText()).isEqualTo("订单超时关闭 幂等 DB+MQ 顺序");
     }
 
@@ -154,7 +160,7 @@ class RagPlanCompilerTest {
                         "缓存穿透的原理与防护",
                         "",
                         List.of(retrievalPlan(
-                                "缓存穿透的原理与防护",
+                                "寻找考察缓存穿透原理与防护方案的题目。",
                                 List.of(),
                                 "L3"
                         ))
@@ -165,8 +171,8 @@ class RagPlanCompilerTest {
 
         assertThat(request.isShouldRetrieve()).isTrue();
         assertThat(request.getQuestionType()).isEqualTo("SCENARIO");
-        assertThat(request.getQueryText()).isEqualTo("缓存穿透的原理与防护");
-        assertThat(request.getDenseQueryText()).isEqualTo("缓存穿透的原理与防护");
+        assertThat(request.getQueryText()).isEqualTo("寻找考察缓存穿透原理与防护方案的题目。");
+        assertThat(request.getDenseQueryText()).isEqualTo(request.getQueryText());
         assertThat(request.getSparseQueryText()).isBlank();
     }
 
@@ -179,7 +185,7 @@ class RagPlanCompilerTest {
                         "Redis 热点 key 过期后的流量保护",
                         "",
                         List.of(retrievalPlan(
-                                "缓存击穿后的流量保护与回源控制",
+                                "寻找考察缓存击穿后流量保护与回源控制的题目。",
                                 List.of(),
                                 "L3"
                         ))
@@ -190,8 +196,8 @@ class RagPlanCompilerTest {
 
         assertThat(request.isShouldRetrieve()).isTrue();
         assertThat(request.getQuestionType()).isEqualTo("SCENARIO");
-        assertThat(request.getQueryText()).isEqualTo("缓存击穿后的流量保护与回源控制");
-        assertThat(request.getDenseQueryText()).isEqualTo("缓存击穿后的流量保护与回源控制");
+        assertThat(request.getQueryText()).isEqualTo("寻找考察缓存击穿后流量保护与回源控制的题目。");
+        assertThat(request.getDenseQueryText()).isEqualTo(request.getQueryText());
         assertThat(request.getSparseQueryText()).isBlank();
     }
 

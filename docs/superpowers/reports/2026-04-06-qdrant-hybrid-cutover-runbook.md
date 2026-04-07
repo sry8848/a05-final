@@ -73,7 +73,7 @@
 
 - named dense vector：`dense`
 - named sparse vector：`bm25`
-- payload 索引：`question_type`、`domain_code`、`active`
+- payload 索引：`question_type`、`active`
 
 ### 3.2 验证 schema
 
@@ -90,6 +90,7 @@ Invoke-RestMethod -Method Get -Uri "http://localhost:6333/collections/$collectio
 - named dense vector 名称正确
 - named sparse vector 名称正确
 - payload schema 至少包含 `question_type`、`domain_code`、`active`
+- payload 索引至少包含 `question_type`、`active`
 
 如果你不是用默认 REST 端口，或者只开放了 gRPC，请改用你当前的 Qdrant 管理方式完成相同确认。
 

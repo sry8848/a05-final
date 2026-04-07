@@ -42,6 +42,8 @@ class RagContextTest {
                 .containsEntry("retrievalTriggered", true)
                 .containsEntry("denseCandidateCount", 3)
                 .containsEntry("sparseCandidateCount", 5)
+                .containsEntry("difficultyWindowApplied", true)
+                .containsEntry("difficultyWindowValues", List.of("L1", "L2", "L3"))
                 .containsEntry("fusionTopQuestionIds", List.of("q2", "q1"))
                 .containsEntry("rerankPreTopQuestionIds", List.of("q1", "q2"))
                 .containsEntry("rerankPostTopQuestionIds", List.of("q2", "q1"))

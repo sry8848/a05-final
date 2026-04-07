@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将当前 hybrid 检索字段职责收缩为 `dense=questionText+intentConcept`、`sparse=questionText+keywords+scoringKeyPoints`，并临时移除 `domainCode` 作为 query filter 的参与方式。
+**Goal:** 将当前 hybrid 检索字段职责收缩为 `dense=questionText+intentConcept`、`sparse=questionText+keywords+scoringKeyPoints`，并移除 `domainCode` 作为 query filter 的参与方式。
 
-**Architecture:** 保持现有 `dense recall -> sparse recall -> RRF -> rerank -> hard guardrails` 主链路不变，只调整题卡的 dense/sparse 表示、compiler 生成的查询文本，以及 query executor 的过滤口径。`domainCode` 继续作为 payload 与下游返回字段存在，但不再进入 Qdrant 查询 filter。`referenceContext`、`scoringPitfalls` 保留给 rerank 和最终返回，不再进入主检索表示。
+**Architecture:** 保持现有 `dense recall -> sparse recall -> RRF -> rerank -> hard guardrails` 主链路不变，只调整题卡的 dense/sparse 表示、compiler 生成的查询文本，以及 query executor 的过滤口径。`domainCode` 继续作为 payload 与下游返回字段存在，但不再进入 Qdrant 查询 filter。关于 `domainCode` 在护栏与请求契约中的进一步降级，现行口径已由 `2026-04-07-rag-domaincode-metadata-downgrade-implementation.md` 取代。`referenceContext`、`scoringPitfalls` 保留给 rerank 和最终返回，不再进入主检索表示。
 
 **Tech Stack:** Java 21, Spring Boot 3.2.5, Spring AI `EmbeddingModel`, Qdrant Java Client, Qdrant sparse/BM25, JUnit 5, Mockito, AssertJ
 
@@ -36,8 +36,8 @@
 
 ## Assumptions
 
-- 本计划按你刚确认的方向执行：`domainCode` 仅从 query filter 中移除，不主动删除 payload 字段，也不从最终返回结构中删除。
-- 本计划默认不改 `RagRetrievalServiceImpl` 的硬护栏逻辑；也就是说，`domainCode` 退出召回过滤，不等于退出后置护栏。若你要连护栏一起取消，需要单独改口径。
+- 本计划完成的范围是字段拆分与召回 filter 收缩。
+- `domainCode` 在 RAG 中彻底降级为纯元数据的现行口径，已由 `2026-04-07-rag-domaincode-metadata-downgrade-implementation.md` 接管；本文件中的旧“保留给护栏”假设不再有效。
 
 ## Chunk 1: 收紧题卡检索表示
 
