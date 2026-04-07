@@ -186,11 +186,14 @@ class PromptTemplateCoverageTest {
                 .contains("nextProjectPoint")
                 .contains("nextItemType")
                 .contains("nextItemName")
-                .contains("queryText")
-                .contains("keywordHints")
                 .contains("difficultyHint")
-                .contains("检索 brief")
-                .contains("软约束")
+                .contains("`queryText`")
+                .contains("独立")
+                .contains("完整")
+                .contains("自然语言")
+                .contains("`keywordHints`")
+                .contains("术语锚点")
+                .contains("相邻一级")
                 .contains("`targetDomainCode` 必须从【主考纲剩余待考察域（菜单）】中选择一个合法的 `domainCode`")
                 .contains("绝不能写成完整问句")
                 .contains("绝不允许把下一题准备问的知识点提前预支写进去")
@@ -209,6 +212,7 @@ class PromptTemplateCoverageTest {
                 .doesNotContain("retrievalType")
                 .doesNotContain("expectedEvidence")
                 .doesNotContain("avoidEvidence")
+                .doesNotContain("软约束")
                 .doesNotContain("回答评价");
     }
 

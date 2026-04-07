@@ -41,7 +41,7 @@ class EvaluationDecisionContractTest {
                   ],
                   "retrievalPlans": [
                     {
-                      "queryText": "Seata AT 模式 本地事务边界 分支事务注册",
+                      "queryText": "寻找考察 Seata AT 模式下本地事务边界与分支事务注册机制的题目。",
                       "keywordHints": ["Seata", "AT", "分支事务注册"],
                       "difficultyHint": "L4"
                     }
@@ -65,7 +65,8 @@ class EvaluationDecisionContractTest {
         assertThat(output.getNewCoveredDomains().getFirst().getDomainName()).isEqualTo("Spring 框架");
         assertThat(output.getNewCoveredPoints()).containsExactly("Seata AT 模式下全局事务与本地事务的协同边界");
         assertThat(output.getRetrievalPlans()).hasSize(1);
-        assertThat(output.getRetrievalPlans().getFirst().getQueryText()).contains("分支事务注册");
+        assertThat(output.getRetrievalPlans().getFirst().getQueryText())
+                .isEqualTo("寻找考察 Seata AT 模式下本地事务边界与分支事务注册机制的题目。");
         assertThat(output.getRetrievalPlans().getFirst().getKeywordHints()).containsExactly("Seata", "AT", "分支事务注册");
         assertThat(output.getRetrievalPlans().getFirst().getDifficultyHint()).isEqualTo("L4");
     }
@@ -86,7 +87,7 @@ class EvaluationDecisionContractTest {
                   "newCoveredPoints": [],
                   "retrievalPlans": [
                     {
-                      "queryText": "Seata 事务边界落地",
+                      "queryText": "寻找考察 Seata 事务边界落地与协调机制的题目。",
                       "keywordHints": [],
                       "difficultyHint": "L3"
                     }
@@ -98,7 +99,8 @@ class EvaluationDecisionContractTest {
 
         assertThat(output.getInterviewAction()).isEqualTo("CONTINUE");
         assertThat(output.getRetrievalPlans()).hasSize(1);
-        assertThat(output.getRetrievalPlans().getFirst().getQueryText()).isEqualTo("Seata 事务边界落地");
+        assertThat(output.getRetrievalPlans().getFirst().getQueryText())
+                .isEqualTo("寻找考察 Seata 事务边界落地与协调机制的题目。");
         assertThat(output.getRetrievalPlans().getFirst().getKeywordHints()).isEmpty();
         assertThat(output.getRetrievalPlans().getFirst().getDifficultyHint()).isEqualTo("L3");
     }
