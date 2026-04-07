@@ -10,8 +10,10 @@ import java.util.List;
 /**
  * RAG 检索请求，由 AnswerSubmitService 在 Step6 组装并传入 RagRetrievalService。
  *
- * <p>各字段均来自 EvaluationDecisionOutput.NextQuestionStrategy，
- * 检索服务根据这些维度构建 dense/sparse 查询，并执行后续融合与精排。
+ * <p>各字段均来自上游 retrieval plan。
+ * 检索服务会将 queryText 作为语义视图输入 dense/rerank，
+ * 将 keywordQueries/sparseQueryText 作为词法视图输入 sparse/BM25，
+ * 并根据 questionType/difficultyHint 追加业务过滤。
  */
 @Data
 @Builder
@@ -22,23 +24,23 @@ public class RagRetrievalRequest {
     /** 是否应该发起检索；为 false 时调用方应直接跳过检索。 */
     private boolean shouldRetrieve;
 
-    /** 真实执行的主查询文本。 */
+    /** 上游生成的独立、完整自然语言语义查询。 */
     private String queryText;
 
-    /** dense 分支执行的自然语言查询文本。 */
+    /** dense 分支执行的自然语言语义查询文本。 */
     private String denseQueryText;
 
-    /** sparse/BM25 分支执行的术语锚点查询文本。 */
+    /** sparse/BM25 分支执行的术语锚点文本；为空时直接跳过 sparse。 */
     private String sparseQueryText;
 
-    /** 关键词检索候选词。 */
+    /** sparse/BM25 使用的术语锚点列表。 */
     @Builder.Default
     private List<String> keywordQueries = List.of();
 
     /** 目标题目类型，如 PRINCIPLE / SCENARIO，可用于进一步过滤 */
     private String questionType;
 
-    /** 当前轮希望探到的目标深度提示，如 L3；只作为软提示参与查询/排序 */
+    /** 当前轮目标难度提示；开启配置时会被解析成相邻一级 difficulty window 硬过滤。 */
     private String difficultyHint;
 
     /**

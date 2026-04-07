@@ -199,6 +199,35 @@ class RagRetrievalServiceImplTest {
     }
 
     @Test
+    @DisplayName("retrieve should keep difficulty audit when recall throws exception")
+    void retrieve_shouldKeepDifficultyAuditWhenRecallThrowsException() {
+        EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
+        QdrantClient qdrantClient = mock(QdrantClient.class);
+        RagRerankService rerankService = mock(RagRerankService.class);
+        RagRetrievalServiceImpl service = newService(embeddingModel, qdrantClient, rerankService, true);
+
+        when(embeddingModel.embed("Redis 缓存穿透的原理与防护")).thenReturn(new float[]{0.1f, 0.2f});
+        when(qdrantClient.queryAsync(any(Points.QueryPoints.class)))
+                .thenThrow(new IllegalStateException("qdrant down"));
+
+        RagContext context = service.retrieve(RagRetrievalRequest.builder()
+                .shouldRetrieve(true)
+                .queryText("Redis 缓存穿透的原理与防护")
+                .denseQueryText("Redis 缓存穿透的原理与防护")
+                .sparseQueryText("Redis 缓存穿透 布隆过滤器")
+                .keywordQueries(List.of("Redis", "缓存穿透", "布隆过滤器"))
+                .questionType("PRINCIPLE")
+                .difficultyHint("L2")
+                .focusPoint("缓存穿透")
+                .build());
+
+        assertThat(context.isEmpty()).isTrue();
+        assertThat(context.getRetrievalAudit())
+                .extracting("retrievalTriggered", "difficultyWindowApplied", "difficultyWindowValues")
+                .containsExactly(true, true, List.of("L1", "L2", "L3"));
+    }
+
+    @Test
     @DisplayName("retrieve audit should keep full fusion and rerank input candidates when they exceed injected topk")
     void retrieveAudit_shouldKeepFullFusionAndRerankInputCandidatesWhenTheyExceedInjectedTopk() throws Exception {
         EmbeddingModel embeddingModel = mock(EmbeddingModel.class);

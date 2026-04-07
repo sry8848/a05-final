@@ -45,12 +45,12 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
             return RagContext.empty();
         }
 
+        List<String> difficultyWindow = resolveDifficultyWindow(request);
+        boolean difficultyWindowApplied = !difficultyWindow.isEmpty();
         log.info("RAG 检索开始, questionType={}, difficultyHint={}, denseQueryText={}, sparseQueryText={}",
                 request.getQuestionType(), request.getDifficultyHint(),
                 request.getDenseQueryText(), request.getSparseQueryText());
         try {
-            List<String> difficultyWindow = resolveDifficultyWindow(request);
-            boolean difficultyWindowApplied = !difficultyWindow.isEmpty();
             List<QdrantHybridQueryExecutor.SearchHit> denseHits = queryExecutor.denseRecall(request);
             List<QdrantHybridQueryExecutor.SearchHit> sparseHits = queryExecutor.sparseRecall(request);
 
@@ -128,8 +128,23 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
         } catch (Exception e) {
             log.error("RAG 检索异常, questionType={}",
                     request.getQuestionType(), e);
-            return RagContext.emptyTriggered(RagContext.RetrievalAudit.empty(true));
+            return RagContext.emptyTriggered(emptyAuditWithDifficultyWindow(difficultyWindowApplied, difficultyWindow));
         }
+    }
+
+    private RagContext.RetrievalAudit emptyAuditWithDifficultyWindow(boolean difficultyWindowApplied,
+                                                                     List<String> difficultyWindow) {
+        return RagContext.RetrievalAudit.builder()
+                .retrievalTriggered(true)
+                .denseCandidateCount(0)
+                .sparseCandidateCount(0)
+                .difficultyWindowApplied(difficultyWindowApplied)
+                .difficultyWindowValues(difficultyWindow == null ? List.of() : List.copyOf(difficultyWindow))
+                .fusionTopQuestionIds(List.of())
+                .rerankPreTopQuestionIds(List.of())
+                .rerankPostTopQuestionIds(List.of())
+                .injectedQuestionIds(List.of())
+                .build();
     }
 
     private List<String> resolveDifficultyWindow(RagRetrievalRequest request) {

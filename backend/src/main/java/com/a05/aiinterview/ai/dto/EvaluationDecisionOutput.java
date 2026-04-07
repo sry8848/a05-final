@@ -55,8 +55,11 @@ public class EvaluationDecisionOutput {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class RetrievalPlan {
+        /** 独立、完整的自然语言语义查询，供 dense/rerank 直接使用。 */
         private String queryText;
+        /** sparse/BM25 使用的术语锚点；为空时后端直接跳过 sparse。 */
         private List<String> keywordHints;
+        /** 目标难度提示；后端会按配置将其解析为相邻一级 difficulty window 硬过滤。 */
         private String difficultyHint;
     }
 }

@@ -10,12 +10,12 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 将 AI 输出的 retrieval brief 编译为可执行的单库检索请求。
+ * 将 AI 输出的 retrieval brief 编译为可执行检索请求。
  *
  * <p>核心职责：
  * <ul>
  *   <li>根据 AI 决策（DecisionExecutionPlan）决定是否需要检索</li>
- *   <li>如果需要检索，构建完整的 RagRetrievalRequest</li>
+ *   <li>如果需要检索，显式拆出语义视图（queryText）与词法视图（keywordHints）</li>
  *   <li>如果不需要检索，返回 shouldRetrieve=false 的空请求</li>
  * </ul>
  *
@@ -36,13 +36,13 @@ public class RagPlanCompiler {
      *   <li>提取第一个检索计划</li>
      *   <li>判断是否需要检索（shouldRetrieve）</li>
      *   <li>如果不需要检索：返回 shouldRetrieve=false 的空请求</li>
-     *   <li>如果需要检索：构建完整的检索请求</li>
+     *   <li>如果需要检索：dense 仅使用自然语言 queryText，sparse 仅使用 keywordHints</li>
      * </ol>
      *
      * @param plan 决策执行计划（来自AI评估决策）
      * @param positionCode 岗位编码
      * @param experienceLevel 经验级别
-     * @return RAG检索请求
+     * @return 语义视图、词法视图与业务过滤已拆分好的 RAG 检索请求
      */
     public RagRetrievalRequest compile(DecisionExecutionPlan plan, String positionCode, String experienceLevel) {
         String questionType = normalizeQuestionType(plan == null ? null : plan.getTargetQuestionType());
@@ -88,7 +88,7 @@ public class RagPlanCompiler {
      *
      * <p>检索条件判断：
      * <ul>
-     *   <li>PRINCIPLE/SCENARIO/BEHAVIORAL/PROJECT_DEEP_DIVE 题型：只有有 retrievalPlans 才检索</li>
+     *   <li>PRINCIPLE/SCENARIO/BEHAVIORAL/PROJECT_DEEP_DIVE 题型：只有存在 retrievalPlans 才检索</li>
      * </ul>
      *
      * @param questionType 标准化后的题型
@@ -117,7 +117,7 @@ public class RagPlanCompiler {
      * <ul>
      *   <li>如果 plan 为空，返回 null</li>
      *   <li>如果 retrievalPlans 为空或不存在，返回 null</li>
-     *   <li>否则返回第一个检索计划（retrievalPlans.getFirst()）</li>
+     *   <li>否则返回第一个检索计划，由其提供 queryText/keywordHints/difficultyHint</li>
      * </ul>
      *
      * @param plan 决策执行计划
