@@ -1,313 +1,306 @@
-# RAG 链路技术实现分析
+# 面试 RAG 技术实现说明
 
-## 1. 整体架构
+## 1. 文档范围
 
-### 1.1 核心组件
+本文只描述当前仓库中的主实现，不复述已经删除或停用的旧路径。
 
-| 组件 | 职责 | 实现类 | 位置 |
-|------|------|--------|------|
-| 配置管理 | RAG 相关配置 | `RagProperties` | rag/config/ |
-| 基础设施 | Qdrant 客户端和 VectorStore | `RagConfiguration` | rag/config/ |
-| 知识入库 | 批量写入知识文档 | `KnowledgeIngestionService` | rag/service/ |
-| 检索服务 | 核心检索逻辑 | `RagRetrievalServiceImpl` | rag/service/impl/ |
-| 重排服务 | 文本排序 | `DashScopeRagRerankService` | rag/service/impl/ |
-| 数据传输 | 检索请求和结果 | `RagRetrievalRequest`, `RagContext` | rag/dto/ |
+当前技术基线是：
 
-### 1.2 技术栈
+- Qdrant 原生 hybrid collection
+- dense + sparse/BM25 双路召回
+- RRF 融合
+- DashScope 文本 rerank
+- difficulty window 统一过滤
+- `RagContext` 结构化输出
 
-- **向量数据库**: Qdrant (gRPC 接口)
-- **向量化模型**: OpenAI Embedding (通过 Spring AI)
-- **重排服务**: 阿里百炼 Text Rerank API
-- **框架**: Spring Boot 3, Spring AI 1.0.0
+## 2. 核心组件
 
-## 2. 知识入库流程
+| 组件 | 作用 | 现行实现 |
+|------|------|----------|
+| 配置 | 管理 RAG 开关、Qdrant 和 rerank 参数 | `RagProperties` |
+| Schema 管理 | 创建 hybrid collection 与 payload index | `QdrantHybridCollectionManager` |
+| Point 映射 | 把题卡映射成 dense vector + sparse document + payload | `QdrantHybridPointMapper` |
+| 知识入库 | 批量写入 Qdrant | `KnowledgeIngestionService` |
+| 请求编译 | 把评估决策编译成检索请求 | `RagPlanCompiler` |
+| Hybrid 查询执行 | 执行 dense/sparse 两路 Qdrant 查询 | `QdrantHybridQueryExecutor` |
+| 难度窗口解析 | 把 `difficultyHint` 解析成相邻一级窗口 | `DifficultyWindowResolver` |
+| 融合 | 合并 dense/sparse 排名 | `RrfFusion` |
+| 重排 | 调用 DashScope 文本排序 API | `DashScopeRagRerankService` |
+| 检索编排 | 串起召回、融合、重排和护栏 | `RagRetrievalServiceImpl` |
+| 结果承载 | 输出结构化上下文与审计 | `RagContext` |
 
-### 2.1 数据模型
+## 3. 数据模型与存储
 
-**`KnowledgeDocument`** 字段：
-- `id`: 题目唯一标识
-- `questionText`: 题目文本
-- `intentConcept`: 考点概念
-- `referenceContext`: 参考语境
-- `scoringKeyPoints`: 评分关键点
-- `scoringPitfalls`: 评分误区
-- `domainCode`: 知识域编码
-- `questionType`: 题目类型
-- `difficulty`: 难度等级
-- `keywords`: 关键词列表
-- `followUpIds`: 跟进题目ID列表
-- `active`: 是否激活
-- `version`: 版本号
-- `source`: 来源
+### 3.1 题卡数据模型
 
-### 2.2 入库流程
+知识单元是 `KnowledgeDocument`。高相关字段包括：
 
-```mermaid
-flowchart TD
-    A[接收 KnowledgeDocument 列表] --> B[转换为 Spring AI Document]
-    B --> C[批量写入 VectorStore]
-    C --> D[自动向量化处理]
-    D --> E[写入 Qdrant 集合]
-```
+- `id`
+- `questionText`
+- `intentConcept`
+- `referenceContext`
+- `scoringKeyPoints`
+- `scoringPitfalls`
+- `followUpIds`
+- `domainCode`
+- `questionType`
+- `difficulty`
+- `keywords`
+- `source`
+- `version`
+- `active`
 
-**关键步骤**：
-1. **构建 metadata**: 将 `KnowledgeDocument` 字段映射为 Qdrant metadata
-2. **生成稳定 ID**: 使用 UUID 基于题目 ID 生成
-3. **批量处理**: 每批最多 10 个文档，避免 API 限制
-4. **自动向量化**: Spring AI VectorStore 内部调用 EmbeddingModel
+### 3.2 三种表示
 
-## 3. 检索核心流程
+当前会为每张题卡生成三种表示：
 
-### 3.1 检索链路
+| 表示 | 来源字段 | 用途 |
+|------|----------|------|
+| dense 文本 | `questionText + intentConcept` | 语义召回 |
+| sparse 文本 | `questionText + scoringKeyPoints + keywords` | BM25 召回 |
+| payload | 结构化业务字段全集 | 命中还原、护栏、rerank 文档构造、上下文注入 |
 
-```mermaid
-flowchart TD
-    A[接收检索请求<br>RagRetrievalRequest] --> B{是否需要检索?}
-    B -->|否| C[返回空结果]
-    B -->|是| D[Lexical 预过滤]
-    D --> E[Dense 向量召回]
-    E --> F[业务重排]
-    F --> G[应用硬约束]
-    G --> H[构建结构化结果]
-    H --> I[返回 RagContext]
-```
+### 3.3 Qdrant collection 形态
 
-### 3.2 详细步骤
+默认配置见 `application.yml`：
 
-#### 1. Lexical 预过滤
-- **目的**: 快速收缩候选集，提高检索效率
-- **实现**: 使用 Qdrant 的 `scroll` API 结合全文索引
-- **过滤条件**:
-  - 激活状态 (`active=true`)
-  - 题目类型匹配
-  - 知识域匹配
-  - 关键词匹配（`question_text`、`intent_concept`、`keywords`）
-- **返回**: 候选题目 ID 集合
+- collection 名称：`interview_knowledge_hybrid`
+- dense named vector：`dense`
+- sparse named vector：`bm25`
+- dense 向量维度：`1024`
 
-#### 2. Dense 向量召回
-- **目的**: 基于语义相似度召回相关文档
-- **实现**: 使用 Spring AI VectorStore 的 `similaritySearch`
-- **参数**:
-  - 检索文本: 焦点 + 关键词 + 必须包含线索
-  - TopK: 可配置（默认 5）
-  - 相似度阈值: 可配置（默认 0.65）
-- **过滤**: 只保留 lexical 预过滤中的题目
+`QdrantHybridCollectionManager` 当前会确保这两个 payload index：
 
-#### 3. 业务重排
-- **目的**: 优化排序结果，提升相关性
-- **实现**: 调用阿里百炼 Text Rerank API
-- **输入**:
-  - 查询摘要: 包含题型、目标、焦点等
-  - 文档文本: 包含题目、考点、语境等
-- **回退**: API 失败时回退到基于 dense 排名的本地排序
+- `question_type`
+- `active`
 
-#### 4. 应用硬约束
-- **目的**: 确保结果符合业务规则
-- **约束**:
-  - 行为题 (`BEHAVIORAL`) 只能匹配行为题
-  - 项目题 (`PROJECT`) 只能匹配项目题
-  - 知识域必须匹配（如果指定）
+## 4. 入库流程
 
-#### 5. 构建结果
-- **总结**: 生成检索结果摘要
-- **上下文**: 构建格式化的上下文文本
-- **跟进候选**: 收集跟进题目 ID
-- **审计信息**: 记录检索各阶段的统计信息
+`KnowledgeIngestionService.ingest(...)` 的当前流程是：
 
-## 4. 技术实现细节
+1. 遍历 `KnowledgeDocument`
+2. 生成 dense embedding
+3. 通过 `QdrantHybridPointMapper` 构造 `PointStruct`
+4. 每批最多 10 条调用 `qdrantClient.upsertAsync(...)`
 
-### 4.1 Qdrant 配置与优化
+`QdrantHybridPointMapper` 会把：
 
-**索引优化**:
-- **向量索引**: 自动创建（基于 Embedding 维度）
-- **Lexical 索引**:
-  - `question_text`: 文本索引，多语言分词器
-  - `intent_concept`: 文本索引，多语言分词器
-  - `keywords`: 关键词索引
+- dense 文本写入 named dense vector
+- sparse 文本写入 named sparse vector，文档模型为 `qdrant/bm25`
+- 结构化字段写入 payload
 
-**连接配置**:
-- gRPC 连接，默认端口 6334
-- 集合名: 可配置（默认 `interview_knowledge`）
-- 自动初始化 schema: 可配置
+当前 payload 中仍保留 `domain_code`，但它只是结果元数据，不代表当前检索还依赖它做过滤。
 
-### 4.2 检索参数配置
+## 5. 检索请求语义
 
-| 参数 | 说明 | 默认值 | 配置位置 |
-|------|------|--------|----------|
-| `topK` | 检索结果数量 | 5 | application.yml: rag.top-k |
-| `minScore` | 相似度阈值 | 0.65 | application.yml: rag.min-score |
-| `rerank.topN` | 重排结果数量 | 10 | application.yml: rag.rerank.top-n |
-| `rerank.timeoutMs` | 重排超时时间 | 5000 | application.yml: rag.rerank.timeout-ms |
-| `LEXICAL_PREFILTER_MULTIPLIER` | 预过滤倍数 | 4 | 代码常量 |
+### 5.1 `RagRetrievalRequest` 的字段职责
 
-### 4.3 性能优化
+当前高相关字段职责如下：
 
-1. **批量处理**: 知识入库采用批量模式，减少网络往返
-2. **预过滤**: Lexical 预过滤减少向量搜索范围
-3. **并行处理**: HTTP 客户端使用异步连接
-4. **缓存**: 合理设置 Qdrant 缓存参数
-5. **错误处理**: 重排失败时回退到本地排序，保证系统稳定性
+| 字段 | 含义 |
+|------|------|
+| `shouldRetrieve` | 是否应该发起检索 |
+| `queryText` | 上游给出的自然语言语义查询 |
+| `denseQueryText` | dense 执行文本，当前由编译器直接设为 `queryText` |
+| `sparseQueryText` | 由 sparse 术语锚点拼接得到的 BM25 输入 |
+| `keywordQueries` | 稀疏词法锚点列表 |
+| `questionType` | 业务题型过滤条件 |
+| `difficultyHint` | 开启配置时用于 difficulty window 过滤 |
+| `focusPoint` | 当前轮考察焦点 |
+| `positionCode` | 岗位编码 |
+| `experienceLevel` | 候选人资历 |
+| `projectName` | 项目题时的项目名 |
 
-### 4.4 容错机制
+### 5.2 `RagPlanCompiler` 编译规则
 
-- **服务降级**: RAG 服务不可用时，返回空结果
-- **API 失败回退**: 重排 API 失败时使用本地排序
-- **异常捕获**: 统一捕获并记录检索过程中的异常
-- **空值处理**: 对各种输入进行空值检查
+当前编译规则很明确：
 
-## 5. 调用流程
+- 无有效 retrieval plan 时，返回 `shouldRetrieve=false`
+- `queryText` 直接来自上游 retrieval plan
+- `denseQueryText = queryText`
+- `keywordHints` 去重后写入 `keywordQueries`
+- `sparseQueryText = keywordQueries` 以空格拼接
+- `keywordHints` 为空时允许 sparse 分支跳过
+- `PROJECT` 会在题型标准化时转成 `PROJECT_DEEP_DIVE`
 
-### 5.1 知识入库调用
+这说明当前系统已经把“语义查询”和“词法锚点”从编译阶段分开，不再靠运行时把多个来源硬拼成一个查询 brief。
 
-```java
-// 示例代码
-KnowledgeIngestionService ingestionService = ...;
-List<KnowledgeDocument> documents = ...;
-int count = ingestionService.ingest(documents);
-```
+## 6. 执行流程
 
-### 5.2 检索调用
-
-```java
-// 示例代码
-RagRetrievalService retrievalService = ...;
-RagRetrievalRequest request = RagRetrievalRequest.builder()
-    .questionType("PRINCIPLE")
-    .domainCode("JAVA_BASE")
-    .focusPoint("线程池核心参数")
-    .keywordQueries(List.of("线程池", "核心线程数", "最大线程数"))
-    .build();
-RagContext context = retrievalService.retrieve(request);
-```
-
-### 5.3 典型应用场景
-
-1. **题目生成**: 为面试生成相关题目
-2. **答案评估**: 为候选人答案提供评估参考
-3. **学习推荐**: 基于面试表现推荐学习内容
-4. **AI 咨询**: 为用户提供题目相关的智能咨询
-
-## 6. 数据流
-
-### 6.1 知识入库数据流
+### 6.1 总流程
 
 ```mermaid
 flowchart TD
-    A[知识源] --> B[KnowledgeDocument]
-    B --> C[Spring AI Document]
-    C --> D[VectorStore.add]
-    D --> E[EmbeddingModel]
-    E --> F[向量生成]
-    F --> G[Qdrant 写入]
+    A["DecisionExecutionPlan"] --> B["RagPlanCompiler"]
+    B --> C{"shouldRetrieve"}
+    C -->|false| D["RagContext.empty()"]
+    C -->|true| E["denseRecall"]
+    C -->|true| F["sparseRecall"]
+    E --> G["RrfFusion"]
+    F --> G
+    G --> H["DashScopeRagRerankService"]
+    H --> I["Hard Guardrails"]
+    I --> J["RagContext"]
 ```
 
-### 6.2 检索数据流
+### 6.2 dense 分支
 
-```mermaid
-flowchart TD
-    A[检索请求] --> B[Lexical 预过滤]
-    B --> C[Qdrant Scroll]
-    C --> D[候选 ID 集合]
-    D --> E[Dense 向量搜索]
-    E --> F[VectorStore.similaritySearch]
-    F --> G[相似度排序]
-    G --> H[重排请求]
-    H --> I[阿里百炼 API]
-    I --> J[最终排序]
-    J --> K[结果构建]
-    K --> L[返回 RagContext]
-```
+`QdrantHybridQueryExecutor.denseRecall(...)` 会：
 
-## 7. 监控与审计
+1. 读取 `denseQueryText`
+2. 调用 embedding 模型生成向量
+3. 使用 `rag.dense-vector-name`
+4. 追加基础 filter
+5. 按 `rag.dense-top-k` 与 `rag.min-score` 查询
 
-### 7.1 审计信息
+### 6.3 sparse 分支
 
-`RagContext.RetrievalAudit` 包含以下信息：
-- `retrievalTriggered`: 是否触发检索
-- `lexicalCandidateCount`: Lexical 预过滤候选数
-- `denseCandidateCount`: Dense 召回候选数
-- `rerankPreTopQuestionIds`: 重排前 Top 题目 ID
-- `rerankPostTopQuestionIds`: 重排后 Top 题目 ID
-- `injectedQuestionIds`: 最终注入的题目 ID
+`QdrantHybridQueryExecutor.sparseRecall(...)` 会：
 
-### 7.2 日志记录
+1. 读取 `sparseQueryText`
+2. 构造 `Points.Document(text, model=qdrant/bm25)`
+3. 使用 `rag.sparse-vector-name`
+4. 追加同一套基础 filter
+5. 按 `rag.sparse-top-k` 查询
 
-关键步骤都有详细的日志记录：
-- 初始化 Qdrant 客户端和索引
-- 知识入库开始和完成
-- 检索开始和结果
-- API 调用和错误
+如果 `sparseQueryText` 为空，当前实现直接返回空列表，不会发起无意义查询。
 
-## 8. 配置与部署
+### 6.4 基础 filter
 
-### 8.1 核心配置项
+当前 dense/sparse 共用 `buildBaseFilter(...)`，包含：
+
+- `active=true`
+- 标准化后的 `question_type`
+- 可选 difficulty window
+
+现行实现不在这个阶段过滤 `domainCode`。
+
+### 6.5 difficulty window
+
+当 `rag.difficulty-window-enabled=true` 时，`DifficultyWindowResolver` 会把请求中的 `difficultyHint` 解析成有序窗口：
+
+| 输入 | 过滤值 |
+|------|--------|
+| `L1` | `L1, L2` |
+| `L2` | `L1, L2, L3` |
+| `L3` | `L2, L3, L4` |
+| `L4` | `L3, L4, L5` |
+| `L5` | `L4, L5` |
+
+无效值或空值会返回空列表，此时不会追加难度过滤。
+
+### 6.6 融合
+
+`RrfFusion` 接收 dense/sparse 的题卡 ID 排名列表，并返回融合分数。`RagRetrievalServiceImpl` 再基于候选池恢复融合后的题卡顺序。
+
+当前融合候选规模由 `rag.fusion-top-k` 控制，但最终注入上限仍由 `rag.top-k` 决定。
+
+### 6.7 rerank
+
+`DashScopeRagRerankService` 当前调用 DashScope 文本排序接口，输入来自 `RagRerankInputBuilder`：
+
+- query 使用语义查询文本
+- document 依次拼接题目、考点、语境、关键点、误区
+
+如果外部 rerank 调用失败，当前实现会退回 fusion 顺序，并继续完成主链路。
+
+### 6.8 硬护栏
+
+`applyHardGuardrails(...)` 的规则是：
+
+- 行为题只保留行为题
+- 项目题只保留项目题
+- 其他题型要求候选题型一致
+
+当前护栏是最终收口步骤，不参与前置召回。
+
+## 7. 输出结构
+
+### 7.1 `RagContext`
+
+当前输出字段包括：
+
+- `summary`
+- `contextText`
+- `retrievedMaterials`
+- `followUpCandidates`
+- `retrievalAudit`
+- `hitCount`
+- `empty`
+
+### 7.2 `RetrievalAudit`
+
+当前审计字段包括：
+
+- `retrievalTriggered`
+- `denseCandidateCount`
+- `sparseCandidateCount`
+- `difficultyWindowApplied`
+- `difficultyWindowValues`
+- `fusionTopQuestionIds`
+- `rerankPreTopQuestionIds`
+- `rerankPostTopQuestionIds`
+- `injectedQuestionIds`
+
+异常路径不会再统一抹掉已知阶段状态。只要某一阶段已经成功累积到审计，后续异常时也会尽量保留这些事实。
+
+## 8. 与出题主链路的集成
+
+`QuestionStreamService.buildRetrievalContext(...)` 当前会把下面这些内容注入 `QuestionGenerationInput.RetrievalContext`：
+
+- `summary`
+- `retrievalPlans`
+- `retrievedMaterials`
+- `followUpCandidates`
+- `retrievalAudit`
+
+所以当前生成链路消费的是结构化 RAG 上下文，而不是一段不透明的拼接文本。
+
+## 9. 关键配置
+
+`application.yml` 中现行高相关配置如下：
 
 ```yaml
-# RAG 配置
 rag:
-  enabled: true  # 是否启用 RAG
-  top-k: 5       # 检索结果数量
-  min-score: 0.65  # 相似度阈值
-  host: localhost  # Qdrant 主机
-  port: 6334       # Qdrant gRPC 端口
-  collection-name: interview_knowledge  # 集合名
-  initialize-schema: true  # 自动初始化 schema
-  init-sample-data: false  # 是否初始化样本数据
+  enabled: ${RAG_ENABLED:false}
+  top-k: ${RAG_TOP_K:5}
+  min-score: ${RAG_MIN_SCORE:0.65}
+  host: ${QDRANT_HOST:localhost}
+  port: ${QDRANT_PORT:6334}
+  collection-name: ${QDRANT_COLLECTION:interview_knowledge_hybrid}
+  initialize-schema: true
+  dense-vector-name: ${QDRANT_DENSE_VECTOR_NAME:dense}
+  dense-vector-size: ${QDRANT_DENSE_VECTOR_SIZE:1024}
+  sparse-vector-name: ${QDRANT_SPARSE_VECTOR_NAME:bm25}
+  dense-top-k: ${RAG_DENSE_TOP_K:20}
+  sparse-top-k: ${RAG_SPARSE_TOP_K:20}
+  fusion-top-k: ${RAG_FUSION_TOP_K:20}
+  difficulty-window-enabled: ${RAG_DIFFICULTY_WINDOW_ENABLED:false}
+  init-sample-data: ${RAG_INIT_SAMPLE:false}
   rerank:
-    api-key: ${AI_BAILIAN_API_KEY}  # 重排 API Key
-    endpoint: https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank
-    model: gte-rerank-v2  # 重排模型
-    timeout-ms: 5000  # 超时时间
-    top-n: 10  # 重排结果数量
+    api-key: ${AI_BAILIAN_API_KEY:${OPENAI_API_KEY:}}
+    endpoint: ${RAG_RERANK_ENDPOINT:https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}
+    model: ${RAG_RERANK_MODEL:gte-rerank-v2}
+    timeout-ms: ${RAG_RERANK_TIMEOUT_MS:5000}
+    top-n: ${RAG_RERANK_TOP_N:10}
 ```
 
-### 8.2 部署要求
+## 10. 现行实现边界
 
-- **Qdrant 服务**: 运行在指定主机和端口
-- **网络连接**: 能访问阿里百炼 API（重排服务）
-- **API Key**: 配置有效的 `AI_BAILIAN_API_KEY`
-- **资源要求**: Qdrant 需要足够的内存存储向量
+需要明确三件事：
 
-## 9. 代码优化建议
+1. 当前文档说的是现行主路径，不包含历史实验代码或旧设计稿。
+2. `domainCode` 仍是题卡与结果元数据，但不是当前召回过滤条件。
+3. rerank、dense、sparse 的职责已经拆开，后续演进应继续沿着单一职责推进，而不是重新把多个视图揉回一个查询字符串。
 
-### 9.1 性能优化
+## 11. 总结
 
-1. **批量大小调优**: 根据 Qdrant 性能调整批量处理大小
-2. **缓存策略**: 考虑添加本地缓存，减少重复检索
-3. **索引优化**: 根据实际数据分布优化 Qdrant 索引参数
-4. **并发处理**: 考虑使用并行流处理多个检索请求
+当前面试 RAG 的技术实现已经具备完整闭环：
 
-### 9.2 功能增强
+- 入库走原生 Qdrant hybrid point
+- 检索走 dense/sparse 双路召回
+- 排序走 RRF + DashScope rerank
+- 业务收口靠题型硬护栏
+- 输出通过 `RagContext` 结构化注入出题主链路
 
-1. **多模态支持**: 考虑支持图片等多模态知识
-2. **个性化检索**: 根据用户历史行为调整检索策略
-3. **自动评估**: 定期评估检索质量并调整参数
-4. **知识更新**: 实现增量更新机制
-
-### 9.3 代码质量
-
-1. **异常处理**: 增强异常处理和错误恢复机制
-2. **参数验证**: 加强输入参数验证
-3. **文档完善**: 完善代码注释和文档
-4. **单元测试**: 增加单元测试覆盖率
-
-## 10. 总结
-
-### 10.1 技术特点
-
-1. **模块化设计**: 清晰的组件划分和职责分离
-2. **可配置性**: 丰富的配置选项，适应不同场景
-3. **性能优化**: 多阶段检索策略，平衡速度和精度
-4. **容错机制**: 完善的错误处理和回退策略
-5. **可扩展性**: 易于集成新的检索和重排算法
-
-### 10.2 应用价值
-
-- **提升面试质量**: 提供更精准的题目和评估参考
-- **个性化学习**: 基于用户表现推荐学习内容
-- **智能咨询**: 为用户提供专业的题目相关咨询
-- **数据驱动**: 基于真实数据持续优化面试体验
-
----
-
-*文档版本: v1.0 | 更新日期: 2026-03-31*
+因此，后续讨论若再引用旧的前置裁剪、旧的单路 dense 检索或旧的 query brief 拼接方式，都不应再被视为当前实现描述。

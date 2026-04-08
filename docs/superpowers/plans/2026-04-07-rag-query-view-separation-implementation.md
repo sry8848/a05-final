@@ -515,37 +515,46 @@ git commit -m "docs: align retrieval plan semantics with query view separation"
 
 ## Chunk 4: 文档同步与最终验证
 
+> 当前会话已确认：`RagRerankInputBuilder` 保留对 `denseQueryText` 的 fallback，不作为 chunk4 的阻塞项。chunk4 的目标是同步文档口径、验证现行实现边界，并避免被历史文档或无关 prompt/测试误报。
+
 ### Task 7: 更新中文文档口径，清除历史描述
 
 **Files:**
 - Modify: `D:\a05-cursor\docs\superpowers\reports\2026-04-07-interview-rag-current-implementation-report.md`
 - Modify: `D:\a05-cursor\docs\rag-technical-implementation.md`
 
-- [ ] **Step 1: 更新当前实现报告**
+- [ ] **Step 1: 按现行实现重写当前实现报告的关键章节**
 
 同步以下新口径：
 - rerank query 不再包含 `questionType` / `difficultyHint`
 - difficulty filter 在 dense/sparse 两路召回前统一生效
 - `queryText` 是自然语言语义视图
 - `keywordHints` 只用于 sparse
+- 当前审计字段包含 difficulty window 与 dense/sparse/fusion/rerank 各阶段候选信息
+- 当前实现接受保留 `denseQueryText` fallback，但这不是本次文档要继续扩散的推荐模式
 
-- [ ] **Step 2: 修正旧技术文档**
+- [ ] **Step 2: 按现行实现重写旧技术文档中的过时章节**
 
 重点删掉或改写：
 - lexical 预过滤旧描述
 - “difficultyHint 只是软提示”的旧表述
 - dense/rerank 混吃关键词标签的旧口径
+- `VectorStore.similaritySearch` / 单路 dense 召回等过时实现描述
+- 已不存在的 `domainCode` 检索过滤、`lexicalCandidateCount` 等旧审计字段
 
-- [ ] **Step 3: 做文档残留搜索**
+- [ ] **Step 3: 做目标文档残留搜索**
 
 Run:
 
 ```powershell
-rtk rg -n "软约束|题型：|目标难度|术语查询|关键词：" D:\a05-cursor\docs\superpowers\reports\2026-04-07-interview-rag-current-implementation-report.md D:\a05-cursor\docs\rag-technical-implementation.md D:\a05-cursor\backend\src\main\resources\prompts\evaluation-decision.md
+rtk rg -n "lexical 预过滤|VectorStore\.similaritySearch|术语查询（sparseQueryText）|目标难度（difficultyHint）|软提示|软约束" D:\a05-cursor\docs\superpowers\reports\2026-04-07-interview-rag-current-implementation-report.md D:\a05-cursor\docs\rag-technical-implementation.md
+rtk rg -n "题型：|目标难度：|术语查询|关键词：" D:\a05-cursor\backend\src\main\resources\prompts\evaluation-decision.md
 ```
 
 Expected:
-- 如有残留，只能出现在“历史逻辑”说明里，不能被写成现行实现
+- 两份目标文档不再把旧链路写成现行实现
+- `evaluation-decision.md` 不再出现旧的 rerank query 标签拼接口径
+- 历史 plans/specs/reports 不在这一轮判定范围内，不作为 chunk4 失败条件
 
 - [ ] **Step 4: Commit**
 
@@ -575,13 +584,14 @@ Expected:
 Run:
 
 ```powershell
-rtk rg -n "题型：|目标难度|术语查询|关键词：|软约束|displayQuery|mustHaveClues|avoidClues" D:\a05-cursor\backend\src\main D:\a05-cursor\backend\src\test D:\a05-cursor\docs
+rtk rg -n "题型：|目标难度：|术语查询|关键词：|软约束|displayQuery|mustHaveClues|avoidClues" D:\a05-cursor\backend\src\main\java\com\a05\aiinterview\rag D:\a05-cursor\backend\src\main\resources\prompts\evaluation-decision.md D:\a05-cursor\docs\superpowers\reports\2026-04-07-interview-rag-current-implementation-report.md D:\a05-cursor\docs\rag-technical-implementation.md
 ```
 
 Expected:
-- 主代码路径不再存在 `题型/目标难度/术语查询/关键词` 这类 rerank query 标签拼接
+- 现行主代码路径不再存在 `题型/目标难度/术语查询/关键词` 这类 rerank query 标签拼接
 - 不再把 `difficultyHint` 写成软约束
-- 旧字段 `displayQuery/mustHaveClues/avoidClues` 不应重新出现
+- 旧字段 `displayQuery/mustHaveClues/avoidClues` 不应在现行主代码与本次同步文档中重新出现
+- 其他 prompt、历史计划文档、测试断言文本不在这一轮失败判定范围内
 
 - [ ] **Step 3: 如需补充，再跑主链路测试**
 
@@ -595,11 +605,11 @@ Expected:
 - PASS
 - 决策链路与出题输入组装未被本次改造破坏
 
-- [ ] **Step 4: 最终提交**
+- [ ] **Step 4: 如有新增改动，再做最终提交**
 
 ```bash
-git add backend/src/main backend/src/test docs
-git commit -m "feat: separate rag semantic query from sparse hints and apply difficulty window filtering"
+git add docs/superpowers/reports/2026-04-07-interview-rag-current-implementation-report.md docs/rag-technical-implementation.md
+git commit -m "docs: finalize rag query view separation documentation"
 ```
 
 ## Success Criteria

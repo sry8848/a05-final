@@ -1,468 +1,296 @@
-# 面试 RAG 现有实现架构评审报告
+# 面试 RAG 现行实现评审报告
 
 ## 1. 报告目的
 
-本文重点回答 4 个问题：
+这份报告只回答一个问题：**当前仓库里的面试 RAG 到底是怎么工作的。**
 
-1. 为什么面试出题需要 RAG，而不能只依赖大模型自由生成。
-2. 当前系统如何把题卡知识库、检索、重排和出题主链路连接成一条完整流程。
-3. 这套方案的关键技术点和工程控制点分别是什么。
-4. 当前实现的完成度、可运维性和后续演进边界是什么。
+重点不是复述理想方案，而是把现行实现的真实边界讲清楚，避免后续讨论继续混入已经删除的旧链路描述。
 
-本文配套 3 张可保存的 Mermaid 图源文件，位于：
+本文配套的 Mermaid 图源仍在：
 
 - [architecture-overview.mmd](D:/a05-cursor/docs/superpowers/reports/assets/2026-04-07-interview-rag-current-implementation/architecture-overview.mmd)
 - [retrieval-sequence.mmd](D:/a05-cursor/docs/superpowers/reports/assets/2026-04-07-interview-rag-current-implementation/retrieval-sequence.mmd)
 - [knowledge-dataflow.mmd](D:/a05-cursor/docs/superpowers/reports/assets/2026-04-07-interview-rag-current-implementation/knowledge-dataflow.mmd)
 
-## 2. 项目背景与问题定义
+## 2. 结论摘要
 
-面试出题场景与通用问答不同。系统需要根据岗位、候选人回答、题型切换和项目上下文，持续生成“下一道题”。如果完全依赖大模型自由生成，容易出现 3 类问题：
+当前实现已经是一条完整的面试出题知识支撑链路，而不是单点向量检索插件。现行主路径是：
 
-- 题目漂移：问题看起来合理，但与当前岗位能力模型、题型目标或项目主线脱节。
-- 知识点不稳定：同一轮面试中，出题深度、术语精度和考点覆盖缺乏稳定约束。
-- 行为题与项目题失焦：行为题容易混入技术细节，项目题容易退化为脱离项目锚点的泛技术题。
+`评估决策 -> RagPlanCompiler -> Qdrant dense/sparse 双路召回 -> RRF 融合 -> DashScope rerank -> 题型硬护栏 -> RagContext 注入 QuestionGenerationInput`
 
-因此，当前系统不是把 RAG 当成“问答机器人”，而是把它作为**面试出题链路中的受控知识注入层**。其核心目标不是直接回答问题，而是为下一题生成提供更稳定的知识支撑、术语锚点和可审计上下文。
+这条链路有 5 个必须明确的事实：
 
-## 3. 方案总览
+1. `queryText` 已被定义为上游唯一的自然语言语义视图。
+2. `keywordHints` 只用于构造 sparse/BM25 词法输入，不再与 dense/rerank 混用。
+3. `difficultyHint` 在开关开启时会被解析成相邻一级 difficulty window，并在 dense/sparse 两路召回前统一生效。
+4. 现行检索已切到 Qdrant 原生 hybrid query，不再依赖旧的通用 `VectorStore` 检索路径。
+5. 检索审计已经能记录 dense、sparse、fusion、rerank 与最终注入阶段的关键状态，并在异常时尽量保留已知事实。
 
-当前现行方案可以概括为：
+## 3. 当前架构总览
 
-**题卡知识库 + hybrid 检索 + 结果重排 + 题型护栏 + RAG 上下文注入出题主链路。**
+现行架构可以概括为：
 
-这不是单路检索，也不是“检到什么就直接喂给模型”。系统将一次检索分为 5 个主要阶段：
+**结构化题卡知识库 + Qdrant hybrid recall + RRF + 商业 rerank + 程序硬护栏 + 结构化上下文注入。**
 
-1. 根据评估决策生成可执行的检索请求。
-2. 对同一请求执行 dense 与 sparse/BM25 双路独立召回。
-3. 使用 RRF 做第一轮融合排序。
-4. 使用商业 rerank 做最终主排序。
-5. 使用程序硬护栏过滤题型明显不匹配的候选。
+这里最重要的工程分层是：
 
-整体架构如下：
+- 决策层只负责判断是否需要检索，以及给出语义查询与词法锚点。
+- 编译层把决策输出整理成 `RagRetrievalRequest`。
+- 检索层只负责召回、融合、重排、护栏和审计。
+- 出题主链路只消费 `RagContext` 的结构化结果，不直接介入检索细节。
 
-```mermaid
-flowchart LR
-    subgraph A["知识侧"]
-        DS["题卡数据源(JSONL / 管理端导入)"]
-        ING["KnowledgeIngestionService<br/>原生 Qdrant upsert"]
-        DS --> ING
-    end
+这意味着 RAG 在当前系统里承担的是“受控知识注入层”，而不是“让模型自己找资料”的黑箱步骤。
 
-    subgraph B["存储侧"]
-        COL["Qdrant Hybrid Collection<br/>dense: dense<br/>sparse: bm25<br/>payload: 题卡元数据"]
-    end
+## 4. 知识单元与入库设计
 
-    subgraph C["检索侧"]
-        COMP["RagPlanCompiler<br/>编译 shouldRetrieve / queryText /<br/>denseQueryText / sparseQueryText"]
-        DENSE["Dense Recall<br/>QdrantHybridQueryExecutor"]
-        SPARSE["Sparse Recall<br/>QdrantHybridQueryExecutor"]
-        FUSION["RrfFusion<br/>双路结果融合"]
-        RERANK["DashScopeRagRerankService<br/>商业 rerank"]
-        GUARD["Hard Guardrails<br/>题型一致性护栏"]
-        CTX["RagContext<br/>summary / retrievedMaterials /<br/>followUpCandidates / retrievalAudit"]
-    end
+### 4.1 知识单元仍然是结构化题卡
 
-    subgraph D["业务侧"]
-        DECIDE["评估决策 / NextQuestionPlan"]
-        QGS["QuestionStreamService<br/>buildGenInput"]
-        GEN["AI 出题生成"]
-    end
+当前知识库基础单元是 `KnowledgeDocument`，不是长文切片。每条题卡包含：
 
-    ING --> COL
-    DECIDE --> COMP
-    COMP --> DENSE
-    COMP --> SPARSE
-    DENSE --> COL
-    SPARSE --> COL
-    DENSE --> FUSION
-    SPARSE --> FUSION
-    FUSION --> RERANK
-    RERANK --> GUARD
-    GUARD --> CTX
-    CTX --> QGS
-    QGS --> GEN
-```
+- 题目本身 `questionText`
+- 考察意图 `intentConcept`
+- 参考语境 `referenceContext`
+- 关键得分点 `scoringKeyPoints`
+- 典型误区 `scoringPitfalls`
+- 追问候选 `followUpIds`
+- 元数据 `domainCode`、`questionType`、`difficulty`、`keywords`、`source`、`version`、`active`
 
-这一架构的关键价值在于：RAG 不是替代出题模型，而是把“知识召回、排序、护栏、可观测性”独立出来，形成一个可控、可审计、可降级的中间层。
+这样建模的直接好处是：命中的结果天然就是出题链路能消费的结构化材料，不需要再从自由文本里二次抽取。
 
-## 4. 知识库数据模型与入库设计
+### 4.2 一张题卡会被拆成三种表示
 
-### 4.1 题卡作为基础知识单元
+当前映射规则由 `KnowledgeDocument` 和 `QdrantHybridPointMapper` 决定：
 
-当前知识库的基础单元不是长文档切片，而是**结构化面试题卡**。每张题卡包含：
+- dense 表示只使用 `questionText + intentConcept`
+- sparse 表示只使用 `questionText + scoringKeyPoints + keywords`
+- payload 保留完整业务字段，供结果还原、护栏判断、上下文注入和审计使用
 
-- `questionText`：题目本身
-- `intentConcept`：核心考察点
-- `referenceContext`：业务语境与正确处理背景
-- `scoringKeyPoints`：关键得分点
-- `scoringPitfalls`：典型误区
-- `followUpIds`：追问候选
-- `domainCode`、`questionType`、`difficulty`
-- `keywords`
-- `source`、`version`、`active`
+这意味着：
 
-这种建模方式的优点是：知识单元天然与出题目标一致。系统检索到的不是抽象文本段，而是可直接被注入下一题生成链路的结构化题卡。
+- 语义召回尽量保留高语义密度文本
+- BM25 分支优先吃术语锚点和评分点
+- 长叙事字段如 `referenceContext`、`scoringPitfalls` 不直接进入召回文本，而是在 rerank 文档和最终注入时使用
 
-### 4.2 一张题卡，三种表示
+### 4.3 入库已经切到 Qdrant 原生 hybrid point
 
-当前实现不会把题卡简单拼成一个统一检索文本，而是拆成 3 个层次：
+`KnowledgeIngestionService` 的现行路径是：
 
-1. **Dense 表示**
-   当前只使用：
-   - `questionText`
-   - `intentConcept`
+1. 用 embedding 模型生成 dense vector
+2. 用 `qdrant/bm25` 文档模型生成 sparse document
+3. 用 `QdrantHybridPointMapper` 组装 payload
+4. 通过 `QdrantClient.upsertAsync(...)` 批量写入 collection
 
-2. **Sparse 表示**
-   当前只使用：
-   - `questionText`
-   - `scoringKeyPoints`
-   - `keywords`
+当前 collection schema 由 `QdrantHybridCollectionManager` 维护，核心约束是：
 
-3. **Payload 表示**
-   保留完整业务字段，用于命中还原、rerank 文档构造、题型护栏判断和下游上下文注入。
+- collection 名称默认 `interview_knowledge_hybrid`
+- dense named vector 默认 `dense`
+- sparse named vector 默认 `bm25`
+- payload index 当前只确保 `question_type` 和 `active`
 
-这样做的原因是：
+`domain_code` 仍保留在 payload 中，但它现在是结果元数据，不是检索 filter 主条件。
 
-- dense 分支负责语义召回，优先保留“题目 + 考点”这类高语义密度内容。
-- sparse/BM25 分支负责术语锚点命中，优先保留“题目 + 得分点 + 关键词”。
-- `referenceContext` 和 `scoringPitfalls` 不再进入主检索表示，而是留给 rerank 和最终注入，避免把长叙事噪音直接送入召回阶段。
+## 5. 检索请求编译口径
 
-对应的数据流如下：
+### 5.1 检索不是总会触发
 
-```mermaid
-flowchart TD
-    DOC["单张题卡 KnowledgeDocument<br/>questionText / intentConcept / referenceContext /<br/>scoringKeyPoints / scoringPitfalls /<br/>followUpIds / domainCode / questionType / difficulty / keywords"]
+`RagPlanCompiler` 会先读取 `DecisionExecutionPlan` 中的 `retrievalPlans`，再决定是否生成可执行检索请求。
 
-    DENSE["Dense 表示<br/>questionText + intentConcept"]
-    SPARSE["Sparse 表示<br/>questionText + scoringKeyPoints + keywords"]
-    PAYLOAD["Payload 保留完整业务字段<br/>question_text / intent_concept / reference_context /<br/>scoring_key_points / scoring_pitfalls /<br/>follow_up_ids / domain_code / question_type / difficulty / keywords / source / active / version"]
+当前规则是：
 
-    POINT["Qdrant Point<br/>稳定 point id + dense vector + sparse document + payload"]
-    HIT["SearchHit / Candidate<br/>从 payload 还原题卡候选"]
-    RERANKDOC["Rerank 文档视图<br/>题目 + 考点 + 语境 + 关键点 + 误区"]
-    OUT["RagContext<br/>retrievedMaterials / followUpCandidates / retrievalAudit / contextText"]
-    PROMPT["QuestionGenerationInput.RetrievalContext"]
+- `PRINCIPLE`
+- `SCENARIO`
+- `BEHAVIORAL`
+- `PROJECT_DEEP_DIVE`
 
-    DOC --> DENSE
-    DOC --> SPARSE
-    DOC --> PAYLOAD
-    DENSE --> POINT
-    SPARSE --> POINT
-    PAYLOAD --> POINT
-    POINT --> HIT
-    HIT --> RERANKDOC
-    HIT --> OUT
-    RERANKDOC --> OUT
-    OUT --> PROMPT
-```
+这几类题型只有在存在 `retrievalPlans` 时才触发检索；否则直接返回 `shouldRetrieve=false` 的空请求。
 
-### 4.3 原生 Qdrant Hybrid 入库
+### 5.2 语义视图和词法视图已经拆开
 
-当前入库链路已经从旧的通用存储抽象切换为 **Qdrant 原生 Java Client**。入库过程包括：
+当前 `RagRetrievalRequest` 的关键字段语义如下：
 
-1. 对题卡的 dense 表示调用 embedding 模型。
-2. 生成 named dense vector。
-3. 生成 named sparse document，模型标记为 `qdrant/bm25`。
-4. 组装 payload 元数据。
-5. 通过原生 `upsertAsync` 写入 hybrid collection。
+- `queryText`：上游给出的独立、完整、自然语言语义查询
+- `denseQueryText`：dense 执行层使用的文本；当前编译器直接把它设为 `queryText`
+- `sparseQueryText`：由 `keywordHints` 去重后拼接得到的 BM25 输入
+- `keywordQueries`：去重后的 sparse 术语锚点列表
+- `difficultyHint`：开启配置时参与 difficulty window 硬过滤
 
-当前 collection schema 采用：
+现行编译结果已经不再把题型、难度说明、锚点标签拼进 rerank query。检索链路里真正被拆开的，是“语义查询”和“词法锚点”这两个视图。
 
-- collection 名称：`interview_knowledge_hybrid`
-- dense named vector：`dense`
-- sparse named vector：`bm25`
-- payload index：`question_type`、`active`
+## 6. 检索执行链路
 
-其中 `domain_code` payload 仍保留在 schema 与 payload 中，用于数据完整性、下游消费和结果展示；但它不再承担召回、rerank 或后置护栏语义。
+### 6.1 双路召回
 
-## 5. 检索执行链路设计
+`RagRetrievalServiceImpl` 的主链路是：
 
-### 5.1 从评估决策到可执行检索请求
+1. `QdrantHybridQueryExecutor.denseRecall(request)`
+2. `QdrantHybridQueryExecutor.sparseRecall(request)`
+3. `RrfFusion.fuse(...)`
+4. `ragRerankService.rerank(...)`
+5. `applyHardGuardrails(...)`
+6. 构造 `RagContext`
 
-面试系统不会无条件触发检索。当前 `RagPlanCompiler` 会先把评估决策层给出的 `retrievalPlans` 编译成 `RagRetrievalRequest`，再由检索层执行。
+其中：
 
-当前编译输出的核心字段包括：
+- dense 分支对 `denseQueryText` 做 embedding，然后查 named dense vector
+- sparse 分支对 `sparseQueryText` 走 `qdrant/bm25`
+- 如果 `sparseQueryText` 为空，sparse 分支直接返回空列表，不会额外伪造请求
 
-- `shouldRetrieve`
-- `questionType`
-- `queryText`
-- `denseQueryText`
-- `sparseQueryText`
-- `keywordQueries`
-- `focusPoint`
-- `difficultyHint`
-- `domainCode`
-- `projectName`
+### 6.2 dense 和 sparse 共用同一套基础过滤
 
-当前编译规则是：
-
-- `denseQueryText = queryText`
-- `sparseQueryText = keywordHints join`
-- `keywordHints` 为空时，允许 sparse 分支为空，但 dense 分支仍可执行
-- `shouldRetrieve=false` 时，整个检索层直接短路
-
-也就是说，系统已经把“是否检索、检索什么、稠密查什么、稀疏查什么”从业务逻辑里抽出来，形成了独立的请求编译层。
-
-### 5.2 双路独立召回，而不是单路裁剪
-
-当前检索执行采用两条独立分支：
-
-- **Dense Recall**
-  将 `denseQueryText` 做 embedding 后，搜索 named dense vector。
-
-- **Sparse/BM25 Recall**
-  将 `sparseQueryText` 作为 BM25 文本查询，搜索 named sparse vector。
-
-当前召回阶段只保留两类低误伤过滤条件：
+当前 `QdrantHybridQueryExecutor.buildBaseFilter()` 只拼 3 类条件：
 
 - `active=true`
-- `questionType`
+- 标准化后的 `question_type`
+- 可选的 difficulty window
 
-`domainCode` 当前不参与召回阶段 filter，也不参与后置护栏或 rerank。它仅作为题卡与结果的展示元数据保留。
+这里有两个必须强调的事实：
 
-### 5.3 单次请求执行时序
+1. `PROJECT_DEEP_DIVE` 会在语料过滤前标准化成 `PROJECT`
+2. `domainCode` 不参与现行召回过滤
 
-```mermaid
-sequenceDiagram
-    participant QS as QuestionStreamService
-    participant RPC as RagPlanCompiler
-    participant RRS as RagRetrievalServiceImpl
-    participant QE as QdrantHybridQueryExecutor
-    participant QD as Qdrant
-    participant RRF as RrfFusion
-    participant RR as DashScopeRagRerankService
-    participant QGI as QuestionGenerationInput
+### 6.3 difficulty window 已经是统一的硬过滤
 
-    QS->>RPC: compile(NextQuestionPlan, positionCode, experienceLevel)
-    RPC-->>QS: RagRetrievalRequest
-    alt shouldRetrieve = false
-        QS-->>QGI: 空 RagContext
-    else shouldRetrieve = true
-        QS->>RRS: retrieve(request)
-        RRS->>QE: denseRecall(request)
-        QE->>QD: dense query(active + questionType)
-        QD-->>QE: dense hits
-        QE-->>RRS: dense hits
+只要 `rag.difficulty-window-enabled=true` 且请求带有有效 `difficultyHint`，当前实现就会先用 `DifficultyWindowResolver` 解析出窗口，再把它同时加到 dense/sparse 两路查询的 filter 中。
 
-        RRS->>QE: sparseRecall(request)
-        QE->>QD: sparse query(active + questionType)
-        QD-->>QE: sparse hits
-        QE-->>RRS: sparse hits
+当前映射规则是：
 
-        RRS->>RRF: fuse(denseIds, sparseIds)
-        RRF-->>RRS: fused scores
+- `L1 -> [L1, L2]`
+- `L2 -> [L1, L2, L3]`
+- `L3 -> [L2, L3, L4]`
+- `L4 -> [L3, L4, L5]`
+- `L5 -> [L4, L5]`
 
-        RRS->>RR: rerank(request, fused candidates)
-        RR-->>RRS: rerank scores
+这已经不是“给 rerank 的附加提示”，而是召回阶段的统一过滤条件。
 
-        RRS->>RRS: applyHardGuardrails()
-        RRS-->>QS: RagContext(retrievedMaterials + retrievalAudit)
-        QS-->>QGI: buildRetrievalContext(plan, ragContext)
-    end
-```
+## 7. 融合、重排与护栏
 
-这条链路的关键点在于：dense 与 sparse 不是主辅关系，而是两条平行证据源。真正的排序结果由后续融合、重排和护栏共同决定。
+### 7.1 RRF 负责把双路证据并入同一排序空间
 
-## 6. 融合、重排与护栏机制
+`RrfFusion` 当前接收 dense 与 sparse 的题卡 ID 序列，输出融合后的分数列表。`RagRetrievalServiceImpl` 再基于这个结果恢复候选池顺序。
 
-### 6.1 RRF：让双路证据进入统一排序空间
+这一步的价值是：
 
-当前系统使用纯 Java 实现的 **Reciprocal Rank Fusion（RRF）** 对 dense 与 sparse 两路结果进行融合。其目的不是取代 rerank，而是先完成一轮轻量、稳定、可审计的双路合并。
+- dense/sparse 双命中的题卡会更稳定地进入前排
+- 某一路弱、另一路强的题卡也不会被提前误杀
+- 融合逻辑纯本地、可测且确定
 
-这一步的价值在于：
+### 7.2 rerank 当前只消费语义查询与题卡核心文本
 
-- 同时被 dense 和 sparse 命中的题卡，会获得更稳定的前排位置。
-- dense 强但 sparse 弱，或 sparse 强但 dense 弱的题卡，也仍有机会进入候选池。
-- 融合逻辑不依赖外部服务，具备确定性和可测性。
+`DashScopeRagRerankService` 当前会调用 `RagRerankInputBuilder` 构造 query 与 document：
 
-### 6.2 商业 rerank：把最终排序交给更强的语义排序器
+- query 侧使用语义查询文本
+- document 侧按“题目、考点、语境、关键点、误区”的顺序拼接候选内容
 
-在 RRF 之后，系统会调用 DashScope 商业 rerank 服务做最终排序。当前 rerank query brief 会带上：
+这意味着现行 rerank 不再把题型说明、难度说明或 BM25 锚点标签拼成一段 query brief 发送给外部排序器。
 
-- 题型
-- 语义查询（denseQueryText / queryText）
-- 术语查询（sparseQueryText）
-- 焦点（focusPoint）
-- 关键词（keywordQueries）
-- 目标难度（difficultyHint）
+如果 DashScope rerank 失败，当前实现会记录 warning，并回退到 fusion 排序结果，不阻断主链路。
 
-进入 rerank 的候选文档会带上：
+### 7.3 硬护栏负责最后的业务收口
 
-- 题目
-- 考点
-- 语境
-- 关键点
-- 误区
+`applyHardGuardrails(...)` 的当前逻辑很直接：
 
-也就是说，当前 rerank 不只是对“标题”做排序，而是对题卡的核心语义结构进行再判断。
+- 目标是行为题时，只保留 `BEHAVIORAL`
+- 目标是项目题时，只保留 `PROJECT`
+- 其他题型要求候选题型与目标题型一致
 
-### 6.3 程序硬护栏：保证结果不发生明显题型漂移
+这一步的作用不是提升“相关度”，而是防止最终注入结果在业务上明显跑偏。
 
-如果说 RRF 与 rerank 负责“找得准”，那么硬护栏负责“不能错得离谱”。
+## 8. RagContext 输出与主链路集成
 
-当前主要护栏规则包括：
+### 8.1 输出已经是结构化上下文
 
-- **行为题护栏**
-  最终候选必须是 `BEHAVIORAL`，防止行为题被技术题污染。
-
-- **项目题护栏**
-  最终候选必须是 `PROJECT`。
-
-- **其他题型护栏**
-  候选题型必须与目标题型一致。
-
-这意味着当前系统采取的是：
-
-**召回阶段尽量保守放宽，最终注入阶段严格收口。**
-
-这是一个典型的“高召回 + 题型收口”工程策略，适合面试出题这种不能明显跑偏的业务。
-
-## 7. 与出题主链路的集成方式
-
-当前 RAG 不是孤立服务，而是嵌入在 `QuestionStreamService` 的主流程中。典型过程是：
-
-1. 评估上一题回答，得到 `NextQuestionPlan`
-2. 安全调用 RAG 检索
-3. 将结果构造成 `QuestionGenerationInput`
-4. 交给 AI 出题生成
-
-当前实现有两个重要工程点：
-
-- **RAG 失败不阻断主链路**
-  如果 `rag.enabled=false`、检索异常、无命中或任一阶段出错，系统都会回退到空 `RagContext`，题目生成流程继续执行。
-
-- **RAG 结果是结构化输入，而不是拼接字符串黑箱**
-  `QuestionGenerationInput.RetrievalContext` 当前会同时携带：
-  - retrievalPlans
-  - retrievedMaterials
-  - followUpCandidates
-  - retrievalAudit
-  - summary
-
-这使得生成链路既能消费知识内容，也能消费检索审计信息和追问候选。
-
-当前 `RagContext` 输出的关键结果包括：
+`RagContext` 当前会输出：
 
 - `summary`
 - `contextText`
 - `retrievedMaterials`
 - `followUpCandidates`
 - `retrievalAudit`
+- `hitCount`
+- `empty`
 
-其中 `retrievalAudit` 已具备完整的链路可观测字段：
+其中 `retrievedMaterials` 仍保留完整题卡关键字段，出题链路不需要重新解析纯文本。
 
+### 8.2 检索审计已经覆盖主要阶段
+
+当前 `retrievalAudit` 的字段包括：
+
+- `retrievalTriggered`
 - `denseCandidateCount`
 - `sparseCandidateCount`
+- `difficultyWindowApplied`
+- `difficultyWindowValues`
 - `fusionTopQuestionIds`
 - `rerankPreTopQuestionIds`
 - `rerankPostTopQuestionIds`
 - `injectedQuestionIds`
 
-这使得 RAG 不再是“黑盒检索”，而是一个可以回放、观察和调试的中间层。
+更关键的是，`RagRetrievalServiceImpl` 在异常路径中也会尽量保留已经累计到的审计状态，而不是统一抹成全空骨架。这让排障时可以区分“某阶段没跑到”和“某阶段跑过但后续失败”。
 
-## 8. 工程实现亮点与可运维性
+### 8.3 RAG 结果通过 `QuestionGenerationInput.RetrievalContext` 注入主链路
 
-从评审视角看，当前实现不仅有算法链路，还有较完整的工程控制面。
+`QuestionStreamService.buildRetrievalContext(...)` 当前会把以下内容打包进出题输入：
 
-### 8.1 启停与兼容
+- `retrievalPlans`
+- `retrievedMaterials`
+- `followUpCandidates`
+- `retrievalAudit`
+- `summary`
 
-- `rag.enabled=false` 时，系统自动切换到 `NoopRagRetrievalService`
-- 出题主链路保持向后兼容，不会因为未启用 Qdrant 而崩溃
+这意味着出题主链路拿到的不是“拼接好的一个大字符串”，而是一份可供 Prompt、日志和调试同时消费的结构化上下文。
 
-### 8.2 Schema 自动初始化
+## 9. 工程与运维观察
 
-- 应用启动时可根据配置自动初始化 hybrid collection
-- 可通过 `initializeSchema` 控制是否由应用负责建库
+### 9.1 降级路径清晰
 
-### 8.3 配置化检索能力
+- `rag.enabled=false` 时，系统旁路到空 `RagContext`
+- 检索异常时，系统也返回空结果，但不阻断出题
+- rerank 失败时只回退排序，不直接中断检索
 
-当前可配置项包括：
+### 9.2 当前关键配置项已经集中在 `rag.*`
 
-- `collectionName`
-- `denseVectorName`
-- `denseVectorSize`
-- `sparseVectorName`
-- `denseTopK`
-- `sparseTopK`
-- `fusionTopK`
-- `topK`
-- `minScore`
-- rerank endpoint / model / timeout / topN
+现行高相关配置包括：
 
-这意味着当前方案不是写死在代码里的实验，而是具备一定运维调优能力的工程实现。
+- `rag.collection-name`
+- `rag.dense-vector-name`
+- `rag.sparse-vector-name`
+- `rag.dense-top-k`
+- `rag.sparse-top-k`
+- `rag.fusion-top-k`
+- `rag.top-k`
+- `rag.min-score`
+- `rag.difficulty-window-enabled`
+- `rag.rerank.*`
 
-### 8.4 管理端导入能力
+这使得召回规模、融合规模、最终注入规模和 difficulty filter 开关都能通过配置控制。
 
-当前已经提供内部管理端接口：
+### 9.3 测试保护已经从“结果大概对”转向“契约明确”
 
-- `POST /api/v1/admin/knowledge/ingest`
-- `POST /api/v1/admin/knowledge/import-jsonl`
+当前高相关测试主要锁这些边界：
 
-这让知识库更新不依赖手工改代码，而可以通过结构化导入流程完成。
+- retrieval plan 的字段语义
+- prompt 是否明确要求自然语言 query 与 keyword hints 分离
+- difficulty window 的解析与过滤
+- rerank 输入构造
+- audit 字段输出
+- `QuestionStreamService` 对检索上下文的组装
 
-### 8.5 Cutover Runbook
+这类测试更适合保护接口边界和实现口径，不再依赖模糊的主观质量判断。
 
-当前还提供了独立 runbook，用于指导：
+## 10. 当前边界
 
-- 新 collection 创建
-- schema 验证
-- 数据重建
-- 切换默认 collection
-- 删除旧 collection 前确认
+现行实现已经稳定，但边界也必须说清楚：
 
-这说明方案已经考虑了从“功能开发”走向“真实切换”的运维路径。
-
-## 9. 测试与验证
-
-当前实现没有把主观质量判断混入正确性测试，而是采用**确定性契约测试 + 链路回归测试**的组合。
-
-核心覆盖点包括：
-
-- 配置与 schema 初始化
-- dense/sparse 文本构造
-- 原生 Qdrant 入库映射
-- JSONL 导入校验
-- 检索请求编译
-- RRF 融合逻辑
-- 检索服务 orchestrator
-- 审计字段输出
-- RAG 结果注入出题输入
-- 回答提交到下一题生成的决策主链路
-
-这种测试策略的价值是：
-
-- 正确性判断基于明确契约，而不是作者主观阈值
-- 可以稳定保护当前实现边界
-- 不会因为外部 embedding 波动或小样本噪音，把工程回归测试做成随机红灯
-
-换句话说，当前实现已经具备**可维护的工程回归保护**，而不是只靠人工点点看结果。
-
-## 10. 当前边界与后续演进
-
-当前实现已经形成完整链路，但并不假装“已经最终最优”。从工程诚实性出发，当前边界包括：
-
-1. **字段拆分仍是当前合理默认，不是最终最优解**
-   当前 dense/sparse 字段职责已经收紧，但是否最优，仍可通过后续消融评估继续验证。
-
-2. **`domainCode` 当前是纯元数据**
-   当前仅在 payload、返回结果、审计和展示中保留 `domainCode`，不参与召回 filter、rerank 或硬护栏。
-
-3. **主观质量评估体系尚未单独建设**
-   当前已删除历史上混杂主观阈值的评测夹具，后续如果要做更专业的 RAG 评估，应独立建设数据集和指标体系，而不是混入代码正确性测试。
-
-4. **最终生产 cutover 仍需人工执行**
-   现有 runbook 已具备，但旧 collection 删除等动作必须人工确认后执行。
-
-这些边界不是缺陷掩饰，而是当前系统对“已完成实现”和“后续演进空间”的清晰划分。
+1. `domainCode` 仍在 payload 与结构化结果中保留，但不是当前检索 filter 的组成部分。
+2. sparse 分支是否充分利用现有词法锚点，后续仍可继续做消融评估；但当前职责边界已经明确，不能再把 dense/rerank 与词法标签混写。
+3. 当前文档只描述仓库内主链路，不把历史计划、旧实验路径或废弃字段当成现行实现的一部分。
 
 ## 11. 结论
 
-当前面试 RAG 实现已经不再是一个简单的“向量检索插件”，而是一条完整落地的出题知识支撑链路。它具备以下几个核心特征：
+当前面试 RAG 的核心价值，不是“用了 hybrid 检索”，而是把**检索视图拆分、统一过滤、融合重排、业务护栏和结构化审计**做成了一条真实可运行的中间层。
 
-- **链路完整**：从题卡入库、检索请求编译、双路召回、融合、重排、护栏到出题输入注入，形成了闭环。
-- **工程可控**：具备配置开关、自动 schema、导入接口、runbook 和回退路径。
-- **业务约束明确**：通过题型护栏把 RAG 从“能检索”提升到“适合面试出题”。
-- **结果可审计**：通过 `retrievalAudit` 记录每个阶段的候选规模与 top ids，使检索结果具备可观察性和可回放性。
+这条链路已经具备三个工程特征：
 
-从技术评审角度看，这套实现的价值不只是“用了 hybrid 检索”，而是把 hybrid retrieval、rerank、业务护栏和主链路集成做成了一个**可运行、可维护、可扩展的面试出题基础设施**。
+- 可以观察：审计字段足以回放主要阶段
+- 可以降级：检索和 rerank 失败都不会直接打断出题
+- 可以继续演进：语义查询、词法锚点、难度过滤和题型护栏的职责边界已经明显清晰于旧实现
