@@ -88,7 +88,7 @@ public class RagPlanCompiler {
      *
      * <p>检索条件判断：
      * <ul>
-     *   <li>PRINCIPLE/SCENARIO/BEHAVIORAL/PROJECT_DEEP_DIVE 这几类题型只有存在 retrievalPlans 才检索</li>
+     *   <li>PRINCIPLE/SCENARIO/BEHAVIORAL/PROJECT_DEEP_DIVE 题型：只有存在 retrievalPlans 才检索</li>
      * </ul>
      *
      * @param questionType 标准化后的题型
