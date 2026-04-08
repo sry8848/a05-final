@@ -1,0 +1,40 @@
+flowchart LR
+    subgraph A["知识侧"]
+        DS["题卡数据源(JSONL / 管理端导入)"]
+        ING["KnowledgeIngestionService\n原生 Qdrant upsert"]
+        DS --> ING
+    end
+
+    subgraph B["存储侧"]
+        COL["Qdrant Hybrid Collection\n dense: dense\n sparse: bm25\n payload: 题卡元数据"]
+    end
+
+    subgraph C["检索侧"]
+        COMP["RagPlanCompiler\n编译 shouldRetrieve / queryText /\ndenseQueryText / sparseQueryText"]
+        DENSE["Dense Recall\nQdrantHybridQueryExecutor"]
+        SPARSE["Sparse Recall\nQdrantHybridQueryExecutor"]
+        FUSION["RrfFusion\n双路结果融合"]
+        RERANK["DashScopeRagRerankService\n商业 rerank"]
+        GUARD["Hard Guardrails\n题型 / 项目 / 行为题护栏"]
+        CTX["RagContext\nsummary / retrievedMaterials /\nfollowUpCandidates / retrievalAudit"]
+    end
+
+    subgraph D["业务侧"]
+        DECIDE["评估决策 / NextQuestionPlan"]
+        QGS["QuestionStreamService\nbuildGenInput"]
+        GEN["AI 出题生成"]
+    end
+
+    ING --> COL
+    DECIDE --> COMP
+    COMP --> DENSE
+    COMP --> SPARSE
+    DENSE --> COL
+    SPARSE --> COL
+    DENSE --> FUSION
+    SPARSE --> FUSION
+    FUSION --> RERANK
+    RERANK --> GUARD
+    GUARD --> CTX
+    CTX --> QGS
+    QGS --> GEN

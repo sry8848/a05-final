@@ -113,6 +113,83 @@ class ProfileServiceTest {
     }
 
     @Test
+    void getSkillOverview_shouldIgnoreLegacyFrontendDomainCodesAndKeepCurrentDomainsOnly() {
+        UserMapper userMapper = mock(UserMapper.class);
+        InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
+        InterviewReportMapper reportMapper = mock(InterviewReportMapper.class);
+        PositionService positionService = mock(PositionService.class);
+        InterviewSessionStatusService statusService = mock(InterviewSessionStatusService.class);
+        ProfileAvatarStorageConfig storageConfig = new ProfileAvatarStorageConfig();
+        ProfileService service = new ProfileService(
+                userMapper, sessionMapper, reportMapper, positionService, storageConfig, statusService
+        );
+
+        List<InterviewSession> sessions = List.of(
+                buildSession(1L, "FRONTEND", "professional", LocalDateTime.of(2026, 3, 1, 10, 0), 30),
+                buildSession(2L, "FRONTEND", "professional", LocalDateTime.of(2026, 3, 2, 10, 0), 30),
+                buildSession(3L, "FRONTEND", "professional", LocalDateTime.of(2026, 3, 3, 10, 0), 30)
+        );
+        when(sessionMapper.selectList(any())).thenReturn(sessions);
+        when(positionService.listSkillDomainEntities("FRONTEND")).thenReturn(List.of(
+                buildDomainEntity("FRONTEND", "browser_runtime", "浏览器运行时"),
+                buildDomainEntity("FRONTEND", "ui_foundation", "HTML / CSS / UI 基础"),
+                buildDomainEntity("FRONTEND", "react", "React 生态")
+        ));
+
+        InterviewReport r1 = new InterviewReport();
+        r1.setSessionId(1L);
+        r1.setSkillDomainScores(List.of(
+                Map.of("domainCode", "browser", "domainName", "浏览器原理", "score", 20, "commentary", "旧域数据，不应继续参与聚合"),
+                Map.of("domainCode", "browser_runtime", "domainName", "浏览器运行时", "score", 62, "commentary", "事件循环回答基本准确"),
+                Map.of("domainCode", "ui_foundation", "domainName", "HTML / CSS / UI 基础", "score", 55, "commentary", "表单语义化解释偏浅")
+        ));
+
+        InterviewReport r2 = new InterviewReport();
+        r2.setSessionId(2L);
+        r2.setSkillDomainScores(List.of(
+                Map.of("domainCode", "browser_runtime", "domainName", "浏览器运行时", "score", 70, "commentary", "回流重绘链路更完整"),
+                Map.of("domainCode", "ui_foundation", "domainName", "HTML / CSS / UI 基础", "score", 60, "commentary", "无障碍意识有提升"),
+                Map.of("domainCode", "react", "domainName", "React 生态", "score", 58, "commentary", "Hooks 依赖项分析仍有遗漏")
+        ));
+
+        InterviewReport r3 = new InterviewReport();
+        r3.setSessionId(3L);
+        r3.setSkillDomainScores(List.of(
+                Map.of("domainCode", "browser_runtime", "domainName", "浏览器运行时", "score", 78, "commentary", "渲染机制讲解清晰"),
+                Map.of("domainCode", "react", "domainName", "React 生态", "score", 64, "commentary", "状态与副作用表达更稳定")
+        ));
+        when(reportMapper.selectList(any())).thenReturn(List.of(r1, r2, r3));
+
+        SkillOverviewDto dto = service.getSkillOverview(9L, "FRONTEND");
+
+        assertEquals("FRONTEND", dto.getPositionCode());
+        assertEquals(3, dto.getDomains().size());
+        assertTrue(dto.getDomains().stream().noneMatch(item -> "browser".equals(item.getDomainCode())));
+
+        var browserRuntime = dto.getDomains().stream()
+                .filter(item -> "browser_runtime".equals(item.getDomainCode()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("浏览器运行时", browserRuntime.getDomainName());
+        assertEquals(BigDecimal.valueOf(70.0), browserRuntime.getScore());
+        assertEquals(3, browserRuntime.getAppearanceCount());
+
+        var uiFoundation = dto.getDomains().stream()
+                .filter(item -> "ui_foundation".equals(item.getDomainCode()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(BigDecimal.valueOf(57.5), uiFoundation.getScore());
+        assertEquals(2, uiFoundation.getAppearanceCount());
+
+        var react = dto.getDomains().stream()
+                .filter(item -> "react".equals(item.getDomainCode()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(BigDecimal.valueOf(61.0), react.getScore());
+        assertEquals(2, react.getAppearanceCount());
+    }
+
+    @Test
     void getSkillOverview_shouldAggregateRecentEightSessionsAndBuildRankingsAndTrends() {
         UserMapper userMapper = mock(UserMapper.class);
         InterviewSessionMapper sessionMapper = mock(InterviewSessionMapper.class);
@@ -448,8 +525,12 @@ class ProfileServiceTest {
     }
 
     private PositionSkillDomain buildDomainEntity(String code, String name) {
+        return buildDomainEntity("JAVA_BACKEND", code, name);
+    }
+
+    private PositionSkillDomain buildDomainEntity(String positionCode, String code, String name) {
         PositionSkillDomain entity = new PositionSkillDomain();
-        entity.setPositionCode("JAVA_BACKEND");
+        entity.setPositionCode(positionCode);
         entity.setDomainCode(code);
         entity.setDomainName(name);
         entity.setVersion(1);

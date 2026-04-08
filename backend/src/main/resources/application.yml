@@ -61,8 +61,7 @@ spring:
           model: ${OPENAI_EMBEDDING_MODEL:text-embedding-v4}
 
 
-  # Qdrant 向量数据库配置（被 spring-ai-qdrant-store 自动读取）
-  # 当 RagConfiguration 检测到 rag.enabled=true 时才会初始化连接，否则跳过相关 Bean
+  # Qdrant 连接仍由 RagConfiguration 按需创建；hybrid collection/schema 由原生 QdrantClient 管理
 
 server:
   port: 8080
@@ -136,8 +135,15 @@ rag:
   min-score: ${RAG_MIN_SCORE:0.65}
   host: ${QDRANT_HOST:localhost}
   port: ${QDRANT_PORT:6334}
-  collection-name: ${QDRANT_COLLECTION:interview_knowledge}
+  collection-name: ${QDRANT_COLLECTION:interview_knowledge_hybrid}
   initialize-schema: true
+  dense-vector-name: ${QDRANT_DENSE_VECTOR_NAME:dense}
+  dense-vector-size: ${QDRANT_DENSE_VECTOR_SIZE:1024}
+  sparse-vector-name: ${QDRANT_SPARSE_VECTOR_NAME:bm25}
+  dense-top-k: ${RAG_DENSE_TOP_K:20}
+  sparse-top-k: ${RAG_SPARSE_TOP_K:20}
+  fusion-top-k: ${RAG_FUSION_TOP_K:20}
+  difficulty-window-enabled: ${RAG_DIFFICULTY_WINDOW_ENABLED:false}
   # init-sample-data=true 时会在启动时向 Qdrant 插入示例知识条目（仅用于开发测试）
   init-sample-data: ${RAG_INIT_SAMPLE:false}
   rerank:

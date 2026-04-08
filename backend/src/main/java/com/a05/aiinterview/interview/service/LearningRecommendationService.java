@@ -5,15 +5,19 @@ import com.a05.aiinterview.interview.entity.InterviewReport;
 import com.a05.aiinterview.interview.entity.InterviewSession;
 import com.a05.aiinterview.interview.mapper.InterviewReportMapper;
 import com.a05.aiinterview.interview.mapper.InterviewSessionMapper;
+import com.a05.aiinterview.position.entity.PositionSkillDomain;
+import com.a05.aiinterview.position.service.PositionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -27,6 +31,7 @@ public class LearningRecommendationService {
 
     private final InterviewSessionMapper interviewSessionMapper;
     private final InterviewReportMapper interviewReportMapper;
+    private final PositionService positionService;
 
     @Value("${learning.recommendation.enabled:true}")
     private boolean recommendationEnabled;
@@ -57,8 +62,9 @@ public class LearningRecommendationService {
     }
 
     private List<LearningRecommendationDto.Section> buildSections(InterviewReport report, InterviewSession session) {
+        Map<String, PositionSkillDomain> allowedDomains = loadAllowedDomains(session.getPositionCode());
         int limit = Math.max(topK, 1);
-        List<DomainCandidate> weakestDomains = extractWeakestDomains(report, limit);
+        List<DomainCandidate> weakestDomains = extractWeakestDomains(report, limit, allowedDomains);
 
         List<LearningRecommendationDto.Section> sections = new ArrayList<>();
 
@@ -217,23 +223,53 @@ public class LearningRecommendationService {
         return items;
     }
 
-    private List<DomainCandidate> extractWeakestDomains(InterviewReport report, int limit) {
+    private List<DomainCandidate> extractWeakestDomains(
+            InterviewReport report,
+            int limit,
+            Map<String, PositionSkillDomain> allowedDomains) {
         if (report.getSkillDomainScores() == null || report.getSkillDomainScores().isEmpty()) {
             return List.of();
         }
 
         return report.getSkillDomainScores().stream()
-                .map(this::toDomainCandidate)
+                .map(scoreMap -> toDomainCandidate(scoreMap, allowedDomains))
+                .filter(java.util.Objects::nonNull)
                 .sorted(Comparator.comparingDouble(DomainCandidate::score))
                 .limit(Math.max(limit, 1))
                 .toList();
     }
 
-    private DomainCandidate toDomainCandidate(Map<String, Object> scoreMap) {
+    private DomainCandidate toDomainCandidate(
+            Map<String, Object> scoreMap,
+            Map<String, PositionSkillDomain> allowedDomains) {
         String domainCode = asString(scoreMap.get("domainCode"), "general");
-        String domainName = asString(scoreMap.get("domainName"), domainCode);
+        PositionSkillDomain allowedDomain = allowedDomains.get(domainCode);
+        if (!allowedDomains.isEmpty() && allowedDomain == null) {
+            return null;
+        }
+        String domainName = allowedDomain != null
+                ? allowedDomain.getDomainName()
+                : asString(scoreMap.get("domainName"), domainCode);
         double score = asDouble(scoreMap.get("score"), 70D);
         return new DomainCandidate(domainCode, domainName, score);
+    }
+
+    private Map<String, PositionSkillDomain> loadAllowedDomains(String positionCode) {
+        if (!StringUtils.hasText(positionCode)) {
+            return Map.of();
+        }
+        List<PositionSkillDomain> entities = positionService.listSkillDomainEntities(positionCode);
+        if (entities == null || entities.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, PositionSkillDomain> map = new LinkedHashMap<>();
+        for (PositionSkillDomain entity : entities) {
+            if (entity == null || !StringUtils.hasText(entity.getDomainCode())) {
+                continue;
+            }
+            map.put(entity.getDomainCode(), entity);
+        }
+        return map;
     }
 
     private String buildSearchLink(String query) {

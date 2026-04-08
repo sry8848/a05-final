@@ -1,31 +1,37 @@
 package com.a05.aiinterview.rag.service;
 
-import com.a05.aiinterview.rag.config.RagProperties;
 import com.a05.aiinterview.rag.dto.KnowledgeDocument;
+import com.a05.aiinterview.rag.config.RagProperties;
+import com.google.common.util.concurrent.Futures;
+import io.qdrant.client.PointIdFactory;
+import io.qdrant.client.QdrantClient;
+import io.qdrant.client.grpc.Points;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.ai.document.Document;
-import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.embedding.EmbeddingModel;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
 
 @DisplayName("KnowledgeIngestionService tests")
 class KnowledgeIngestionServiceTest {
 
     @Test
-    @DisplayName("ingest should persist single-corpus interview card metadata and retrieval text")
-    void ingest_shouldPersistSingleCorpusInterviewCardMetadataAndRetrievalText() {
-        VectorStore vectorStore = mock(VectorStore.class);
-        KnowledgeIngestionService service = new KnowledgeIngestionService(vectorStore, new RagProperties());
+    @DisplayName("ingest should upsert hybrid point with dense vector sparse document and metadata")
+    void ingest_shouldUpsertHybridPointWithDenseVectorSparseDocumentAndMetadata() {
+        EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
+        QdrantClient qdrantClient = mock(QdrantClient.class);
+        RagProperties properties = new RagProperties();
+        KnowledgeIngestionService service = new KnowledgeIngestionService(embeddingModel, qdrantClient, properties);
 
         KnowledgeDocument document = KnowledgeDocument.builder()
                 .id("redis-cache-penetration-001")
@@ -44,51 +50,52 @@ class KnowledgeIngestionServiceTest {
                 .version("v1")
                 .build();
 
+        when(embeddingModel.embed(any(String.class))).thenReturn(new float[]{0.1f, 0.2f, 0.3f});
+        when(qdrantClient.upsertAsync(any(String.class), any(List.class)))
+                .thenReturn(Futures.immediateFuture(Points.UpdateResult.newBuilder().build()));
+
         int written = service.ingest(List.of(document));
 
         assertThat(written).isEqualTo(1);
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<Document>> captor = ArgumentCaptor.forClass(List.class);
-        verify(vectorStore).add(captor.capture());
+        ArgumentCaptor<List<Points.PointStruct>> captor = ArgumentCaptor.forClass(List.class);
+        verify(qdrantClient).upsertAsync(any(String.class), captor.capture());
 
-        List<Document> storedDocuments = captor.getValue();
-        assertThat(storedDocuments).hasSize(1);
+        List<Points.PointStruct> storedPoints = captor.getValue();
+        assertThat(storedPoints).hasSize(1);
 
-        Document stored = storedDocuments.getFirst();
+        Points.PointStruct stored = storedPoints.getFirst();
         assertThat(stored.getId())
-                .isEqualTo(UUID.nameUUIDFromBytes("redis-cache-penetration-001".getBytes()).toString());
-        assertThat(stored.getText())
+                .isEqualTo(PointIdFactory.id(UUID.nameUUIDFromBytes("redis-cache-penetration-001".getBytes())));
+        assertThat(stored.getVectors().getVectors().containsVectors("dense")).isTrue();
+        assertThat(stored.getVectors().getVectors().getVectorsOrThrow("dense").getDataList())
+                .containsExactly(0.1f, 0.2f, 0.3f);
+        assertThat(stored.getVectors().getVectors().containsVectors("bm25")).isTrue();
+        assertThat(stored.getVectors().getVectors().getVectorsOrThrow("bm25").hasDocument()).isTrue();
+        assertThat(stored.getVectors().getVectors().getVectorsOrThrow("bm25").getDocument().getModel()).isEqualTo("qdrant/bm25");
+        assertThat(stored.getVectors().getVectors().getVectorsOrThrow("bm25").getDocument().getText())
                 .contains("讲一下 Redis 缓存穿透")
-                .contains("考察空值缓存、布隆过滤器和数据库保护方案")
-                .contains("高并发查询不存在数据时")
-                .contains("缓存空对象")
+                .contains("Redis")
+                .contains("缓存穿透")
                 .contains("布隆过滤器")
-                .doesNotContain("混淆穿透和击穿");
+                .doesNotContain("高并发查询不存在数据时");
 
-        Map<String, Object> metadata = stored.getMetadata();
-        assertThat(metadata)
-                .containsEntry("question_id", "redis-cache-penetration-001")
-                .containsEntry("question_text", "讲一下 Redis 缓存穿透")
-                .containsEntry("intent_concept", "考察空值缓存、布隆过滤器和数据库保护方案")
-                .containsEntry("reference_context", "高并发查询不存在数据时，缓存层需要做兜底，避免数据库被持续打穿。")
-                .containsEntry("domain_code", "redis")
-                .containsEntry("question_type", "PRINCIPLE")
-                .containsEntry("difficulty", "L2")
-                .containsEntry("source", "manual_curated")
-                .containsEntry("active", true)
-                .containsEntry("version", "v1");
-        assertThat(metadata.get("scoring_key_points")).isEqualTo(List.of("缓存空对象", "布隆过滤器", "方案局限性"));
-        assertThat(metadata.get("scoring_pitfalls")).isEqualTo(List.of("混淆穿透和击穿"));
-        assertThat(metadata.get("keywords")).isEqualTo(List.of("Redis", "缓存穿透", "布隆过滤器"));
-        assertThat(metadata.get("follow_up_ids")).isEqualTo(List.of("redis-bloom-filter-false-positive-001"));
+        assertThat(stored.getPayloadMap())
+                .containsKeys("question_id", "question_text", "intent_concept", "reference_context",
+                        "domain_code", "question_type", "difficulty", "source", "active", "version",
+                        "keywords", "scoring_key_points", "scoring_pitfalls", "follow_up_ids");
     }
 
     @Test
     @DisplayName("ingest should use stable uuid point ids derived from question id")
     void ingest_shouldUseStableUuidPointIdsDerivedFromQuestionId() {
-        VectorStore vectorStore = mock(VectorStore.class);
-        KnowledgeIngestionService service = new KnowledgeIngestionService(vectorStore, new RagProperties());
+        EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
+        QdrantClient qdrantClient = mock(QdrantClient.class);
+        when(embeddingModel.embed(any(String.class))).thenReturn(new float[]{0.1f, 0.2f});
+        when(qdrantClient.upsertAsync(any(String.class), any(List.class)))
+                .thenReturn(Futures.immediateFuture(Points.UpdateResult.newBuilder().build()));
+        KnowledgeIngestionService service = new KnowledgeIngestionService(embeddingModel, qdrantClient, new RagProperties());
 
         KnowledgeDocument first = KnowledgeDocument.builder()
                 .id("redis-cache-penetration-001")
@@ -118,20 +125,24 @@ class KnowledgeIngestionServiceTest {
         service.ingest(List.of(second));
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<Document>> captor = ArgumentCaptor.forClass(List.class);
-        verify(vectorStore, times(2)).add(captor.capture());
+        ArgumentCaptor<List<Points.PointStruct>> captor = ArgumentCaptor.forClass(List.class);
+        verify(qdrantClient, times(2)).upsertAsync(any(String.class), captor.capture());
 
-        List<List<Document>> allBatches = captor.getAllValues();
-        String expectedId = UUID.nameUUIDFromBytes("redis-cache-penetration-001".getBytes()).toString();
+        List<List<Points.PointStruct>> allBatches = captor.getAllValues();
+        Points.PointId expectedId = PointIdFactory.id(UUID.nameUUIDFromBytes("redis-cache-penetration-001".getBytes()));
         assertThat(allBatches.get(0).getFirst().getId()).isEqualTo(expectedId);
         assertThat(allBatches.get(1).getFirst().getId()).isEqualTo(expectedId);
     }
 
     @Test
-    @DisplayName("ingest should split large batches to satisfy embedding provider request limits")
-    void ingest_shouldSplitLargeBatchesToSatisfyEmbeddingProviderRequestLimits() {
-        VectorStore vectorStore = mock(VectorStore.class);
-        KnowledgeIngestionService service = new KnowledgeIngestionService(vectorStore, new RagProperties());
+    @DisplayName("ingest should split large batches to satisfy explicit hybrid upsert limits")
+    void ingest_shouldSplitLargeBatchesToSatisfyExplicitHybridUpsertLimits() {
+        EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
+        QdrantClient qdrantClient = mock(QdrantClient.class);
+        when(embeddingModel.embed(any(String.class))).thenReturn(new float[]{0.1f, 0.2f});
+        when(qdrantClient.upsertAsync(any(String.class), any(List.class)))
+                .thenReturn(Futures.immediateFuture(Points.UpdateResult.newBuilder().build()));
+        KnowledgeIngestionService service = new KnowledgeIngestionService(embeddingModel, qdrantClient, new RagProperties());
 
         List<KnowledgeDocument> documents = IntStream.range(0, 11)
                 .mapToObj(index -> KnowledgeDocument.builder()
@@ -155,8 +166,8 @@ class KnowledgeIngestionServiceTest {
         service.ingest(documents);
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<Document>> captor = ArgumentCaptor.forClass(List.class);
-        verify(vectorStore, times(2)).add(captor.capture());
+        ArgumentCaptor<List<Points.PointStruct>> captor = ArgumentCaptor.forClass(List.class);
+        verify(qdrantClient, times(2)).upsertAsync(any(String.class), captor.capture());
         assertThat(captor.getAllValues())
                 .extracting(List::size)
                 .containsExactly(10, 1);

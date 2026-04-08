@@ -6,6 +6,7 @@ import com.a05.aiinterview.rag.dto.RagRetrievalRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -16,6 +17,15 @@ class RagPlanCompilerTest {
     private final RagPlanCompiler compiler = new RagPlanCompiler();
 
     @Test
+    @DisplayName("rag retrieval request should not expose domainCode as executable retrieval input")
+    void ragRetrievalRequest_shouldNotExposeDomainCodeAsExecutableRetrievalInput() {
+        assertThat(Arrays.stream(RagRetrievalRequest.class.getDeclaredFields())
+                .map(field -> field.getName())
+                .toList())
+                .doesNotContain("domainCode");
+    }
+
+    @Test
     @DisplayName("principle retrieval plan should compile into executable request")
     void principlePlan_shouldCompileIntoExecutableRequest() {
         RagRetrievalRequest request = compiler.compile(
@@ -24,13 +34,9 @@ class RagPlanCompilerTest {
                         "HashMap扩容机制",
                         "",
                         List.of(retrievalPlan(
-                                "补充高频理论题问法和关键误区",
-                                "HashMap扩容机制",
-                                "Java HashMap 扩容机制 触发条件 2的幂 元素迁移 线程不安全",
+                                "寻找考察 Java HashMap 扩容触发条件、2 的幂容量设计与元素迁移机制的题目。",
                                 List.of("HashMap", "resize", "2的幂", "线程不安全"),
-                                "L2",
-                                List.of("触发条件", "元素迁移", "2的幂原因"),
-                                List.of("集合框架泛介绍")
+                                "L2"
                         ))
                 ),
                 "JAVA_BACKEND",
@@ -39,31 +45,24 @@ class RagPlanCompilerTest {
 
         assertThat(request.isShouldRetrieve()).isTrue();
         assertThat(request.getQuestionType()).isEqualTo("PRINCIPLE");
-        assertThat(request.getDisplayQuery()).isEqualTo("HashMap扩容机制");
-        assertThat(request.getQueryText()).contains("HashMap");
-        assertThat(request.getKeywordQueries()).contains("HashMap", "resize", "2的幂", "线程不安全");
-        assertThat(request.getMustHaveClues()).contains("触发条件", "元素迁移");
-        assertThat(request.getAvoidClues()).contains("集合框架泛介绍");
-        assertThat(request.getDifficultyHint()).isEqualTo("L2");
-        assertThat(request.getPreferredDifficultyLevels()).containsExactly("L1", "L2", "L3");
+        assertThat(request.getQueryText())
+                .isEqualTo("寻找考察 Java HashMap 扩容触发条件、2 的幂容量设计与元素迁移机制的题目。");
+        assertThat(request.getDenseQueryText()).isEqualTo(request.getQueryText());
+        assertThat(request.getSparseQueryText()).isEqualTo("HashMap resize 2的幂 线程不安全");
     }
 
     @Test
-    @DisplayName("behavioral retrieval plan should retrieve without technical domain binding")
-    void behavioralPlan_shouldRetrieveWithoutTechnicalDomainBinding() {
+    @DisplayName("behavioral retrieval plan should compile executable query texts")
+    void behavioralPlan_shouldCompileExecutableQueryTexts() {
         RagRetrievalRequest request = compiler.compile(
                 plan(
                         "BEHAVIORAL",
                         "讲一次和产品意见不一致的经历",
                         "",
                         List.of(retrievalPlan(
-                                "补充行为题高频问法和复盘追问角度",
-                                "与产品意见不一致",
-                                "行为面试 与产品意见不一致 冲突沟通 推进结果 复盘",
+                                "寻找行为面试中考察与产品意见不一致时如何沟通、推进和复盘的题目。",
                                 List.of("沟通", "推进", "冲突", "协作"),
-                                "L2",
-                                List.of("沟通动作", "推进过程", "结果复盘"),
-                                List.of("空泛价值观表态")
+                                "L2"
                         ))
                 ),
                 "JAVA_BACKEND",
@@ -72,13 +71,15 @@ class RagPlanCompilerTest {
 
         assertThat(request.isShouldRetrieve()).isTrue();
         assertThat(request.getQuestionType()).isEqualTo("BEHAVIORAL");
-        assertThat(request.getDomainCode()).isBlank();
-        assertThat(request.getKeywordQueries()).contains("沟通", "推进", "冲突", "协作");
+        assertThat(request.getQueryText())
+                .isEqualTo("寻找行为面试中考察与产品意见不一致时如何沟通、推进和复盘的题目。");
+        assertThat(request.getDenseQueryText()).isEqualTo(request.getQueryText());
+        assertThat(request.getSparseQueryText()).isEqualTo("沟通 推进 冲突 协作");
     }
 
     @Test
-    @DisplayName("project retrieval should be skipped when there is no explicit technical hook")
-    void projectPlanWithoutHook_shouldSkipRetrieval() {
+    @DisplayName("project retrieval should be skipped when there is no retrieval plan")
+    void projectPlanWithoutRetrievalPlan_shouldSkipRetrieval() {
         RagRetrievalRequest request = compiler.compile(
                 plan(
                         "PROJECT_DEEP_DIVE",
@@ -91,26 +92,24 @@ class RagPlanCompilerTest {
         );
 
         assertThat(request.isShouldRetrieve()).isFalse();
+        assertThat(request.getQuestionType()).isEqualTo("PROJECT_DEEP_DIVE");
         assertThat(request.getQueryText()).isBlank();
-        assertThat(request.getKeywordQueries()).isEmpty();
+        assertThat(request.getDenseQueryText()).isBlank();
+        assertThat(request.getSparseQueryText()).isBlank();
     }
 
     @Test
-    @DisplayName("project retrieval should be enabled when explicit technical hook exists")
-    void projectPlanWithHook_shouldRetrieve() {
+    @DisplayName("project retrieval should be enabled when retrieval plan exists")
+    void projectPlanWithRetrievalPlan_shouldRetrieve() {
         RagRetrievalRequest request = compiler.compile(
                 plan(
                         "PROJECT_DEEP_DIVE",
                         "Seata XID 丢失怎么修",
                         "订单系统",
                         List.of(retrievalPlan(
-                                "补充 Seata 项目链路里的技术钩子和修复问法",
-                                "Seata XID 丢失怎么修",
-                                "Seata AT 模式 Feign 调用 XID 丢失 Header 透传 拦截器修复",
+                                "寻找项目面试中考察 Seata AT 模式下 Feign 调用时 XID 丢失与 Header 透传修复的题目。",
                                 List.of("Seata", "XID", "Feign", "Header透传"),
-                                "L4",
-                                List.of("透传链路", "丢失位置", "拦截器修复"),
-                                List.of("Seata 基础定义")
+                                "L4"
                         ))
                 ),
                 "JAVA_BACKEND",
@@ -118,14 +117,16 @@ class RagPlanCompilerTest {
         );
 
         assertThat(request.isShouldRetrieve()).isTrue();
-        assertThat(request.getProjectName()).isEqualTo("订单系统");
-        assertThat(request.getKeywordQueries()).contains("Seata", "XID", "Feign", "Header透传");
-        assertThat(request.getPreferredDifficultyLevels()).containsExactly("L3", "L4", "L5");
+        assertThat(request.getQuestionType()).isEqualTo("PROJECT_DEEP_DIVE");
+        assertThat(request.getQueryText())
+                .isEqualTo("寻找项目面试中考察 Seata AT 模式下 Feign 调用时 XID 丢失与 Header 透传修复的题目。");
+        assertThat(request.getDenseQueryText()).isEqualTo(request.getQueryText());
+        assertThat(request.getSparseQueryText()).isEqualTo("Seata XID Feign Header透传");
     }
 
     @Test
-    @DisplayName("scenario retrieval should preserve explicit domain and neighbor difficulty range")
-    void scenarioPlan_shouldPreserveDomainAndNeighborDifficultyRange() {
+    @DisplayName("scenario retrieval should compile executable query texts")
+    void scenarioPlan_shouldCompileExecutableQueryTexts() {
         RagRetrievalRequest request = compiler.compile(
                 DecisionExecutionPlan.builder()
                         .targetQuestionType("SCENARIO")
@@ -133,13 +134,9 @@ class RagPlanCompilerTest {
                         .nextItemName("订单系统")
                         .targetDomainCode("distributed")
                         .retrievalPlans(List.of(retrievalPlan(
-                                "补充订单超时关闭的场景化追问和工程取舍",
-                                "订单超时关闭 幂等性 DB+MQ顺序",
-                                "订单超时关闭 幂等性 DB 和 MQ 顺序 事务状态机 消费重复",
+                                "寻找订单超时关闭场景下，考察幂等、DB 与 MQ 顺序一致性及事务状态机的题目。",
                                 List.of("订单超时关闭", "幂等", "DB+MQ", "顺序"),
-                                "L4",
-                                List.of("状态机", "消费幂等", "顺序错乱"),
-                                List.of("纯概念定义")
+                                "L4"
                         )))
                         .build(),
                 "JAVA_BACKEND",
@@ -147,8 +144,61 @@ class RagPlanCompilerTest {
         );
 
         assertThat(request.isShouldRetrieve()).isTrue();
-        assertThat(request.getDomainCode()).isEqualTo("distributed");
-        assertThat(request.getPreferredDifficultyLevels()).containsExactly("L3", "L4", "L5");
+        assertThat(request.getQuestionType()).isEqualTo("SCENARIO");
+        assertThat(request.getQueryText())
+                .isEqualTo("寻找订单超时关闭场景下，考察幂等、DB 与 MQ 顺序一致性及事务状态机的题目。");
+        assertThat(request.getDenseQueryText()).isEqualTo(request.getQueryText());
+        assertThat(request.getSparseQueryText()).isEqualTo("订单超时关闭 幂等 DB+MQ 顺序");
+    }
+
+    @Test
+    @DisplayName("empty keyword hints should still allow retrieval when query text exists")
+    void emptyKeywordHints_shouldStillRetrieve() {
+        RagRetrievalRequest request = compiler.compile(
+                plan(
+                        "SCENARIO",
+                        "缓存穿透的原理与防护",
+                        "",
+                        List.of(retrievalPlan(
+                                "寻找考察缓存穿透原理与防护方案的题目。",
+                                List.of(),
+                                "L3"
+                        ))
+                ),
+                "JAVA_BACKEND",
+                "JUNIOR"
+        );
+
+        assertThat(request.isShouldRetrieve()).isTrue();
+        assertThat(request.getQuestionType()).isEqualTo("SCENARIO");
+        assertThat(request.getQueryText()).isEqualTo("寻找考察缓存穿透原理与防护方案的题目。");
+        assertThat(request.getDenseQueryText()).isEqualTo(request.getQueryText());
+        assertThat(request.getSparseQueryText()).isBlank();
+    }
+
+    @Test
+    @DisplayName("focus point should not be appended into sparse query when keyword hints are empty")
+    void focusPoint_shouldNotBeAppendedIntoSparseQuery() {
+        RagRetrievalRequest request = compiler.compile(
+                plan(
+                        "SCENARIO",
+                        "Redis 热点 key 过期后的流量保护",
+                        "",
+                        List.of(retrievalPlan(
+                                "寻找考察缓存击穿后流量保护与回源控制的题目。",
+                                List.of(),
+                                "L3"
+                        ))
+                ),
+                "JAVA_BACKEND",
+                "JUNIOR"
+        );
+
+        assertThat(request.isShouldRetrieve()).isTrue();
+        assertThat(request.getQuestionType()).isEqualTo("SCENARIO");
+        assertThat(request.getQueryText()).isEqualTo("寻找考察缓存击穿后流量保护与回源控制的题目。");
+        assertThat(request.getDenseQueryText()).isEqualTo(request.getQueryText());
+        assertThat(request.getSparseQueryText()).isBlank();
     }
 
     private DecisionExecutionPlan plan(
@@ -166,22 +216,14 @@ class RagPlanCompilerTest {
     }
 
     private EvaluationDecisionOutput.RetrievalPlan retrievalPlan(
-            String goal,
-            String displayQuery,
             String queryText,
             List<String> keywordHints,
-            String difficultyHint,
-            List<String> mustHaveClues,
-            List<String> avoidClues
+            String difficultyHint
     ) {
         return EvaluationDecisionOutput.RetrievalPlan.builder()
-                .goal(goal)
-                .displayQuery(displayQuery)
                 .queryText(queryText)
                 .keywordHints(keywordHints)
                 .difficultyHint(difficultyHint)
-                .mustHaveClues(mustHaveClues)
-                .avoidClues(avoidClues)
                 .build();
     }
 }

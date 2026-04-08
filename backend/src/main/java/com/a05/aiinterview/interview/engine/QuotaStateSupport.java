@@ -6,10 +6,12 @@ import com.a05.aiinterview.ai.contract.StrategyDefinition;
 import com.a05.aiinterview.ai.contract.StrategyLimit;
 import com.a05.aiinterview.interview.entity.InterviewQuestion;
 
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * quota_state 账本辅助工具。
@@ -25,6 +27,25 @@ public final class QuotaStateSupport {
     public static final String PROJECT_TOTAL = "projectTotal";
     public static final String SCENARIO_TOTAL = "scenarioTotal";
     public static final String BEHAVIORAL_TOTAL = "behavioralTotal";
+    private static final Set<StrategyCode> SAME_POINT_FOLLOW_UP_STRATEGIES = EnumSet.of(
+            StrategyCode.S_P_VERIFY,
+            StrategyCode.S_P_DEEP_LINK,
+            StrategyCode.S_P_VARIANT,
+            StrategyCode.S_J_RECONSTRUCT,
+            StrategyCode.S_J_RESPONSIBILITY,
+            StrategyCode.S_J_PRESSURE,
+            StrategyCode.S_J_TRADEOFF,
+            StrategyCode.S_J_GUARDRAILS,
+            StrategyCode.S_J_EVOLUTION,
+            StrategyCode.S_S_FOLLOW_DIAGNOSE,
+            StrategyCode.S_S_FOLLOW_RESPONSE,
+            StrategyCode.S_S_FOLLOW_TRADEOFF,
+            StrategyCode.S_S_FOLLOW_GUARDRAILS,
+            StrategyCode.S_B_FOLLOW_DECISION,
+            StrategyCode.S_B_FOLLOW_REFLECTION,
+            StrategyCode.S_B_FOLLOW_CONFLICT,
+            StrategyCode.S_B_FOLLOW_TRANSFER
+    );
 
     private QuotaStateSupport() {
     }
@@ -86,11 +107,17 @@ public final class QuotaStateSupport {
 
         if (strategy != null) {
             applyQuotaPolicy(quotaState, currentType, strategy);
+            updateSamePointContinue(quotaState, strategyCode);
             return quotaState;
         }
 
         incrementTypeTotal(quotaState, normalizeQuestionType(targetQuestionType));
+        quotaState.put(SAME_POINT_CONTINUE, 0);
         return quotaState;
+    }
+
+    public static boolean isSamePointFollowUp(StrategyCode strategyCode) {
+        return strategyCode != null && SAME_POINT_FOLLOW_UP_STRATEGIES.contains(strategyCode);
     }
 
     private static void incrementTypeTotal(Map<String, Object> quotaState, String targetQuestionType) {
@@ -105,6 +132,14 @@ public final class QuotaStateSupport {
         }
     }
 
+    private static void updateSamePointContinue(Map<String, Object> quotaState, StrategyCode strategyCode) {
+        if (isSamePointFollowUp(strategyCode)) {
+            increment(quotaState, SAME_POINT_CONTINUE);
+            return;
+        }
+        quotaState.put(SAME_POINT_CONTINUE, 0);
+    }
+
     private static void applyQuotaPolicy(Map<String, Object> quotaState,
                                          String currentQuestionType,
                                          StrategyDefinition strategy) {
@@ -112,9 +147,15 @@ public final class QuotaStateSupport {
             clearContinuousCountersForSource(quotaState, currentQuestionType);
         }
         for (StrategyLimit limit : strategy.quotaUpdatePolicy().resets()) {
+            if (limit == StrategyLimit.SAME_POINT_CONTINUE) {
+                continue;
+            }
             quotaState.put(limit.ledgerKey(), 0);
         }
         for (StrategyLimit limit : strategy.quotaUpdatePolicy().increments()) {
+            if (limit == StrategyLimit.SAME_POINT_CONTINUE) {
+                continue;
+            }
             increment(quotaState, limit.ledgerKey());
         }
     }
@@ -165,7 +206,6 @@ public final class QuotaStateSupport {
     }
 
     private static void clearPrincipleCounters(Map<String, Object> quotaState) {
-        quotaState.put(SAME_POINT_CONTINUE, 0);
         quotaState.put(SAME_DOMAIN_CONTINUE, 0);
     }
 

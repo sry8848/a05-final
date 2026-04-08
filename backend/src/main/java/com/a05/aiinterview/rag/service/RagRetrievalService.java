@@ -22,7 +22,7 @@ public interface RagRetrievalService {
      *
      * <p>实现类必须保证：检索异常时降级返回 {@link RagContext#empty()}，不抛出异常阻断主链路。
      *
-     * @param request 检索请求（包含 domainCode、questionType、focusPoint 等维度）
+     * @param request 检索请求（包含 questionType、focusPoint、queryText 等执行维度）
      * @return RAG 上下文结果；无命中或被禁用时返回 {@link RagContext#empty()}
      */
     RagContext retrieve(RagRetrievalRequest request);

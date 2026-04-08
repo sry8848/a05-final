@@ -137,7 +137,7 @@ public class EvaluationDecisionInput {
         private String relatedItemType;
         private String relatedItemName;
         private String questionStem;
-        private String answerSummary;
-        private String answerAssessment;
+        private String answerContent;
+        private String answerContentType;
     }
 }

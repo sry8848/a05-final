@@ -56,14 +56,7 @@
         @restart="handleResultRestart"
         @showQuestionDetail="handleShowQuestionDetailFromResult"
       />
-      <RadarChartPage 
-        v-else-if="showRadarPage"
-        @goBack="showRadarPage = false"
-      />
-      <ScoreTrendPage 
-        v-else-if="showScoreTrendPage"
-        @goBack="showScoreTrendPage = false"
-      />
+
       <div v-else class="main-container" :class="{ 'interview-fullscreen': isInterviewRunning }">
         <Sidebar 
           v-show="!isInterviewRunning"
@@ -99,7 +92,6 @@
             @redo="handleRedoQuestionFromBank"
           />
           <ResumesPage v-else-if="currentPage === 'resumes'" />
-          <AnalysisPage v-else-if="currentPage === 'analysis'" />
           <SettingsPage 
             v-else-if="currentPage === 'settings'"
             :isDarkMode="isDarkMode"
@@ -123,15 +115,13 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import InterviewPage from './components/InterviewPage.vue'
 import HistoryPage from './components/HistoryPage.vue'
-import AnalysisPage from './components/AnalysisPage.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import LoginPage from './components/LoginPage.vue'
 import RegisterPage from './components/RegisterPage.vue'
 import InterviewResultPage from './components/InterviewResultPage.vue'
 import QuestionBankPage from './components/QuestionBankPage.vue'
 import GrowthCenterPage from './components/GrowthCenterPage.vue'
-import RadarChartPage from './components/RadarChartPage.vue'
-import ScoreTrendPage from './components/ScoreTrendPage.vue'
+
 import QuestionDetailPage from './components/QuestionDetailPage.vue'
 import InterviewReportGeneratingPage from './components/InterviewReportGeneratingPage.vue'
 import AdminLoginPage from './components/AdminLoginPage.vue'
@@ -173,15 +163,13 @@ export default {
     InterviewPage,
     HistoryPage,
     ResumesPage,
-    AnalysisPage,
     SettingsPage,
     LoginPage,
     RegisterPage,
     InterviewResultPage,
     QuestionBankPage,
     GrowthCenterPage,
-    RadarChartPage,
-    ScoreTrendPage,
+
     QuestionDetailPage,
     InterviewReportGeneratingPage,
     AdminLoginPage,
@@ -205,8 +193,7 @@ export default {
     const resultEntrySource = ref('live')
     const historyHasUnread = ref(false)
     const interviewResult = ref(null)
-    const showRadarPage = ref(false)
-    const showScoreTrendPage = ref(false)
+
     const showQuestionDetail = ref(false)
     const questionDetailLoading = ref(false)
     const selectedQuestionDetail = ref(null)
@@ -1284,9 +1271,9 @@ export default {
       if (!isLoggedIn.value) return
       
       if (event.ctrlKey || event.metaKey) {
-        const pages = ['growth', 'interview', 'history', 'analysis', 'settings']
+        const pages = ['growth', 'interview', 'history', 'settings']
         const key = parseInt(event.key)
-        if (key >= 1 && key <= 5) {
+        if (key >= 1 && key <= 4) {
           event.preventDefault()
           navigateTo(pages[key - 1])
         }
@@ -1329,8 +1316,7 @@ export default {
       reportGeneratingJobName,
       historyHasUnread,
       interviewResult,
-      showRadarPage,
-      showScoreTrendPage,
+
       showQuestionDetail,
       questionDetailLoading,
       selectedQuestionDetail,

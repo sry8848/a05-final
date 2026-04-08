@@ -87,7 +87,7 @@ experienceItems 必须覆盖简历中所有真实存在、可识别的项目/实
 你输出的每个项目必须满足：
 - 必须是候选人简历中真实存在、可深挖的项目或实习经历
 - 优先选择与 JD 相关、且候选人职责较清晰的项目
-- resumeDescription是从简历中直接抽取的这部分描述的原文
+- resumeDescription 必须复述简历中该项目/实习条目的对应原文片段，不要概括、改写，也不要输出任何模板占位语
 - techHooks 必须是可作为后续项目深挖入口的“技术钩子”，而不是随便罗列技术栈
 - techHooks 应尽量体现“业务场景 + 技术动作”或“系统问题 + 处理方式”
 - 如果项目近期已经被聊过，techHooks 要尽量避开上次切入点
@@ -182,7 +182,7 @@ Output Schema
 {
 "itemType": "PROJECT/ INTERNSHIP",
 "itemName": "苍穹外卖",
-"resumeDescription": "简历上的原始项目描述",
+"resumeDescription": "负责商家端与用户端核心业务迭代，参与订单、支付、库存等链路开发与优化。",
 "techHooks": [
 "Redis 缓存店铺营业状态",
 "RabbitMQ 异步处理高峰期下单削峰",

@@ -11,32 +11,96 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 新账本 reducer。
- * 只维护最小运行态：当前焦点、当前 item、已覆盖点、候选点和知识域状态。
+ * 默认状态账本归约器（State Ledger Reducer）。
+ *
+ * <p>核心设计思想（类似 Redux Reducer）：
+ * <ul>
+ *   <li>不可变更新：深拷贝旧账本，不会修改原始对象</li>
+ *   <li>只维护最小运行态：当前焦点、当前 item、已覆盖点、知识域状态</li>
+ *   <li>纯函数：相同输入总是产生相同输出，无副作用</li>
+ * </ul>
+ *
+ * <p>更新内容：
+ * <ul>
+ *   <li>current_focus / active_item_*：更新当前焦点和激活项</li>
+ *   <li>covered_points：合并新覆盖的知识点</li>
+ *   <li>covered_domains：合并新覆盖的知识域</li>
+ *   <li>recent_question_families：记录最近题目的家族ID，避免重复考察</li>
+ *   <li>domain_states：更新知识域状态（unasked → in_progress → covered）</li>
+ * </ul>
  */
 @Component
 public class DefaultStateLedgerReducer implements StateLedgerReducer {
 
+    /**
+     * 计算新账本的主方法（纯函数，无副作用）。
+     *
+     * <p>处理流程：
+     * <ol>
+     *   <li>深拷贝旧账本（确保不可变更新）</li>
+     *   <li>设置 last_attempt_id</li>
+     *   <li>更新当前焦点和激活项（current_focus、active_item_*）</li>
+     *   <li>合并新覆盖的知识点（covered_points）</li>
+     *   <li>合并题目家族ID（recent_question_families）</li>
+     *   <li>合并新覆盖的知识域（covered_domains）</li>
+     *   <li>更新知识域状态（domain_states）</li>
+     *   <li>返回新账本</li>
+     * </ol>
+     *
+     * @param oldLedger 旧账本
+     * @param mutation 变更指令
+     * @param attemptId 作答记录 ID
+     * @param evidenceQuestionId 证据题目 ID
+     * @return 新账本
+     */
     @Override
     public Map<String, Object> reduce(Map<String, Object> oldLedger,
                                       LedgerMutation mutation,
                                       String attemptId,
                                       Long evidenceQuestionId) {
+        // 步骤1：深拷贝旧账本（确保不可变更新，不修改原始对象）
         Map<String, Object> ledger = deepCopyLedger(oldLedger);
+
+        // 步骤2：记录最后一次作答记录 ID
         ledger.put("last_attempt_id", attemptId);
 
+        // 步骤3：更新当前焦点和激活项（next优先，current作为fallback）
         putIfNotBlank(ledger, "current_focus", firstNonBlank(mutation.getNextFocus(), mutation.getCurrentFocus()));
         putIfNotBlank(ledger, "active_item_key", firstNonBlank(mutation.getNextItemKey(), mutation.getCurrentItemKey()));
         putIfNotBlank(ledger, "active_item_type", firstNonBlank(mutation.getNextItemType(), mutation.getCurrentItemType()));
         putIfNotBlank(ledger, "active_item_name", firstNonBlank(mutation.getNextItemName(), mutation.getCurrentItemName()));
 
+        // 步骤4：合并新覆盖的知识点（去重）
         mergeStringListField(ledger, "covered_points", mutation.getNewCoveredPoints());
+
+        // 步骤5：合并题目家族ID（用于避免近亲重复）
         mergeQuestionFamily(ledger, mutation.getQuestionFamilyId());
+
+        // 步骤6：合并新覆盖的知识域
         mergeCoveredDomains(ledger, mutation.getNewCoveredDomains());
+
+        // 步骤7：更新知识域状态（domain_states）
         updateDomainStates(ledger, mutation, evidenceQuestionId);
+
+        // 步骤8：返回新账本
         return ledger;
     }
 
+    /**
+     * 合并题目家族ID到 recent_question_families 列表（去重）。
+     *
+     * <p>题目家族ID的作用：
+     * <ul>
+     *   <li>避免考察"近亲"题目（相似题型+相似焦点）</li>
+     *   <li>例如：连续问两个"HashMap原理"相关的题目属于近亲重复</li>
+     *   <li>使用 LinkedHashSet 保证顺序并去重</li>
+     * </ul>
+     *
+     * <p>家族ID的格式：{题型}.{焦点}，例如 "PRINCIPLE.HashMap扩容机制"
+     *
+     * @param ledger 账本对象（会被直接修改）
+     * @param questionFamilyId 题目家族ID
+     */
     private void mergeQuestionFamily(Map<String, Object> ledger, String questionFamilyId) {
         if (questionFamilyId == null || questionFamilyId.isBlank()) {
             return;
@@ -46,6 +110,27 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
         ledger.put("recent_question_families", new ArrayList<>(values));
     }
 
+    /**
+     * 合并新覆盖的知识域到 covered_domains 列表（按 domainCode 去重）。
+     *
+     * <p>知识域覆盖的意义：
+     * <ul>
+     *   <li>表示该知识域已形成初步判断，无需继续深入</li>
+     *   <li>用于后续策略筛选时避免重复考察已覆盖的域</li>
+     *   <li>按 domainCode 去重，确保同一知识域不会被重复记录</li>
+     * </ul>
+     *
+     * <p>数据结构：
+     * <pre>{@code
+     * [
+     *   {"domainCode": "JAVA_COLLECTIONS", "domainName": "Java集合框架"},
+     *   {"domainCode": "CONCURRENT", "domainName": "并发编程"}
+     * ]
+     * }</pre>
+     *
+     * @param ledger 账本对象（会被直接修改）
+     * @param coveredDomains 新覆盖的知识域列表
+     */
     private void mergeCoveredDomains(Map<String, Object> ledger,
                                      List<LedgerMutation.CoveredDomainByCode> coveredDomains) {
         if (coveredDomains == null || coveredDomains.isEmpty()) {
@@ -64,6 +149,20 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
         ledger.put("covered_domains", new ArrayList<>(values.values()));
     }
 
+    /**
+     * 更新知识域状态（domain_states 数组）。
+     *
+     * <p>更新逻辑：
+     * <ul>
+     *   <li>如果是当前知识域且不是跳过，状态变为 in_progress</li>
+     *   <li>如果知识域被标记为新覆盖，状态变为 covered，saturated=true</li>
+     *   <li>添加证据题目ID到 evidenceRefs</li>
+     * </ul>
+     *
+     * @param ledger 账本
+     * @param mutation 变更指令
+     * @param evidenceQuestionId 证据题目ID
+     */
     @SuppressWarnings("unchecked")
     private void updateDomainStates(Map<String, Object> ledger,
                                     LedgerMutation mutation,
@@ -82,6 +181,7 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
         for (Map<String, Object> state : copiedStates) {
             String domainCode = asString(state.get("domainCode"));
 
+            // 情况1：当前知识域，添加证据，状态变为 in_progress（如果不是跳过）
             if (Objects.equals(domainCode, mutation.getCurrentDomainCode()) && evidenceQuestionId != null) {
                 LinkedHashSet<Long> refs = new LinkedHashSet<>(toLongList(state.get("evidenceRefs")));
                 refs.add(evidenceQuestionId);
@@ -92,6 +192,7 @@ public class DefaultStateLedgerReducer implements StateLedgerReducer {
                 }
             }
 
+            // 情况2：知识域被标记为新覆盖，状态变为 covered，saturated=true
             if (mutation.getNewCoveredDomains() == null) {
                 continue;
             }

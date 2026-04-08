@@ -1,4 +1,4 @@
-import { buildApiUrl, resolveBackendUrl } from '../api/base.js'
+import { buildApiUrl, resolveWebSocketUrl } from '../api/base.js'
 
 /**
  * AsrService — 后端代理 ASR 封装
@@ -79,7 +79,7 @@ export class AsrService {
         },
       })
 
-      await this._connectWebSocket(resolveBackendUrl(token.wsUrl))
+      await this._connectWebSocket(resolveWebSocketUrl(token.wsUrl))
       await this._sendStartAndWaitReady(questionType, token.protocolVersion || 'v1', audioConfig, context)
       this._startAudioCapture(audioConfig)
 

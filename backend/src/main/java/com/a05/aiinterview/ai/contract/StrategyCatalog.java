@@ -12,17 +12,49 @@ import java.util.Set;
 /**
  * 评估决策策略目录。
  * Chunk 2 起作为后端唯一策略真源。
+ *
+ * <p>核心职责：
+ * <ul>
+ *   <li>定义所有可用的面试策略</li>
+ *   <li>作为策略的单一真实来源（Single Source of Truth）</li>
+ *   <li>提供策略查询和分类方法</li>
+ * </ul>
+ *
+ * <p>策略分类：
+ * <ul>
+ *   <li><b>内部策略（Internal/ADVANCE）</b>：在当前题型内深入追问</li>
+ *   <li><b>切换策略（SWITCH）</b>：在当前题型内切换焦点或项目</li>
+ *   <li><b>进入策略（ENTER）</b>：切换到其他题型</li>
+ *   <li><b>结束策略（END/WRAPUP）</b>：结束面试</li>
+ * </ul>
+ *
+ * <p>题型定义：
+ * <ul>
+ *   <li>INTRO：自我介绍</li>
+ *   <li>PRINCIPLE：理论题</li>
+ *   <li>PROJECT_DEEP_DIVE：项目深挖题</li>
+ *   <li>SCENARIO：场景题</li>
+ *   <li>BEHAVIORAL：行为题</li>
+ * </ul>
  */
 public final class StrategyCatalog {
 
+    /** 题型常量：自我介绍 */
     private static final String INTRO = "INTRO";
+    /** 题型常量：理论题 */
     private static final String PRINCIPLE = "PRINCIPLE";
+    /** 题型常量：项目深挖题 */
     private static final String PROJECT = "PROJECT_DEEP_DIVE";
+    /** 题型常量：场景题 */
     private static final String SCENARIO = "SCENARIO";
+    /** 题型常量：行为题 */
     private static final String BEHAVIORAL = "BEHAVIORAL";
 
+    /** 所有题型的集合 */
     private static final Set<String> ALL_CURRENT_TYPES = Set.of(INTRO, PRINCIPLE, PROJECT, SCENARIO, BEHAVIORAL);
+    /** 所有策略定义的列表（初始化时构建，不可变） */
     private static final List<StrategyDefinition> DEFINITIONS = buildDefinitions();
+    /** 策略编码到策略定义的索引映射（初始化时构建，不可变） */
     private static final Map<String, StrategyDefinition> BY_CODE = buildIndex();
 
     private StrategyCatalog() {
@@ -53,6 +85,25 @@ public final class StrategyCatalog {
         return find(code).map(StrategyDefinition::targetQuestionType).orElse("");
     }
 
+    /**
+     * 获取指定题型的所有内部策略（不包括进入策略和结束策略）。
+     *
+     * <p>内部策略定义：
+     * <ul>
+     *   <li>moveType 不是 ENTER（排除进入策略）</li>
+     *   <li>不是 wrapup（排除结束策略）</li>
+     *   <li>允许在当前题型使用</li>
+     * </ul>
+     *
+     * <p>使用场景：
+     * <ul>
+     *   <li>当前是理论题时，获取所有理论题内的深入追问策略</li>
+     *   <li>当前是项目题时，获取所有项目题内的深入追问策略</li>
+     * </ul>
+     *
+     * @param currentQuestionType 当前题型
+     * @return 该题型可用的内部策略列表
+     */
     public static List<StrategyDefinition> internalStrategiesFor(String currentQuestionType) {
         String normalizedType = normalizeQuestionType(currentQuestionType);
         return DEFINITIONS.stream()
@@ -62,16 +113,58 @@ public final class StrategyCatalog {
                 .toList();
     }
 
+    /**
+     * 获取所有进入策略（用于切换到其他题型）。
+     *
+     * <p>进入策略定义：
+     * <ul>
+     *   <li>moveType = ENTER</li>
+     *   <li>用于从当前题型切换到其他题型</li>
+     * </ul>
+     *
+     * <p>例如：
+     * <ul>
+     *   <li>S_ENTER_PRINCIPLE：从其他题型进入理论题</li>
+     *   <li>S_ENTER_PROJECT：从其他题型进入项目题</li>
+     * </ul>
+     *
+     * @return 所有进入策略列表
+     */
     public static List<StrategyDefinition> enterStrategies() {
         return DEFINITIONS.stream()
                 .filter(definition -> definition.moveType() == StrategyMoveType.ENTER)
                 .toList();
     }
 
+    /**
+     * 获取结束策略（S_WRAPUP）。
+     *
+     * <p>结束策略的特点：
+     * <ul>
+     *   <li>任何时候都可用</li>
+     *   <li>没有配额限制</li>
+     *   <li>用于结束本场面试</li>
+     * </ul>
+     *
+     * @return 结束策略定义
+     */
     public static StrategyDefinition wrapup() {
         return BY_CODE.get(StrategyCode.S_WRAPUP.code());
     }
 
+    /**
+     * 规范化题型名称（去空格、转大写）。
+     *
+     * <p>规范化的意义：
+     * <ul>
+     *   <li>统一输入格式，避免大小写问题</li>
+     *   <li>去除首尾空格，避免匹配失败</li>
+     *   <li>使用 Locale.ROOT 确保跨语言环境一致</li>
+     * </ul>
+     *
+     * @param questionType 原始题型名称
+     * @return 规范化后的题型名称
+     */
     public static String normalizeQuestionType(String questionType) {
         return questionType == null ? "" : questionType.trim().toUpperCase(Locale.ROOT);
     }

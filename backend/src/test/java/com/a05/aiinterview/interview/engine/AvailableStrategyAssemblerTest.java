@@ -143,6 +143,77 @@ class AvailableStrategyAssemblerTest {
     }
 
     @Test
+    @DisplayName("same-point limit should block all same-line follow-up strategies across question types")
+    void samePointLimitShouldBlockAllSameLineFollowUpStrategiesAcrossQuestionTypes() {
+        Map<String, Object> quotaState = quotaState(QuotaStateSupport.SAME_POINT_CONTINUE, 2);
+
+        List<EvaluationDecisionInput.AvailableStrategy> projectStrategies = assembler.assemble(
+                "PROJECT_DEEP_DIVE",
+                true,
+                remainingDomains("redis"),
+                quotaState,
+                "JUNIOR"
+        );
+        List<EvaluationDecisionInput.AvailableStrategy> scenarioStrategies = assembler.assemble(
+                "SCENARIO",
+                true,
+                remainingDomains("redis"),
+                quotaState,
+                "JUNIOR"
+        );
+        List<EvaluationDecisionInput.AvailableStrategy> behavioralStrategies = assembler.assemble(
+                "BEHAVIORAL",
+                true,
+                remainingDomains("redis"),
+                quotaState,
+                "JUNIOR"
+        );
+
+        assertThat(projectStrategies)
+                .extracting(EvaluationDecisionInput.AvailableStrategy::getStrategyCode)
+                .doesNotContain(
+                        StrategyCode.S_J_RECONSTRUCT.code(),
+                        StrategyCode.S_J_RESPONSIBILITY.code(),
+                        StrategyCode.S_J_PRESSURE.code(),
+                        StrategyCode.S_J_TRADEOFF.code(),
+                        StrategyCode.S_J_GUARDRAILS.code(),
+                        StrategyCode.S_J_EVOLUTION.code()
+                )
+                .contains(
+                        StrategyCode.S_J_SWITCH_POINT.code(),
+                        StrategyCode.S_J_SWITCH_PROJECT.code()
+                );
+        assertThat(scenarioStrategies)
+                .extracting(EvaluationDecisionInput.AvailableStrategy::getStrategyCode)
+                .doesNotContain(
+                        StrategyCode.S_S_FOLLOW_DIAGNOSE.code(),
+                        StrategyCode.S_S_FOLLOW_RESPONSE.code(),
+                        StrategyCode.S_S_FOLLOW_TRADEOFF.code(),
+                        StrategyCode.S_S_FOLLOW_GUARDRAILS.code()
+                )
+                .contains(
+                        StrategyCode.S_S_NEW_DIAGNOSE.code(),
+                        StrategyCode.S_S_NEW_RESPONSE.code(),
+                        StrategyCode.S_S_NEW_TRADEOFF.code(),
+                        StrategyCode.S_S_NEW_GUARDRAILS.code()
+                );
+        assertThat(behavioralStrategies)
+                .extracting(EvaluationDecisionInput.AvailableStrategy::getStrategyCode)
+                .doesNotContain(
+                        StrategyCode.S_B_FOLLOW_DECISION.code(),
+                        StrategyCode.S_B_FOLLOW_REFLECTION.code(),
+                        StrategyCode.S_B_FOLLOW_CONFLICT.code(),
+                        StrategyCode.S_B_FOLLOW_TRANSFER.code()
+                )
+                .contains(
+                        StrategyCode.S_B_NEW_DECISION.code(),
+                        StrategyCode.S_B_NEW_REFLECTION.code(),
+                        StrategyCode.S_B_NEW_CONFLICT.code(),
+                        StrategyCode.S_B_NEW_TRANSFER.code()
+                );
+    }
+
+    @Test
     @DisplayName("should delete enter-project when project context is missing")
     void shouldDeleteEnterProjectWhenProjectContextIsMissing() {
         List<EvaluationDecisionInput.AvailableStrategy> strategies = assembler.assemble(
@@ -180,7 +251,7 @@ class AvailableStrategyAssemblerTest {
     @Test
     @DisplayName("senior profile should keep enter-project available when junior quota is already exhausted")
     void seniorProfileShouldKeepEnterProjectAvailableWhenJuniorQuotaIsAlreadyExhausted() {
-        Map<String, Object> quotaState = quotaState(QuotaStateSupport.PROJECT_TOTAL, 10);
+        Map<String, Object> quotaState = quotaState(QuotaStateSupport.PROJECT_TOTAL, 8);
 
         List<EvaluationDecisionInput.AvailableStrategy> juniorStrategies = assembler.assemble(
                 "PRINCIPLE",

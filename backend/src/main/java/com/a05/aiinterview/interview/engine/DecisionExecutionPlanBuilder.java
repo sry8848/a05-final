@@ -14,25 +14,63 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * AI决策执行计划构建器，负责验证和构建标准化的决策执行计划。
+ *
+ * <p>核心职责：
+ * <ol>
+ *   <li>验证 AI 决策输出的合法性（策略编码、必填字段、知识域等）</li>
+ *   <li>将原始 AI 输出标准化为 DecisionExecutionPlan 执行计划</li>
+ *   <li>处理各种边界情况（如知识域继承、策略约束等）</li>
+ *   <li>返回验证结果，包含通过或失败原因（错误码列表）</li>
+ * </ol>
+ *
+ * <p>这是容错机制的第一级，确保 AI 决策符合系统约束后才能继续执行
+ */
 @Component
 public class DecisionExecutionPlanBuilder {
 
+    /** 同知识域原则题策略集合（S_P_VERIFY、S_P_DEEP_LINK等） */
     private static final Set<String> SAME_DOMAIN_PRINCIPLE_STRATEGIES = Set.of(
             StrategyCode.S_P_VERIFY.code(),
             StrategyCode.S_P_DEEP_LINK.code(),
             StrategyCode.S_P_VARIANT.code(),
             StrategyCode.S_P_SAME_DOMAIN_SHIFT.code()
     );
+    private static final Set<String> ALLOWED_DIFFICULTY_HINTS = Set.of("", "L1", "L2", "L3", "L4", "L5");
 
+    /**
+     * 构建并验证决策执行计划。
+     *
+     * <p>验证流程：
+     * <ol>
+     *   <li>基本格式校验（interviewAction 必须是 CONTINUE 或 WRAPUP）</li>
+     *   <li>如果是 WRAPUP：确保其他字段为空，设置终止源和原因</li>
+     *   <li>如果是 CONTINUE：校验策略编码、必填字段、知识域约束等</li>
+     *   <li>根据策略类型确定目标题型（PRINCIPLE/PROJECT_DEEP_DIVE等）</li>
+     *   <li>处理知识域逻辑（要求、继承、禁止）</li>
+     *   <li>如果有错误，返回失败；否则返回成功的执行计划</li>
+     * </ol>
+     *
+     * @param currentQuestion 当前题目
+     * @param output AI 原始输出
+     * @param remainingTargetDomains 剩余待考察知识域列表
+     * @param availableStrategies 可用策略列表
+     * @param source 决策来源（RAW_AI/REPAIRED/FALLBACK）
+     * @return 验证结果，包含执行计划或错误列表
+     */
     public DecisionValidationResult build(InterviewQuestion currentQuestion,
                                           EvaluationDecisionOutput output,
                                           List<EvaluationDecisionInput.RemainingTargetDomain> remainingTargetDomains,
                                           List<String> availableStrategies,
                                           DecisionExecutionPlan.EffectiveDecisionSource source) {
+        // 输出为空直接失败
         if (output == null) {
             return DecisionValidationResult.failure(List.of("INVALID_STRATEGY_CODE"));
         }
+
         List<String> errors = new ArrayList<>();
+        // 标准化并提取字段
         String interviewAction = normalize(output.getInterviewAction());
         String strategyCode = normalize(output.getFinalDecision());
         String nextFocus = trim(output.getNextFocus());
@@ -41,18 +79,22 @@ public class DecisionExecutionPlanBuilder {
         String nextProjectPoint = trim(output.getNextProjectPoint());
         String targetDomainCode = trim(output.getTargetDomainCode());
 
+        // ========== 阶段1：基础校验 ==========
         if (!"CONTINUE".equals(interviewAction) && !"WRAPUP".equals(interviewAction)) {
             errors.add("INVALID_STRATEGY_CODE");
             return DecisionValidationResult.failure(errors);
         }
 
+        // ========== 分支1：WRAPUP 结束面试 ==========
         if ("WRAPUP".equals(interviewAction)) {
+            // 校验：WRAPUP 策略必须是 S_WRAPUP，且其他字段必须为空
             if (!StrategyCode.S_WRAPUP.code().equals(strategyCode)
                     || !nextFocus.isBlank()
                     || !targetDomainCode.isBlank()
                     || (output.getRetrievalPlans() != null && !output.getRetrievalPlans().isEmpty())) {
                 return DecisionValidationResult.failure(List.of("WRAPUP_FIELDS_MUST_BE_EMPTY"));
             }
+            // 返回 WRAPUP 执行计划
             return DecisionValidationResult.success(DecisionExecutionPlan.builder()
                     .interviewAction("WRAPUP")
                     .strategyCode(StrategyCode.S_WRAPUP.code())
@@ -73,24 +115,32 @@ public class DecisionExecutionPlanBuilder {
                     .build());
         }
 
+        // ========== 分支2：CONTINUE 继续面试 ==========
+        // 校验策略编码合法性
         if (!StrategyCatalog.isAllowed(strategyCode)) {
             errors.add("INVALID_STRATEGY_CODE");
         }
+        // 校验策略在可用策略池内
         if (!availableStrategies.isEmpty() && !availableStrategies.contains(strategyCode)) {
             errors.add("STRATEGY_NOT_IN_AVAILABLE_POOL");
         }
+        // 校验必填字段：nextFocus
         if (nextFocus.isBlank()) {
             errors.add("NEXT_FOCUS_REQUIRED");
         }
+        validateRetrievalPlans(output == null ? null : output.getRetrievalPlans(), errors);
 
         String currentType = currentQuestion == null ? "" : normalize(currentQuestion.getQuestionType());
         String targetQuestionType = StrategyCatalog.targetQuestionType(strategyCode);
         String targetDomainName = "";
 
+        // ========== 知识域校验逻辑 ==========
         if (StrategyCatalog.requiresTargetDomain(strategyCode)) {
+            // 情况A：策略要求必须有目标知识域
             if (targetDomainCode.isBlank()) {
                 errors.add("TARGET_DOMAIN_REQUIRED");
             } else {
+                // 验证知识域在剩余待考察列表中
                 EvaluationDecisionInput.RemainingTargetDomain matched = findRemainingDomain(remainingTargetDomains, targetDomainCode);
                 if (matched == null) {
                     errors.add("TARGET_DOMAIN_NOT_IN_MENU");
@@ -99,6 +149,7 @@ public class DecisionExecutionPlanBuilder {
                 }
             }
         } else if ("PRINCIPLE".equals(currentType) && SAME_DOMAIN_PRINCIPLE_STRATEGIES.contains(strategyCode)) {
+            // 情况B：同知识域原则题策略，从上一题继承知识域
             if (targetDomainCode.isBlank()) {
                 Map<String, Object> context = currentQuestion.getGenerationContextJson() != null
                         ? currentQuestion.getGenerationContextJson()
@@ -110,13 +161,16 @@ public class DecisionExecutionPlanBuilder {
                 }
             }
         } else if (!targetDomainCode.isBlank()) {
+            // 情况C：策略不需要知识域，但AI提供了 - 报错
             errors.add("TARGET_DOMAIN_MUST_BE_EMPTY");
         }
 
+        // 如果有错误，去重后返回失败
         if (!errors.isEmpty()) {
             return DecisionValidationResult.failure(errors.stream().distinct().toList());
         }
 
+        // ========== 返回成功的执行计划 ==========
         return DecisionValidationResult.success(DecisionExecutionPlan.builder()
                 .interviewAction("CONTINUE")
                 .strategyCode(strategyCode)
@@ -135,6 +189,12 @@ public class DecisionExecutionPlanBuilder {
                 .build());
     }
 
+    /**
+     * 判断策略是否属于同知识域原则题策略。
+     *
+     * @param strategyCode 策略编码
+     * @return 是否为同知识域原则题策略
+     */
     public static boolean isSameDomainPrincipleStrategy(String strategyCode) {
         return SAME_DOMAIN_PRINCIPLE_STRATEGIES.contains(normalize(strategyCode));
     }
@@ -171,5 +231,29 @@ public class DecisionExecutionPlanBuilder {
 
     private static String asString(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private static void validateRetrievalPlans(
+            List<EvaluationDecisionOutput.RetrievalPlan> retrievalPlans,
+            List<String> errors
+    ) {
+        if (retrievalPlans == null || retrievalPlans.isEmpty()) {
+            return;
+        }
+        if (retrievalPlans.size() > 1) {
+            errors.add("RETRIEVAL_PLAN_COUNT_INVALID");
+        }
+        for (EvaluationDecisionOutput.RetrievalPlan retrievalPlan : retrievalPlans) {
+            if (retrievalPlan == null) {
+                continue;
+            }
+            if (trim(retrievalPlan.getQueryText()).isBlank()) {
+                errors.add("RETRIEVAL_QUERY_TEXT_REQUIRED");
+            }
+            String difficultyHint = trim(retrievalPlan.getDifficultyHint()).toUpperCase(Locale.ROOT);
+            if (!ALLOWED_DIFFICULTY_HINTS.contains(difficultyHint)) {
+                errors.add("RETRIEVAL_DIFFICULTY_HINT_INVALID");
+            }
+        }
     }
 }

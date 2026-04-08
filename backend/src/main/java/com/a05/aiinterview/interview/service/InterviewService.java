@@ -128,7 +128,7 @@ public class InterviewService {
         dto.setStatus(session.getStatus());
 
         // 提取考纲摘要（plannedDomains 列表，用于 Loading 页展示）
-        //TODO  Loading 页不展示
+        //TODO  Loading 页无需展示
         dto.setSyllabusSummary(buildSyllabusSummary(session));
 
         if ("in_progress".equals(session.getStatus())) {

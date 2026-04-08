@@ -54,3 +54,36 @@ export function resolveBackendUrl(pathOrUrl, rawBase = import.meta.env?.VITE_API
 
   return buildApiUrl(value, rawBase)
 }
+
+function resolveRuntimeOrigin() {
+  if (typeof globalThis !== 'undefined' && globalThis.location?.origin) {
+    return globalThis.location.origin
+  }
+  return ''
+}
+
+function toWebSocketUrl(urlLike) {
+  const runtimeOrigin = resolveRuntimeOrigin()
+  const parsed = runtimeOrigin ? new URL(urlLike, runtimeOrigin) : new URL(urlLike)
+  if (parsed.protocol === 'http:') {
+    parsed.protocol = 'ws:'
+  } else if (parsed.protocol === 'https:') {
+    parsed.protocol = 'wss:'
+  }
+  return parsed.toString()
+}
+
+export function resolveWebSocketUrl(pathOrUrl, rawBase = import.meta.env?.VITE_API_BASE_URL) {
+  const value = String(pathOrUrl || '').trim()
+  if (!value) return ''
+  if (isAbsoluteUrl(value)) {
+    return toWebSocketUrl(value)
+  }
+
+  const backendUrl = resolveBackendUrl(value, rawBase)
+  if (backendUrl.startsWith('/')) {
+    const runtimeOrigin = resolveRuntimeOrigin()
+    return runtimeOrigin ? toWebSocketUrl(`${runtimeOrigin}${backendUrl}`) : backendUrl
+  }
+  return toWebSocketUrl(backendUrl)
+}

@@ -17,7 +17,7 @@ import static org.mockito.Mockito.when;
 class AsrControllerTest {
 
     @Test
-    void getAsrToken_shouldReturnProxyWsUrlAndAudioConfig() {
+    void getAsrToken_shouldReturnProxyWsPathAndAudioConfig() {
         SpeechProperties properties = new SpeechProperties();
         properties.getAsr().setEnabled(true);
         properties.getAsr().setTokenTtlSeconds(300);
@@ -41,7 +41,7 @@ class AsrControllerTest {
         AsrTokenResponse data = response.getData();
         assertNotNull(data);
         assertTrue(data.isEnabled());
-        assertEquals("ws://localhost:8080/api/v1/asr/stream?ticket=ticket-123", data.getWsUrl());
+        assertEquals("/api/v1/asr/stream?ticket=ticket-123", data.getWsUrl());
         assertEquals("ticket-123", data.getTicket());
         assertEquals(1741800000L, data.getExpiresAt());
         assertEquals("v1", data.getProtocolVersion());

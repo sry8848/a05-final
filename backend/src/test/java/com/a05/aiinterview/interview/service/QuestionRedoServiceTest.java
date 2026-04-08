@@ -45,7 +45,7 @@ class QuestionRedoServiceTest {
         session.setExperienceLevel("JUNIOR");
         session.setMode("practice");
         session.setSyllabusJson(Map.of(
-                "domains", List.of(Map.of("domainCode", "browser", "domainName", "浏览器原理"))
+                "domains", List.of(Map.of("domainCode", "browser_runtime", "domainName", "浏览器运行时"))
         ));
         when(sessionMapper.selectById(11L)).thenReturn(session);
 
@@ -54,10 +54,10 @@ class QuestionRedoServiceTest {
         question.setSessionId(11L);
         question.setQuestionNo(3);
         question.setQuestionType("PRINCIPLE");
-        question.setDomainCode("browser");
+        question.setDomainCode("browser_runtime");
         question.setStem("请解释浏览器渲染流水线。");
         question.setExpectedPoints(List.of("Parse", "Layout", "Paint"));
-        question.setGenerationContextJson(Map.of("domainCode", "browser", "focusPoint", "渲染流水线"));
+        question.setGenerationContextJson(Map.of("domainCode", "browser_runtime", "focusPoint", "渲染流水线"));
         when(questionMapper.selectById(22L)).thenReturn(question);
 
         doAnswer(invocation -> {
@@ -86,7 +86,7 @@ class QuestionRedoServiceTest {
         assertNotNull(inserted.getSourceSnapshotJson());
         assertEquals("请解释浏览器渲染流水线。", inserted.getSourceSnapshotJson().get("questionStem"));
         assertEquals("PRINCIPLE", inserted.getSourceSnapshotJson().get("questionType"));
-        assertEquals("浏览器原理", inserted.getSourceSnapshotJson().get("domainName"));
+        assertEquals("浏览器运行时", inserted.getSourceSnapshotJson().get("domainName"));
         assertEquals(List.of("Parse", "Layout", "Paint"), inserted.getSourceSnapshotJson().get("expectedPoints"));
         assertEquals("渲染流水线", inserted.getSourceSnapshotJson().get("focusPoint"));
         org.junit.jupiter.api.Assertions.assertEquals(
@@ -136,8 +136,8 @@ class QuestionRedoServiceTest {
                 "idealAnswerOutline", List.of("定义", "流程", "优化"),
                 "rewrittenAnswer", "参考答案",
                 "evaluatedDomains", List.of(Map.of(
-                        "domainCode", "browser",
-                        "domainName", "浏览器原理",
+                        "domainCode", "browser_runtime",
+                        "domainName", "浏览器运行时",
                         "score", BigDecimal.valueOf(88),
                         "commentary", "主域表现良好"
                 )),
@@ -167,7 +167,7 @@ class QuestionRedoServiceTest {
         assertEquals(List.of("缺少性能边界"), response.getWeakPoints());
         assertEquals("参考答案", response.getRewrittenAnswer());
         assertEquals(1, response.getEvaluatedDomains().size());
-        assertEquals("浏览器原理", response.getEvaluatedDomains().get(0).getDomainName());
+        assertEquals("浏览器运行时", response.getEvaluatedDomains().get(0).getDomainName());
         assertEquals(1, response.getHighlightedSegments().size());
         assertEquals("先说解析再说布局", response.getHighlightedSegments().get(0).getSegment());
         assertEquals(1, response.getHighlightedAnnotations().size());

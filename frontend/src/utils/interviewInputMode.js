@@ -31,9 +31,11 @@ export function buildProfessionalInterviewStartBlockedReason({ microphoneReady, 
   return ''
 }
 
-export function buildVoiceFailureMessage(interviewMode) {
+export function buildVoiceFailureMessage(interviewMode, detail = '') {
+  const extraDetail = String(detail || '').trim()
+  const detailSuffix = extraDetail ? `（${extraDetail}）` : ''
   if (normalizeInterviewMode(interviewMode) === 'professional') {
-    return '专业模式仅支持语音输入，请重试麦克风/语音识别或结束面试。'
+    return `专业模式仅支持语音输入${detailSuffix}，请重试麦克风/语音识别或结束面试。`
   }
-  return '当前语音识别不可用，请重试或切换到文字输入。'
+  return `当前语音识别不可用${detailSuffix}，请重试或切换到文字输入。`
 }

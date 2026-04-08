@@ -41,8 +41,32 @@ class QuotaStateSupportTest {
     }
 
     @Test
-    @DisplayName("advance should clear principle counters when exiting current type")
-    void advance_shouldClearPrincipleCountersWhenExitingCurrentType() {
+    @DisplayName("advance should count deep-link as same-point follow-up")
+    void advance_shouldCountDeepLinkAsSamePointFollowUp() {
+        Map<String, Object> reduced = QuotaStateSupport.advance(
+                Map.of(
+                        "samePointContinue", 1,
+                        "sameDomainContinue", 2,
+                        "sameProjectPointContinue", 0,
+                        "sameProjectContinue", 0,
+                        "principleTotal", 3,
+                        "projectTotal", 0,
+                        "scenarioTotal", 0,
+                        "behavioralTotal", 0
+                ),
+                "PRINCIPLE",
+                StrategyCode.S_P_DEEP_LINK,
+                "PRINCIPLE"
+        );
+
+        assertThat(reduced).containsEntry("samePointContinue", 2)
+                .containsEntry("sameDomainContinue", 3)
+                .containsEntry("principleTotal", 4);
+    }
+
+    @Test
+    @DisplayName("advance should clear same-point counter when exiting current type")
+    void advance_shouldClearSamePointCounterWhenExitingCurrentType() {
         Map<String, Object> reduced = QuotaStateSupport.advance(
                 QuotaStateSupport.initialQuotaState(),
                 "PRINCIPLE",
@@ -56,11 +80,36 @@ class QuotaStateSupportTest {
     }
 
     @Test
-    @DisplayName("advance should keep project chain when switching project point")
-    void advance_shouldKeepProjectChainWhenSwitchingProjectPoint() {
+    @DisplayName("advance should increment same-point for project follow-up strategies")
+    void advance_shouldIncrementSamePointForProjectFollowUpStrategies() {
         Map<String, Object> reduced = QuotaStateSupport.advance(
                 Map.of(
-                        "samePointContinue", 0,
+                        "samePointContinue", 2,
+                        "sameDomainContinue", 0,
+                        "sameProjectPointContinue", 2,
+                        "sameProjectContinue", 3,
+                        "principleTotal", 1,
+                        "projectTotal", 4,
+                        "scenarioTotal", 0,
+                        "behavioralTotal", 0
+                ),
+                "PROJECT_DEEP_DIVE",
+                StrategyCode.S_J_PRESSURE,
+                "PROJECT_DEEP_DIVE"
+        );
+
+        assertThat(reduced).containsEntry("samePointContinue", 3)
+                .containsEntry("sameProjectPointContinue", 3)
+                .containsEntry("sameProjectContinue", 4)
+                .containsEntry("projectTotal", 5);
+    }
+
+    @Test
+    @DisplayName("advance should keep project chain but clear same-point when switching project point")
+    void advance_shouldKeepProjectChainButClearSamePointWhenSwitchingProjectPoint() {
+        Map<String, Object> reduced = QuotaStateSupport.advance(
+                Map.of(
+                        "samePointContinue", 2,
                         "sameDomainContinue", 0,
                         "sameProjectPointContinue", 2,
                         "sameProjectContinue", 3,
@@ -74,9 +123,50 @@ class QuotaStateSupportTest {
                 "PROJECT_DEEP_DIVE"
         );
 
-        assertThat(reduced).containsEntry("sameProjectPointContinue", 0)
+        assertThat(reduced).containsEntry("samePointContinue", 0)
+                .containsEntry("sameProjectPointContinue", 0)
                 .containsEntry("sameProjectContinue", 4)
                 .containsEntry("projectTotal", 5);
+    }
+
+    @Test
+    @DisplayName("advance should increment same-point for scenario and behavioral follow-up strategies")
+    void advance_shouldIncrementSamePointForScenarioAndBehavioralFollowUpStrategies() {
+        Map<String, Object> scenario = QuotaStateSupport.advance(
+                Map.of(
+                        "samePointContinue", 1,
+                        "sameDomainContinue", 0,
+                        "sameProjectPointContinue", 0,
+                        "sameProjectContinue", 0,
+                        "principleTotal", 0,
+                        "projectTotal", 0,
+                        "scenarioTotal", 1,
+                        "behavioralTotal", 0
+                ),
+                "SCENARIO",
+                StrategyCode.S_S_FOLLOW_RESPONSE,
+                "SCENARIO"
+        );
+        Map<String, Object> behavioral = QuotaStateSupport.advance(
+                Map.of(
+                        "samePointContinue", 2,
+                        "sameDomainContinue", 0,
+                        "sameProjectPointContinue", 0,
+                        "sameProjectContinue", 0,
+                        "principleTotal", 0,
+                        "projectTotal", 0,
+                        "scenarioTotal", 0,
+                        "behavioralTotal", 1
+                ),
+                "BEHAVIORAL",
+                StrategyCode.S_B_FOLLOW_TRANSFER,
+                "BEHAVIORAL"
+        );
+
+        assertThat(scenario).containsEntry("samePointContinue", 2)
+                .containsEntry("scenarioTotal", 2);
+        assertThat(behavioral).containsEntry("samePointContinue", 3)
+                .containsEntry("behavioralTotal", 2);
     }
 
     @Test

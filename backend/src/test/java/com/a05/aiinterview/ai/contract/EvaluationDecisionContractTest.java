@@ -23,6 +23,8 @@ class EvaluationDecisionContractTest {
     void continueOutput_shouldKeepNewSchemaFields() {
         String json = """
                 {
+                  "answerUnderstanding": "候选人已经给出实质回答，但边界理解还不稳定。",
+                  "planningIntent": "当前应继续进入项目链路核实真实工程深度。",
                   "decisionReason": "上一题回答具备继续追问的信息增益，因此进入项目链路验证真实工程深度。",
                   "interviewAction": "CONTINUE",
                   "finalDecision": "S_ENTER_PROJECT",
@@ -39,13 +41,9 @@ class EvaluationDecisionContractTest {
                   ],
                   "retrievalPlans": [
                     {
-                      "goal": "补充 Seata AT 边界细节",
-                      "displayQuery": "Seata AT 边界",
-                      "queryText": "Seata AT 模式 本地事务边界 分支事务注册",
+                      "queryText": "寻找考察 Seata AT 模式下本地事务边界与分支事务注册机制的题目。",
                       "keywordHints": ["Seata", "AT", "分支事务注册"],
-                      "difficultyHint": "L4",
-                      "mustHaveClues": ["事务边界", "分支事务注册"],
-                      "avoidClues": ["通用微服务定义"]
+                      "difficultyHint": "L4"
                     }
                   ]
                 }
@@ -54,6 +52,8 @@ class EvaluationDecisionContractTest {
         EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
 
         assertThat(output.getInterviewAction()).isEqualTo("CONTINUE");
+        assertThat(output.getAnswerUnderstanding()).isEqualTo("候选人已经给出实质回答，但边界理解还不稳定。");
+        assertThat(output.getPlanningIntent()).isEqualTo("当前应继续进入项目链路核实真实工程深度。");
         assertThat(output.getFinalDecision()).isEqualTo("S_ENTER_PROJECT");
         assertThat(output.getNextFocus()).isEqualTo("Seata AT 事务边界落地");
         assertThat(output.getTargetDomainCode()).isEmpty();
@@ -65,13 +65,44 @@ class EvaluationDecisionContractTest {
         assertThat(output.getNewCoveredDomains().getFirst().getDomainName()).isEqualTo("Spring 框架");
         assertThat(output.getNewCoveredPoints()).containsExactly("Seata AT 模式下全局事务与本地事务的协同边界");
         assertThat(output.getRetrievalPlans()).hasSize(1);
-        assertThat(output.getRetrievalPlans().getFirst().getGoal()).isEqualTo("补充 Seata AT 边界细节");
-        assertThat(output.getRetrievalPlans().getFirst().getDisplayQuery()).isEqualTo("Seata AT 边界");
-        assertThat(output.getRetrievalPlans().getFirst().getQueryText()).contains("分支事务注册");
+        assertThat(output.getRetrievalPlans().getFirst().getQueryText())
+                .isEqualTo("寻找考察 Seata AT 模式下本地事务边界与分支事务注册机制的题目。");
         assertThat(output.getRetrievalPlans().getFirst().getKeywordHints()).containsExactly("Seata", "AT", "分支事务注册");
         assertThat(output.getRetrievalPlans().getFirst().getDifficultyHint()).isEqualTo("L4");
-        assertThat(output.getRetrievalPlans().getFirst().getMustHaveClues()).containsExactly("事务边界", "分支事务注册");
-        assertThat(output.getRetrievalPlans().getFirst().getAvoidClues()).containsExactly("通用微服务定义");
+    }
+
+    @Test
+    @DisplayName("retrieval plan should allow empty keyword hints")
+    void retrievalPlan_shouldAllowEmptyKeywordHints() {
+        String json = """
+                {
+                  "answerUnderstanding": "候选人回答较泛，但仍有继续追问价值。",
+                  "planningIntent": "继续围绕当前焦点做事实补充。",
+                  "decisionReason": "当前回答还有澄清空间，因此继续。",
+                  "interviewAction": "CONTINUE",
+                  "finalDecision": "S_ENTER_PROJECT",
+                  "nextFocus": "Seata 事务边界落地",
+                  "targetDomainCode": "",
+                  "newCoveredDomains": [],
+                  "newCoveredPoints": [],
+                  "retrievalPlans": [
+                    {
+                      "queryText": "寻找考察 Seata 事务边界落地与协调机制的题目。",
+                      "keywordHints": [],
+                      "difficultyHint": "L3"
+                    }
+                  ]
+                }
+                """;
+
+        EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
+
+        assertThat(output.getInterviewAction()).isEqualTo("CONTINUE");
+        assertThat(output.getRetrievalPlans()).hasSize(1);
+        assertThat(output.getRetrievalPlans().getFirst().getQueryText())
+                .isEqualTo("寻找考察 Seata 事务边界落地与协调机制的题目。");
+        assertThat(output.getRetrievalPlans().getFirst().getKeywordHints()).isEmpty();
+        assertThat(output.getRetrievalPlans().getFirst().getDifficultyHint()).isEqualTo("L3");
     }
 
     @Test
@@ -79,6 +110,8 @@ class EvaluationDecisionContractTest {
     void wrapupOutput_shouldClearNextPlanFields() {
         String json = """
                 {
+                  "answerUnderstanding": "本场已经形成足够判断。",
+                  "planningIntent": "无需继续扩展面试范围。",
                   "decisionReason": "本场面试已经形成足够能力画像，可以结束。",
                   "interviewAction": "WRAPUP",
                   "finalDecision": "S_WRAPUP",
@@ -88,13 +121,9 @@ class EvaluationDecisionContractTest {
                   "newCoveredPoints": [],
                   "retrievalPlans": [
                     {
-                      "goal": "无效",
-                      "displayQuery": "无效",
                       "queryText": "无效",
                       "keywordHints": [],
-                      "difficultyHint": "",
-                      "mustHaveClues": [],
-                      "avoidClues": []
+                      "difficultyHint": ""
                     }
                   ]
                 }
@@ -103,6 +132,8 @@ class EvaluationDecisionContractTest {
         EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision(json);
 
         assertThat(output.getInterviewAction()).isEqualTo("WRAPUP");
+        assertThat(output.getAnswerUnderstanding()).isEqualTo("本场已经形成足够判断。");
+        assertThat(output.getPlanningIntent()).isEqualTo("无需继续扩展面试范围。");
         assertThat(output.getFinalDecision()).isEqualTo("S_WRAPUP");
         assertThat(output.getNextFocus()).isEmpty();
         assertThat(output.getNextItemType()).isEmpty();
@@ -203,6 +234,8 @@ class EvaluationDecisionContractTest {
     void projectFields_shouldSurviveLegalContinueOutput() {
         EvaluationDecisionOutput output = validator.parseAndValidateEvaluationDecision("""
                 {
+                  "answerUnderstanding": "候选人已经进入真实项目语境。",
+                  "planningIntent": "下一步应继续项目主线验证工程真实性。",
                   "decisionReason": "当前应继续进入项目主线核实真实工程深度。",
                   "interviewAction": "CONTINUE",
                   "finalDecision": "S_ENTER_PROJECT",
@@ -218,6 +251,8 @@ class EvaluationDecisionContractTest {
                 """);
 
         assertThat(output.getInterviewAction()).isEqualTo("CONTINUE");
+        assertThat(output.getAnswerUnderstanding()).isEqualTo("候选人已经进入真实项目语境。");
+        assertThat(output.getPlanningIntent()).isEqualTo("下一步应继续项目主线验证工程真实性。");
         assertThat(output.getNextItemType()).isEqualTo("PROJECT");
         assertThat(output.getNextItemName()).isEqualTo("Chabst");
         assertThat(output.getNextProjectPoint()).isEqualTo("RabbitMQ 延迟消息处理超时订单");

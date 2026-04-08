@@ -2,7 +2,10 @@ package com.a05.aiinterview.rag.controller;
 
 import com.a05.aiinterview.common.ApiResponse;
 import com.a05.aiinterview.rag.dto.KnowledgeDocument;
+import com.a05.aiinterview.rag.dto.KnowledgeJsonlImportError;
+import com.a05.aiinterview.rag.dto.KnowledgeJsonlImportResult;
 import com.a05.aiinterview.rag.service.KnowledgeIngestionService;
+import com.a05.aiinterview.rag.service.KnowledgeJsonlImportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -11,29 +14,30 @@ import jakarta.validation.constraints.NotEmpty;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
 
 /**
  * 知识库管理 Controller（内部接口，需在网关层限制访问）。
- *
- * <p>仅当 {@code rag.enabled=true} 时注册该路由，避免在未接入 RAG 环境中暴露无效接口。
  */
 @Slf4j
 @Tag(name = "知识库管理（内部接口）")
 @RestController
 @RequestMapping("/admin/knowledge")
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "rag.enabled", havingValue = "true")
 public class KnowledgeAdminController {
 
-    private final KnowledgeIngestionService knowledgeIngestionService;
+    private final ObjectProvider<KnowledgeIngestionService> knowledgeIngestionServiceProvider;
+    private final ObjectProvider<KnowledgeJsonlImportService> knowledgeJsonlImportServiceProvider;
 
     /**
      * 批量将知识文档切片并写入 Qdrant 向量库。
@@ -47,10 +51,40 @@ public class KnowledgeAdminController {
     @Operation(summary = "批量入库知识文档（切片+向量化+写 Qdrant）")
     @PostMapping("/ingest")
     public ApiResponse<Map<String, Object>> ingest(@RequestBody @Valid IngestRequest request) {
+        KnowledgeIngestionService knowledgeIngestionService = knowledgeIngestionServiceProvider.getIfAvailable();
+        if (knowledgeIngestionService == null) {
+            return ApiResponse.fail(503, "RAG 未启用，无法导入语料");
+        }
         log.info("知识入库接口被调用, 文档数={}", request.getDocuments().size());
         int count = knowledgeIngestionService.ingest(request.getDocuments());
         log.info("知识入库接口完成, 写入切片数={}", count);
         return ApiResponse.ok(Map.of("ingestedChunks", count));
+    }
+
+    @Operation(summary = "上传 JSONL 题卡并执行全量校验后入库")
+    @PostMapping(value = "/import-jsonl", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<KnowledgeJsonlImportResult> importJsonl(
+            @RequestPart(value = "file", required = false) MultipartFile file) {
+        KnowledgeJsonlImportService knowledgeJsonlImportService = knowledgeJsonlImportServiceProvider.getIfAvailable();
+        if (knowledgeJsonlImportService == null) {
+            String fileName = file == null || file.getOriginalFilename() == null ? "" : file.getOriginalFilename();
+            KnowledgeJsonlImportResult result = KnowledgeJsonlImportResult.failure(
+                    fileName,
+                    0,
+                    0,
+                    List.of(KnowledgeJsonlImportError.file("RAG 未启用，无法导入 JSONL 题卡", "请先开启 rag.enabled 并初始化向量库"))
+            );
+            return new ApiResponse<>(503, "RAG 未启用，无法导入 JSONL 题卡", result,
+                    com.a05.aiinterview.common.TraceContext.getOrCreateTraceId());
+        }
+        KnowledgeJsonlImportResult result = knowledgeJsonlImportService.importJsonl(file);
+        if (result.isSuccess()) {
+            return new ApiResponse<>(0, "导入成功", result, com.a05.aiinterview.common.TraceContext.getOrCreateTraceId());
+        }
+        if (result.isIngestionFailure()) {
+            return new ApiResponse<>(500, "知识入库失败", result, com.a05.aiinterview.common.TraceContext.getOrCreateTraceId());
+        }
+        return new ApiResponse<>(400, "JSONL校验失败", result, com.a05.aiinterview.common.TraceContext.getOrCreateTraceId());
     }
 
     /**

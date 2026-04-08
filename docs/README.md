@@ -29,6 +29,8 @@
   当前仓库结构与目录职责
 - [prompt-strategy.md](/D:/a05-cursor/docs/prompt-strategy.md)
   当前 Prompt 集合与后端编排职责
+- [面试系统技术难点与详细解决方案.md](/D:/a05-cursor/docs/面试系统技术难点与详细解决方案.md)
+  当前已落地的核心技术难点与解决方案说明，适合用于比赛材料整理
 
 ## 归档文档
 

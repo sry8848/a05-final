@@ -92,6 +92,7 @@ public class PlannerOrchestrationService {
                     )
             );
 
+            // 3. 调用 AI Planner 生成考纲
             AiCallResult<PlannerOutput> plannerResult = aiClient.callPlanner(plannerInput);
             PlannerOutput plannerOutput = plannerResult.getOutput();
             interviewDebugTraceService.recordPlannerStage(
@@ -104,6 +105,7 @@ public class PlannerOrchestrationService {
                     )
             );
 
+            // 4. 验证并填充考纲输出
             validateAndFillPlannerOutput(plannerOutput, sessionId);
             PlannerDomainNormalizationService.NormalizationResult normalizationResult =
                     plannerDomainNormalizationService.normalize(plannerOutput, domains);

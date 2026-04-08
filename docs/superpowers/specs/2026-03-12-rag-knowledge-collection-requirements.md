@@ -53,7 +53,7 @@
   "title": "什么是闭包",
   "knowledgeKind": "interview_question",
   "positionCode": "FRONTEND",
-  "domainCode": "js_core",
+  "domainCode": "js_ts_core",
   "questionType": "PRINCIPLE",
   "difficulty": "L2",
   "tags": ["javascript", "closure", "scope"],
@@ -197,8 +197,8 @@
 
 示例：
 
-- `js_core`
-- `browser`
+- `js_ts_core`
+- `browser_runtime`
 - `jvm`
 - `distributed`
 
@@ -431,7 +431,7 @@ id: fe-js-closure-001
 title: 什么是闭包
 knowledgeKind: interview_question
 positionCode: FRONTEND
-domainCode: js_core
+domainCode: js_ts_core
 questionType: PRINCIPLE
 difficulty: L2
 tags: [javascript, closure, scope]

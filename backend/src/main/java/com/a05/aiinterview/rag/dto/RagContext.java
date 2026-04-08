@@ -96,8 +96,11 @@ public class RagContext {
         if (retrievalAudit != null) {
             Map<String, Object> auditMap = new LinkedHashMap<>();
             auditMap.put("retrievalTriggered", retrievalAudit.isRetrievalTriggered());
-            auditMap.put("lexicalCandidateCount", retrievalAudit.getLexicalCandidateCount());
             auditMap.put("denseCandidateCount", retrievalAudit.getDenseCandidateCount());
+            auditMap.put("sparseCandidateCount", retrievalAudit.getSparseCandidateCount());
+            auditMap.put("difficultyWindowApplied", retrievalAudit.isDifficultyWindowApplied());
+            auditMap.put("difficultyWindowValues", retrievalAudit.getDifficultyWindowValues());
+            auditMap.put("fusionTopQuestionIds", retrievalAudit.getFusionTopQuestionIds());
             auditMap.put("rerankPreTopQuestionIds", retrievalAudit.getRerankPreTopQuestionIds());
             auditMap.put("rerankPostTopQuestionIds", retrievalAudit.getRerankPostTopQuestionIds());
             auditMap.put("injectedQuestionIds", retrievalAudit.getInjectedQuestionIds());
@@ -140,8 +143,13 @@ public class RagContext {
     @AllArgsConstructor
     public static class RetrievalAudit {
         private boolean retrievalTriggered;
-        private int lexicalCandidateCount;
         private int denseCandidateCount;
+        private int sparseCandidateCount;
+        private boolean difficultyWindowApplied;
+        @Builder.Default
+        private List<String> difficultyWindowValues = new ArrayList<>();
+        @Builder.Default
+        private List<String> fusionTopQuestionIds = new ArrayList<>();
         @Builder.Default
         private List<String> rerankPreTopQuestionIds = new ArrayList<>();
         @Builder.Default
@@ -152,8 +160,11 @@ public class RagContext {
         public static RetrievalAudit empty(boolean retrievalTriggered) {
             return RetrievalAudit.builder()
                     .retrievalTriggered(retrievalTriggered)
-                    .lexicalCandidateCount(0)
                     .denseCandidateCount(0)
+                    .sparseCandidateCount(0)
+                    .difficultyWindowApplied(false)
+                    .difficultyWindowValues(List.of())
+                    .fusionTopQuestionIds(List.of())
                     .rerankPreTopQuestionIds(List.of())
                     .rerankPostTopQuestionIds(List.of())
                     .injectedQuestionIds(List.of())

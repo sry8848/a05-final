@@ -19,9 +19,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * 阿里百炼文本排序 API 实现。
@@ -34,6 +32,7 @@ public class DashScopeRagRerankService implements RagRerankService {
 
     private final RagProperties ragProperties;
     private final ObjectMapper objectMapper;
+    private final RagRerankInputBuilder inputBuilder = new RagRerankInputBuilder();
 
     @Override
     public List<RerankResult> rerank(RagRetrievalRequest request, List<RerankCandidate> candidates) {
@@ -54,8 +53,8 @@ public class DashScopeRagRerankService implements RagRerankService {
             String requestBody = objectMapper.writeValueAsString(new DashScopeRerankRequest(
                     rerank.getModel(),
                     new DashScopeInput(
-                            buildQueryBrief(request),
-                            candidates.stream().map(this::toDocumentText).toList()
+                            inputBuilder.buildQueryText(request),
+                            candidates.stream().map(inputBuilder::buildDocumentText).toList()
                     ),
                     Map.of(
                             "top_n", Math.min(rerank.getTopN(), candidates.size()),
@@ -97,53 +96,6 @@ public class DashScopeRagRerankService implements RagRerankService {
         } catch (Exception e) {
             throw new IllegalStateException("调用百炼文本排序 API 失败", e);
         }
-    }
-
-    private String buildQueryBrief(RagRetrievalRequest request) {
-        List<String> lines = new ArrayList<>();
-        addLine(lines, "题型", request.getQuestionType());
-        addLine(lines, "目标", firstNonBlank(request.getQueryText(), request.getDisplayQuery()));
-        addLine(lines, "焦点", request.getFocusPoint());
-        addJoinedLine(lines, "必须覆盖", request.getMustHaveClues());
-        addJoinedLine(lines, "避免内容", request.getAvoidClues());
-        return String.join("\n", lines).trim();
-    }
-
-    private String toDocumentText(RerankCandidate candidate) {
-        List<String> lines = new ArrayList<>();
-        addLine(lines, "题目", candidate.questionText());
-        addLine(lines, "考点", candidate.intentConcept());
-        addLine(lines, "语境", candidate.referenceContext());
-        addJoinedLine(lines, "关键点", candidate.scoringKeyPoints());
-        addJoinedLine(lines, "误区", candidate.scoringPitfalls());
-        return String.join("\n", lines).trim();
-    }
-
-    private void addLine(List<String> lines, String label, String value) {
-        if (value != null && !value.isBlank()) {
-            lines.add(label + "：" + value.trim());
-        }
-    }
-
-    private void addJoinedLine(List<String> lines, String label, List<String> values) {
-        if (values == null) {
-            return;
-        }
-        List<String> normalized = values.stream()
-                .filter(Objects::nonNull)
-                .map(String::trim)
-                .filter(value -> !value.isBlank())
-                .toList();
-        if (!normalized.isEmpty()) {
-            lines.add(label + "：" + String.join("；", normalized));
-        }
-    }
-
-    private String firstNonBlank(String primary, String fallback) {
-        if (primary != null && !primary.isBlank()) {
-            return primary.trim();
-        }
-        return fallback == null ? "" : fallback.trim();
     }
 
     private record DashScopeRerankRequest(

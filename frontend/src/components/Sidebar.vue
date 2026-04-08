@@ -54,14 +54,6 @@
         </li>
         <li 
           class="nav-item" 
-          :class="{ active: currentPage === 'analysis' }"
-          @click="$emit('navigate', 'analysis')"
-        >
-          <i class="fas fa-chart-line"></i>
-          <span>数据分析</span>
-        </li>
-        <li 
-          class="nav-item" 
           :class="{ active: currentPage === 'settings' }"
           @click="$emit('navigate', 'settings')"
         >

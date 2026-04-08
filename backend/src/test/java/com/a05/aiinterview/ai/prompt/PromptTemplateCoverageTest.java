@@ -40,7 +40,9 @@ class PromptTemplateCoverageTest {
                 .contains("不要把整个知识域对象删掉")
                 .contains("如果历史 discussedItems 为空，不要臆造项目去重信息")
                 .contains("experienceItems 必须覆盖简历中所有真实存在")
-                .contains("不允许把整个项目从 experienceItems 中删掉");
+                .contains("不允许把整个项目从 experienceItems 中删掉")
+                .contains("必须复述简历中该项目/实习条目的对应原文片段")
+                .doesNotContain("简历上的原始项目描述");
     }
 
     @Test
@@ -130,6 +132,9 @@ class PromptTemplateCoverageTest {
         assertThat(rendered.getPromptCode()).isEqualTo("evaluation_decision");
         assertThat(rendered.getUserPrompt())
                 .contains("Seata AT 模式")
+                .contains("当前待评估题")
+                .contains("候选人当前原始回答")
+                .contains("当前题参考锚点")
                 .contains("主考纲剩余待考察域（菜单）")
                 .contains("redis")
                 .contains("S_J_PRESSURE")
@@ -140,8 +145,13 @@ class PromptTemplateCoverageTest {
                 .contains("samePointContinue")
                 .contains("近期跨场禁选知识点")
                 .contains("blockedEntryPoints")
-                .contains("历史问题、回答概要、回答评价")
+                .contains("历史问答记录")
+                .contains("最近 3 题保留原始问答")
+                .contains("其余更早题目只保留问题和回答摘要")
+                .contains("当前轮严格合法的动作集合，不是推荐顺序")
+                .contains("先理解其会话含义")
                 .contains("不表示该项目本身被禁选")
+                .doesNotContain("【上一题】")
                 .doesNotContain("知识域及知识点状态")
                 .doesNotContain("\"possibleNextMoves\"")
                 .doesNotContain("\"newCandidatePointsByDomain\"")
@@ -152,33 +162,46 @@ class PromptTemplateCoverageTest {
                 .doesNotContain("nextEntryAction")
                 .doesNotContain("nextQuestionType");
         assertThat(rendered.getSystemPrompt())
+                .contains("会话级技术面试控制器")
+                .contains("不是给“上一题”写评语")
+                .contains("滚动规划下一步动作")
+                .contains("面试早期应优先建立粗颗粒画像")
+                .contains("面试中期应在少数高价值主线上做必要确认")
+                .contains("面试后期应优先填补画像缺口")
                 .contains("StrategyCode")
                 .contains("只能从当前注入的策略池中选择一个 `finalDecision`")
+                .contains("`expectedPoints` 只是当前题的参考锚点")
+                .contains("请求提示、请求澄清")
+                .contains("先做会话判断，再去策略池中映射动作")
+                .contains("规划先于策略")
+                .contains("特殊话语优先处理")
+                .contains("answerUnderstanding")
+                .contains("planningIntent")
                 .contains("nextFocus")
                 .contains("当下一题不是项目题时")
                 .contains("共享变量线程安全")
                 .contains("StringBuilder与StringBuffer线程安全差异")
                 .contains("联合索引设计原则")
                 .contains("@Async事务失效机制")
-                .contains("AI评分线程安全")
-                .contains("面评报告索引设计")
                 .contains("nextProjectPoint")
                 .contains("nextItemType")
                 .contains("nextItemName")
-                .contains("goal")
-                .contains("displayQuery")
-                .contains("queryText")
-                .contains("keywordHints")
                 .contains("difficultyHint")
-                .contains("mustHaveClues")
-                .contains("avoidClues")
-                .contains("检索 brief")
-                .contains("技术钩子")
-                .contains("软约束")
+                .contains("`queryText`")
+                .contains("独立")
+                .contains("完整")
+                .contains("自然语言")
+                .contains("`keywordHints`")
+                .contains("术语锚点")
+                .contains("相邻一级")
                 .contains("`targetDomainCode` 必须从【主考纲剩余待考察域（菜单）】中选择一个合法的 `domainCode`")
                 .contains("绝不能写成完整问句")
                 .contains("绝不允许把下一题准备问的知识点提前预支写进去")
-                .contains("\"domainCode\": \"redis\"")
+                .doesNotContain("goal")
+                .doesNotContain("displayQuery")
+                .doesNotContain("mustHaveClues")
+                .doesNotContain("avoidClues")
+                .doesNotContain("技术钩子")
                 .doesNotContain("candidateStrategies")
                 .doesNotContain("expectedAnswerPoints")
                 .doesNotContain("nextQuestionType")
@@ -188,7 +211,9 @@ class PromptTemplateCoverageTest {
                 .doesNotContain("alternateQueries")
                 .doesNotContain("retrievalType")
                 .doesNotContain("expectedEvidence")
-                .doesNotContain("avoidEvidence");
+                .doesNotContain("avoidEvidence")
+                .doesNotContain("软约束")
+                .doesNotContain("回答评价");
     }
 
     @Test
@@ -241,8 +266,8 @@ class PromptTemplateCoverageTest {
                 Map.entry("mode", "practice"),
                 Map.entry("questionStem", "请解释浏览器渲染流水线。"),
                 Map.entry("questionType", "PRINCIPLE"),
-                Map.entry("domainCode", "browser"),
-                Map.entry("domainName", "浏览器原理"),
+                Map.entry("domainCode", "browser_runtime"),
+                Map.entry("domainName", "浏览器运行时"),
                 Map.entry("originalAnswerText", "我会从 parse、layout、paint 三段来讲。"),
                 Map.entry("evaluationScore", "86"),
                 Map.entry("evaluationCommentary", "主线是对的，但边界条件还不够。"),

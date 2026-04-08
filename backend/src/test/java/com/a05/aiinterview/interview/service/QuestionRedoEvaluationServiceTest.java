@@ -134,8 +134,8 @@ class QuestionRedoEvaluationServiceTest {
                 .score(new BigDecimal("-8"))
                 .evaluatedDomains(List.of(
                         QuestionDetailEvaluationOutput.EvaluatedDomain.builder()
-                                .domainCode("browser")
-                                .domainName("浏览器原理")
+                                .domainCode("browser_runtime")
+                                .domainName("浏览器运行时")
                                 .score(new BigDecimal("108.2"))
                                 .commentary("超范围")
                                 .build()

@@ -107,9 +107,9 @@ class PlannerDomainNormalizationServiceTest {
     @DisplayName("when allowed domains are fewer than minimum should use all available")
     void normalize_shouldUseAllAvailableWhenAllowedLessThanMinimum() {
         List<PositionSkillDomain> allowed = List.of(
-                allowed(1L, "browser", "浏览器原理", "渲染流程、Event Loop、缓存", 1),
-                allowed(2L, "network", "网络基础", "HTTP、HTTPS、WebSocket", 2),
-                allowed(3L, "performance", "前端性能优化", "加载优化、渲染优化、首屏优化", 3)
+                allowed(1L, "browser_runtime", "浏览器运行时", "DOM API、事件系统、浏览器解析流程、DOM Tree/CSSOM/Render Tree、回流重绘与生命周期", 1),
+                allowed(2L, "web_network_security", "网络与安全", "HTTP/HTTPS、缓存协商、跨域、鉴权、XSS/CSRF/CSP/Cookie/SameSite", 2),
+                allowed(3L, "web_performance", "前端性能", "Core Web Vitals、首屏优化、长任务、资源加载优化、性能监控与排障", 3)
         );
         PlannerOutput output = PlannerOutput.builder()
                 .planningReasoning("test")
@@ -121,8 +121,8 @@ class PlannerDomainNormalizationServiceTest {
 
         assertThat(result.normalizedOutput().getDomains())
                 .extracting(PlannerOutput.DomainPlan::getDomainCode)
-                .containsExactly("browser", "network", "performance");
-        assertThat(result.backfilledDomains()).containsExactly("browser", "network", "performance");
+                .containsExactly("browser_runtime", "web_network_security", "web_performance");
+        assertThat(result.backfilledDomains()).containsExactly("browser_runtime", "web_network_security", "web_performance");
     }
 
     @Test

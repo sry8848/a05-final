@@ -60,7 +60,7 @@ public class AsrController {
         }
 
         AsrProxyTicketService.AsrProxyTicket ticket = asrProxyTicketService.issueTicket(userId);
-        String wsUrl = buildProxyWsUrl(request, ticket.getTicket());
+        String wsUrl = buildProxyWsPath(request, ticket.getTicket());
 
         return ApiResponse.ok(AsrTokenResponse.builder()
                 .enabled(true)
@@ -92,13 +92,7 @@ public class AsrController {
                 .build());
     }
 
-    private String buildProxyWsUrl(HttpServletRequest request, String ticket) {
-        String scheme = "https".equalsIgnoreCase(request.getScheme()) ? "wss" : "ws";
-        String host = request.getServerName();
-        int port = request.getServerPort();
-        String portPart = (("ws".equals(scheme) && port == 80) || ("wss".equals(scheme) && port == 443))
-                ? ""
-                : ":" + port;
-        return scheme + "://" + host + portPart + request.getContextPath() + "/asr/stream?ticket=" + ticket;
+    private String buildProxyWsPath(HttpServletRequest request, String ticket) {
+        return request.getContextPath() + "/asr/stream?ticket=" + ticket;
     }
 }

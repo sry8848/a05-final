@@ -35,9 +35,12 @@ INSERT INTO position_skill_domains (position_code, position_name, version, domai
 -- 种子数据：前端工程师（FRONTEND）知识域
 -- ============================================================
 INSERT INTO position_skill_domains (position_code, position_name, version, domain_code, domain_name, description, sort_order) VALUES
-('FRONTEND', '前端开发', 1, 'js_core',        'JavaScript 核心',  '原型链、闭包、异步模型、ES6+', 1),
-('FRONTEND', '前端开发', 1, 'browser',        '浏览器原理',        '渲染流程、Event Loop、缓存', 2),
-('FRONTEND', '前端开发', 1, 'vue_react',      'Vue/React 框架',   '组件化、响应式原理、虚拟 DOM', 3),
-('FRONTEND', '前端开发', 1, 'css_layout',     'CSS 与布局',        'Flex、Grid、响应式设计', 4),
-('FRONTEND', '前端开发', 1, 'performance',    '前端性能优化',      '加载优化、渲染优化、首屏优化', 5),
-('FRONTEND', '前端开发', 1, 'network',        '网络基础',          'HTTP、HTTPS、WebSocket', 6);
+('FRONTEND', '前端开发', 1, 'js_ts_core',            'JavaScript / TypeScript 核心', 'JavaScript / TypeScript 语言基础、闭包、原型链、异步模型、模块化、泛型与类型系统', 1),
+('FRONTEND', '前端开发', 1, 'browser_runtime',       '浏览器运行时',                  'DOM API、事件系统、浏览器解析流程、DOM Tree/CSSOM/Render Tree、回流重绘与生命周期', 2),
+('FRONTEND', '前端开发', 1, 'ui_foundation',         'HTML / CSS / UI 基础',         'HTML 语义化、结构规范、表单与无障碍、CSS 布局、响应式设计、组件样式系统', 3),
+('FRONTEND', '前端开发', 1, 'react',                 'React 生态',                    'React 组件模型、Hooks、状态与副作用、渲染机制及生态实践', 4),
+('FRONTEND', '前端开发', 1, 'vue',                   'Vue 生态',                      'Vue 组件模型、响应式系统、Composition API、watch/watchEffect 及生态实践', 5),
+('FRONTEND', '前端开发', 1, 'frontend_engineering',  '前端工程化',                    'Vite/Webpack、Babel/SWC、Tree Shaking、分包、构建与发布流程', 6),
+('FRONTEND', '前端开发', 1, 'app_architecture',      '前端应用架构',                  '状态管理、组件边界、模块拆分、前端数据流与应用级架构取舍', 7),
+('FRONTEND', '前端开发', 1, 'web_network_security',  '网络与安全',                    'HTTP/HTTPS、缓存协商、跨域、鉴权、XSS/CSRF/CSP/Cookie/SameSite', 8),
+('FRONTEND', '前端开发', 1, 'web_performance',       '前端性能',                      'Core Web Vitals、首屏优化、长任务、资源加载优化、性能监控与排障', 9);
